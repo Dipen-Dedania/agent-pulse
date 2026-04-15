@@ -45,9 +45,11 @@ End state: Developers can glance at their desktop bubbles and instantly know the
 
 - One floating, always-on-top bubble per enabled platform/tool.
 - Each bubble displays the platform’s official icon (e.g., Cursor logo, Claude icon, VS Code/Copilot icon, Codex icon).
-- Two clear visual states per bubble:
+- The UI follows an **Apple Glass (Glassmorphism)** design language: semi-transparent backgrounds with background-blur (frosted glass) effects, thin light-catching borders, and soft shadows.
+- Three clear visual states per bubble:
   - **Working**: Gentle, continuous animation (soft pulsing glow, subtle orbiting particles, or calming “thinking” ripple effect).
   - **Idle**: Static, calm appearance with lower opacity and minimal movement (optional subtle “ready” breathing effect).
+  - **Dead/Error**: Visual indicator of failure (e.g., subtle red glow, "shake" animation, or distinct static state) to signal the agent has crashed or hit a critical error.
 - Bubbles are independently movable and can be arranged by the user (e.g., grouped in a corner or spread out).
 - Hover tooltip on each bubble shows brief status: active agent count, last activity time, or current task summary (when available from hook payload).
 - Click on a bubble opens a quick panel with more details for that platform (list of active sessions, recent events).

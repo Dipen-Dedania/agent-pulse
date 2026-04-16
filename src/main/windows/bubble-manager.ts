@@ -1,12 +1,41 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { ToolId } from '../../common/types';
 
 export class BubbleManager {
   private bubbles: Map<ToolId, BrowserWindow> = new Map();
 
+  private static readonly BUBBLE_SIZE = 100;
+  private static readonly TOOLTIP_HEIGHT = 110;
+
   public init() {
-    // Initial bubbles can be loaded from a config file here
+    ipcMain.on('set-ignore-mouse', (event, { ignore }: { ignore: boolean }) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win) return;
+      win.setIgnoreMouseEvents(ignore, { forward: true });
+    });
+
+    ipcMain.on('move-bubble', (event, { dx, dy }: { dx: number; dy: number }) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win) return;
+      const [x, y] = win.getPosition();
+      win.setPosition(x + dx, y + dy);
+    });
+
+    ipcMain.on('bubble-hover', (event, { hovered }: { hovered: boolean }) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win) return;
+      const [x, y] = win.getPosition();
+      const totalHeight = BubbleManager.BUBBLE_SIZE + BubbleManager.TOOLTIP_HEIGHT;
+      if (hovered) {
+        // Expand upward: shift window y up so the bubble stays in place
+        win.setSize(BubbleManager.BUBBLE_SIZE, totalHeight);
+        win.setPosition(x, y - BubbleManager.TOOLTIP_HEIGHT);
+      } else {
+        win.setPosition(x, y + BubbleManager.TOOLTIP_HEIGHT);
+        win.setSize(BubbleManager.BUBBLE_SIZE, BubbleManager.BUBBLE_SIZE);
+      }
+    });
   }
 
   public createBubble(toolId: ToolId) {
@@ -19,7 +48,7 @@ export class BubbleManager {
       transparent: true,
       alwaysOnTop: true,
       resizable: false,
-      movable: true,
+      movable: false,
       hasShadow: false,
       webPreferences: {
         nodeIntegration: false,
@@ -28,7 +57,8 @@ export class BubbleManager {
       },
     });
 
-    window.setIgnoreMouseEvents(false);
+    // Start click-through; renderer will toggle per-pixel via 'set-ignore-mouse'
+    window.setIgnoreMouseEvents(true, { forward: true });
 
     if (process.env.NODE_ENV === 'development') {
       window.loadURL(`http://localhost:5173/bubble?toolId=${toolId}`);

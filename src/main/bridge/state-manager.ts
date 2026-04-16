@@ -6,6 +6,7 @@ export class StatusStateManager {
 
   public updateStatus(toolId: ToolId, state: AgentState, details: any) {
     const current = this.statuses.get(toolId);
+    console.log(`[StateManager] updateStatus called: toolId=${toolId} state=${state}`);
 
     const updatedStatus: ToolStatus = {
       toolId,
@@ -31,12 +32,19 @@ export class StatusStateManager {
     try {
       const { BrowserWindow } = require('electron');
       if (BrowserWindow && BrowserWindow.getAllWindows) {
-        BrowserWindow.getAllWindows().forEach((win: any) => {
-          win.webContents.send('status-update', status);
+        const windows = BrowserWindow.getAllWindows();
+        console.log(`[StateManager] Broadcasting status-update to ${windows.length} window(s):`, JSON.stringify(status));
+        windows.forEach((win: any, idx: number) => {
+          console.log(`[StateManager]   -> window[${idx}] title="${win.getTitle()}" destroyed=${win.isDestroyed()}`);
+          if (!win.isDestroyed()) {
+            win.webContents.send('status-update', status);
+          }
         });
+      } else {
+        console.warn('[StateManager] BrowserWindow.getAllWindows not available');
       }
     } catch (e) {
-      // Silently fail if Electron is not initialized (e.g. during standalone bridge tests)
+      console.error('[StateManager] broadcastStatus error:', e);
     }
   }
 }

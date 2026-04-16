@@ -1,11 +1,12 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
-import path from 'path';
+import { app, ipcMain } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
 import { SettingsWindow } from './windows/settings-window';
 import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
+import { loadConfig, saveConfig, UserConfig } from './user-config';
+import { ToolId } from '../common/types';
 
 class AgentPulseApp {
   private bubbleManager: BubbleManager;
@@ -14,6 +15,7 @@ class AgentPulseApp {
   private bridgeServer: StatusBridgeServer;
   private detector: ToolDetector;
   private writer: ConfigWriter;
+  private userConfig: UserConfig;
 
   constructor() {
     this.stateManager = new StatusStateManager();
@@ -22,6 +24,7 @@ class AgentPulseApp {
     this.settingsWindow = new SettingsWindow();
     this.detector = new ToolDetector();
     this.writer = new ConfigWriter();
+    this.userConfig = loadConfig();
   }
 
   public init() {
@@ -31,12 +34,13 @@ class AgentPulseApp {
       this.setupIpc();
       this.bubbleManager.init();
 
-      // Launch the settings window by default so the user has a starting point
-      this.settingsWindow.show();
+      // Restore bubbles from last saved state
+      const enabled = this.userConfig.enabledBubbles;
+      (Object.keys(enabled) as ToolId[]).forEach(toolId => {
+        if (enabled[toolId]) this.bubbleManager.createBubble(toolId);
+      });
 
-      // FOR DEMO PURPOSES: Spawn a few bubbles immediately so the user sees them
-      this.bubbleManager.createBubble('claude-code');
-      this.bubbleManager.createBubble('cursor');
+      this.settingsWindow.show();
     });
 
     app.on('window-all-closed', () => {
@@ -49,23 +53,31 @@ class AgentPulseApp {
       this.settingsWindow.show();
     });
 
-    ipcMain.on('toggle-bubble', (event, { toolId, enabled }) => {
+    ipcMain.on('toggle-bubble', (_event, { toolId, enabled }: { toolId: ToolId; enabled: boolean }) => {
       if (enabled) {
         this.bubbleManager.createBubble(toolId);
       } else {
         this.bubbleManager.destroyBubble(toolId);
       }
+      // Persist the change
+      this.userConfig.enabledBubbles[toolId] = enabled;
+      saveConfig(this.userConfig);
+    });
+
+    // Settings panel calls this on load to get the real enabled state
+    ipcMain.handle('get-config', () => {
+      return this.userConfig;
     });
 
     ipcMain.handle('detect-tools', async () => {
       return await this.detector.detectAll();
     });
 
-    ipcMain.handle('install-hook', async (event, { toolId, projectPath }) => {
+    ipcMain.handle('install-hook', async (_event, { toolId, projectPath }) => {
       return await this.writer.installHook(toolId, projectPath);
     });
 
-    ipcMain.handle('uninstall-hook', async (event, { toolId, projectPath }) => {
+    ipcMain.handle('uninstall-hook', async (_event, { toolId, projectPath }) => {
       return await this.writer.uninstallHook(toolId, projectPath);
     });
   }

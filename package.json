@@ -6,8 +6,8 @@
   "scripts": {
     "dev:renderer": "vite",
     "build:main": "tsc -p tsconfig.main.json",
-    "dev:main": "npm run build:main && electron dist/main/index.js",
-    "start": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
+    "dev:main": "npm run build:main && cross-env NODE_ENV=development electron dist/main/index.js",
+    "start": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:main\"",
     "test:bridge": "tsx src/main/test-bridge.ts"
   },
   "repository": {
@@ -36,6 +36,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.5.0",
     "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
     "electron": "^41.2.0",
     "electron-builder": "^26.8.1",
     "postcss": "^8.5.9",
@@ -43,6 +44,7 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
-    "vite": "^8.0.8"
+    "vite": "^8.0.8",
+    "wait-on": "^9.0.5"
   }
 }

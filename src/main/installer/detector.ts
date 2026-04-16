@@ -10,6 +10,7 @@ export class ToolDetector {
       'cursor': this.detectCursor(),
       'vscode-copilot': this.detectVSCodeCopilot(),
       'openai-codex': this.detectOpenAICodex(),
+      'kiro': this.detectKiro(),
     };
   }
 
@@ -50,5 +51,23 @@ export class ToolDetector {
     // Codex usually operates via API or specific IDE plugins
     // For MVP, we check for a generic Codex config or environment variable
     return process.env.OPENAI_API_KEY !== undefined;
+  }
+
+  private detectKiro(): boolean {
+    const home = os.homedir();
+    const paths = [
+      path.join(home, 'AppData', 'Local', 'Programs', 'Kiro'),   // Windows
+      path.join(home, 'Applications', 'Kiro.app'),                // macOS
+      '/usr/local/bin/kiro',                                      // Linux
+      path.join(home, '.kiro'),                                   // config dir
+    ];
+    if (paths.some(p => existsSync(p))) return true;
+
+    try {
+      execSync('kiro --version', { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

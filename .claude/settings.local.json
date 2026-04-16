@@ -15,7 +15,14 @@
       "mcp__chrome-devtools__new_page",
       "mcp__chrome-devtools__list_console_messages",
       "mcp__chrome-devtools__navigate_page",
-      "Bash(npm start:*)"
+      "Bash(npm start:*)",
+      "Bash(grep:*)",
+      "Bash(curl -s http://localhost:4242/event)",
+      "WebFetch(domain:cursor.com)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:code.visualstudio.com)",
+      "WebFetch(domain:kiro.dev)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [
       "Read(./.env*)",

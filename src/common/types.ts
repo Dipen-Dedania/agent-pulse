@@ -1,5 +1,5 @@
-export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex';
-export type AgentState = 'working' | 'idle' | 'error';
+export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro';
+export type AgentState = 'working' | 'waiting' | 'idle' | 'error';
 
 export interface NormalizedEvent {
   toolId: ToolId;

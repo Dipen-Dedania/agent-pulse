@@ -122,3 +122,12 @@ The architecture uses a normalized event schema so new tools can be added with m
 - **v1.1**: Custom animation themes, sound alerts, per-bubble quick actions.
 - **v1.2**: Plugin system and support for additional tools.
 - **Future**: Team configuration sharing, deeper integrations (e.g., Raycast).
+
+## Hooks doc
+
+VS Copilot: https://code.visualstudio.com/docs/copilot/customization/hooks
+Codex: https://developers.openai.com/codex/hooks
+Cursor: https://cursor.com/docs/hooks
+Claude Code: https://code.claude.com/docs/en/hooks
+Kiro: https://kiro.dev/docs/hooks/
+Gemini CLI: https://geminicli.com/docs/hooks/

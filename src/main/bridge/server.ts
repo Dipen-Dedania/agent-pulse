@@ -3,33 +3,33 @@ import { StatusStateManager } from './state-manager';
 import { ToolId, AgentState } from '../../common/types';
 
 // Claude Code hook event names → AgentState
-// Stop = agent finished its turn and is waiting for user input (amber)
+// Stop = agent finished its turn and is waiting for user input / permission (amber)
 // SessionEnd = user ended the session entirely (grey/idle)
-const CC_WAITING_EVENTS = new Set(['UserPromptSubmit', 'Stop']);
-const CC_WORKING_EVENTS = new Set(['PreToolUse', 'SubagentStart']);
+const CC_WAITING_EVENTS = new Set(['Stop']);
+const CC_WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SubagentStart']);
 const CC_IDLE_EVENTS    = new Set(['PostToolUse', 'SessionEnd', 'TeammateIdle']);
 const CC_ERROR_EVENTS   = new Set(['StopFailure', 'PostToolUseFailure']);
 
 // Codex hook event names → AgentState (PascalCase, same as CC but detected via turn_id)
-const CODEX_WAITING_EVENTS = new Set(['SessionStart', 'UserPromptSubmit']);
-const CODEX_WORKING_EVENTS = new Set(['PreToolUse']);
-const CODEX_IDLE_EVENTS    = new Set(['PostToolUse', 'Stop']);
+const CODEX_WAITING_EVENTS = new Set(['Stop']);
+const CODEX_WORKING_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse']);
+const CODEX_IDLE_EVENTS    = new Set(['PostToolUse']);
 
 // Cursor hook event names → AgentState (camelCase per Cursor docs)
-const CURSOR_WAITING_EVENTS = new Set(['sessionStart']);
-const CURSOR_WORKING_EVENTS = new Set(['preToolUse', 'subagentStart']);
-const CURSOR_IDLE_EVENTS    = new Set(['postToolUse', 'sessionEnd', 'stop', 'subagentStop']);
+const CURSOR_WAITING_EVENTS = new Set(['stop']);
+const CURSOR_WORKING_EVENTS = new Set(['sessionStart', 'preToolUse', 'subagentStart']);
+const CURSOR_IDLE_EVENTS    = new Set(['postToolUse', 'sessionEnd', 'subagentStop']);
 const CURSOR_ERROR_EVENTS   = new Set(['postToolUseFailure']);
 
 // VS Code Copilot hook event names → AgentState
 // Uses camelCase hookEventName field (distinguishes it from CC/Codex's hook_event_name)
-const COPILOT_WAITING_EVENTS = new Set(['SessionStart', 'UserPromptSubmit']);
-const COPILOT_WORKING_EVENTS = new Set(['PreToolUse', 'SubagentStart']);
-const COPILOT_IDLE_EVENTS    = new Set(['PostToolUse', 'Stop', 'SubagentStop']);
+const COPILOT_WAITING_EVENTS = new Set(['Stop']);
+const COPILOT_WORKING_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreCompact', 'PreToolUse', 'SubagentStart']);
+const COPILOT_IDLE_EVENTS    = new Set(['PostToolUse', 'SubagentStop']);
 
 // Kiro hook event names → AgentState (hook_event_name field, has kiro_version or source='kiro')
-const KIRO_WAITING_EVENTS = new Set(['agentSpawn', 'userPromptSubmit']);
-const KIRO_WORKING_EVENTS = new Set(['preToolUse']);
+const KIRO_WAITING_EVENTS = new Set<string>([]);
+const KIRO_WORKING_EVENTS = new Set(['agentSpawn', 'userPromptSubmit', 'preToolUse']);
 const KIRO_IDLE_EVENTS    = new Set(['postToolUse']);
 
 const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro'];
@@ -57,6 +57,8 @@ export class StatusBridgeServer {
       req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
         try {
+          // Strip UTF-8 BOM that PowerShell may prepend via [Console]::In.ReadToEnd()
+          if (body.charCodeAt(0) === 0xFEFF) body = body.slice(1);
           console.log(`[Bridge] Raw body received: ${body}`);
           const data = JSON.parse(body);
           const normalized = this.normalizePayload(data);
@@ -149,29 +151,37 @@ export class StatusBridgeServer {
   }
 
   /**
-   * Accepts six formats:
+   * Accepts six formats (detection order matters — more specific markers first):
    *
    * 1. Our own format (curl tests):
    *    { toolId: 'claude-code', state: 'working', payload?: {...} }
    *
-   * 2. Claude Code's native hook payload (PascalCase event names, has session_id, no turn_id):
-   *    { hook_event_name: 'PreToolUse', session_id: '...', tool_name: '...', ... }
+   * 2. Cursor's native hook payload (camelCase events, has cursor_version):
+   *    { hook_event_name: 'preToolUse', cursor_version: '...', conversation_id: '...', transcript_path: ... }
    *
-   * 3. Codex native hook payload (PascalCase event names, has turn_id):
-   *    { hook_event_name: 'PreToolUse', session_id: '...', turn_id: '...', cwd: '...', ... }
-   *    Distinguished from Claude Code by presence of turn_id.
-   *
-   * 4. Cursor's native hook payload (camelCase event names, has cursor_version or conversation_id):
-   *    { hook_event_name: 'preToolUse', conversation_id: '...', cursor_version: '...', ... }
-   *
-   * 5. VS Code Copilot hook payload (camelCase field name hookEventName, not hook_event_name):
-   *    { hookEventName: 'PreToolUse', sessionId: '...', cwd: '...', timestamp: '...', ... }
-   *
-   * 6. Kiro hook payload (camelCase event names, has kiro_version or agentSpawn is unique to Kiro):
+   * 3. Kiro hook payload (has kiro_version or unique agentSpawn event):
    *    { hook_event_name: 'agentSpawn', session_id: '...', cwd: '...', ... }
-   *    Distinguished from Cursor by kiro_version field or agentSpawn event name.
+   *
+   * 4. Claude Code CLI (PascalCase events, has permission_mode):
+   *    { hook_event_name: 'PreToolUse', session_id: '...', permission_mode: '...', transcript_path: '...', ... }
+   *    Checked before Copilot because both send transcript_path.
+   *
+   * 5. VS Code Copilot hook payload (uses hookEventName camelCase key, or has transcript_path):
+   *    { hook_event_name: 'PreToolUse', session_id: '...', transcript_path: '...', ... }
+   *
+   * 6. Codex native hook payload (PascalCase events, has turn_id):
+   *    { hook_event_name: 'PreToolUse', session_id: '...', turn_id: '...', cwd: '...', ... }
+   *
+   * 7. Claude Code fallback (PascalCase events, no specific markers):
+   *    { hook_event_name: 'PreToolUse', session_id: '...', tool_name: '...', ... }
    */
   private normalizePayload(data: any): { toolId: ToolId; state: AgentState; payload: any } | null {
+    return normalizePayload(data);
+  }
+}
+
+// Exported for unit testing
+export function normalizePayload(data: any): { toolId: ToolId; state: AgentState; payload: any } | null {
     // Format 1 — explicit toolId + state
     if (data.toolId && data.state) {
       if (VALID_TOOLS.includes(data.toolId) && VALID_STATES.includes(data.state)) {
@@ -180,29 +190,32 @@ export class StatusBridgeServer {
       return null;
     }
 
-    // Format 5 — VS Code Copilot (uses camelCase hookEventName, not hook_event_name)
-    if (data.hookEventName) {
-      const eventName: string = data.hookEventName;
-      let state: AgentState;
-      if (COPILOT_WAITING_EVENTS.has(eventName))      state = 'waiting';
-      else if (COPILOT_WORKING_EVENTS.has(eventName)) state = 'working';
-      else if (COPILOT_IDLE_EVENTS.has(eventName))    state = 'idle';
-      else {
-        console.log(`Ignoring unmapped Copilot event: ${eventName}`);
-        return null;
-      }
-      return {
-        toolId: 'vscode-copilot',
-        state,
-        payload: {
-          sessionId:   data.sessionId,
-          taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
-        },
-      };
-    }
+    if (data.hook_event_name || data.hookEventName) {
+      // Copilot may use either hookEventName (docs) or hook_event_name (actual).
+      const eventName: string = data.hook_event_name ?? data.hookEventName;
 
-    if (data.hook_event_name) {
-      const eventName: string = data.hook_event_name;
+      // Format 4 — Cursor native hook (has cursor_version or conversation_id without session_id).
+      // MUST be checked before Copilot because Cursor also sends transcript_path.
+      if (data.cursor_version !== undefined || (data.conversation_id && data.session_id === undefined)) {
+        let state: AgentState;
+        if (CURSOR_WAITING_EVENTS.has(eventName))      state = 'waiting';
+        else if (CURSOR_WORKING_EVENTS.has(eventName)) state = 'working';
+        else if (CURSOR_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else if (CURSOR_ERROR_EVENTS.has(eventName))   state = 'error';
+        else {
+          console.log(`Ignoring unmapped Cursor event: ${eventName}`);
+          return null;
+        }
+        return {
+          toolId: 'cursor',
+          state,
+          payload: {
+            sessionId:    data.conversation_id,
+            taskSummary:  data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+            errorMessage: data.error_message,
+          },
+        };
+      }
 
       // Format 6 — Kiro native hook (has kiro_version, or camelCase event unique to Kiro like agentSpawn)
       if (data.kiro_version !== undefined || eventName === 'agentSpawn') {
@@ -224,24 +237,46 @@ export class StatusBridgeServer {
         };
       }
 
-      // Format 4 — Cursor native hook (camelCase event name or has cursor_version/conversation_id)
-      if (data.cursor_version !== undefined || (data.conversation_id && data.session_id === undefined)) {
+      // Format 5a — Claude Code CLI (has permission_mode, a CLI-specific field).
+      // MUST be checked before Copilot because both send transcript_path.
+      if (data.permission_mode !== undefined) {
         let state: AgentState;
-        if (CURSOR_WAITING_EVENTS.has(eventName))      state = 'waiting';
-        else if (CURSOR_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (CURSOR_IDLE_EVENTS.has(eventName))    state = 'idle';
-        else if (CURSOR_ERROR_EVENTS.has(eventName))   state = 'error';
+        if (CC_WAITING_EVENTS.has(eventName))      state = 'waiting';
+        else if (CC_WORKING_EVENTS.has(eventName)) state = 'working';
+        else if (CC_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else if (CC_ERROR_EVENTS.has(eventName))   state = 'error';
         else {
-          console.log(`Ignoring unmapped Cursor event: ${eventName}`);
+          console.log(`Ignoring unmapped Claude Code event: ${eventName}`);
           return null;
         }
         return {
-          toolId: 'cursor',
+          toolId: 'claude-code',
           state,
           payload: {
-            sessionId:    data.conversation_id,
+            sessionId:    data.session_id,
             taskSummary:  data.tool_name ? `Tool: ${data.tool_name}` : undefined,
-            errorMessage: data.error_message,
+            errorMessage: data.error,
+          },
+        };
+      }
+
+      // Format 5b — VS Code Copilot (uses hookEventName camelCase key, or transcript_path).
+      // Checked after Claude Code CLI / Cursor / Kiro since those also send transcript_path.
+      if (data.hookEventName !== undefined || (data.transcript_path !== undefined && data.cursor_version === undefined)) {
+        let state: AgentState;
+        if (COPILOT_WAITING_EVENTS.has(eventName))      state = 'waiting';
+        else if (COPILOT_WORKING_EVENTS.has(eventName)) state = 'working';
+        else if (COPILOT_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else {
+          console.log(`Ignoring unmapped Copilot event: ${eventName}`);
+          return null;
+        }
+        return {
+          toolId: 'vscode-copilot',
+          state,
+          payload: {
+            sessionId:   data.session_id ?? data.sessionId,
+            taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
           },
         };
       }
@@ -289,5 +324,4 @@ export class StatusBridgeServer {
     }
 
     return null;
-  }
 }

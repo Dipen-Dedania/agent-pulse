@@ -13,7 +13,7 @@ Instead of constantly switching windows or checking terminals to see if your age
   - 🔴 **Dead/Error**: Red glow and a "shake" animation.
 - **Unified Status Bridge**: A local HTTP server that normalizes events from different tools into a single status layer.
 - **One-Click Installation**: Guided setup to install hooks for supported tools.
-- **Supported Tools**: Claude Code, Cursor, VS Code + GitHub Copilot, and OpenAI Codex.
+- **Supported Tools**: Claude Code, Cursor, VS Code + GitHub Copilot, OpenAI Codex, and Kiro.
 
 ## 🚀 Quick Start
 
@@ -40,14 +40,38 @@ npm start
 ```
 *This will launch both the Vite renderer (for the UI) and the Electron main process concurrently.*
 
-## 🛠 Technical Smoke Test
+## 🧪 Testing
 
-If you want to verify that the Status Bridge (the backend "brain") is working without launching the full GUI, you can run the bridge smoke test:
+### Automated Tests (Vitest)
 
+Run the full test suite:
 ```bash
-npx tsx src/main/test-bridge.ts
+npm test
 ```
-This test simulates incoming events from AI tools and verifies that the state manager updates correctly.
+
+Run in watch mode during development:
+```bash
+npm run test:watch
+```
+
+Generate a coverage report:
+```bash
+npm run test:coverage
+```
+
+The suite covers:
+- **Bridge event normalization** — all 5 tools × all hook event names → correct `AgentState`
+- **Bubble animations** — all tools × all states (`idle`, `waiting`, `working`, `error`) render the correct Framer Motion variant and indicator elements (orbiting ring, error dot)
+- **Zustand status store** — state updates, multi-tool independence, initial hydration
+- **Hook installer** — `installHook` and `uninstallHook` for all tools write and remove the expected files
+
+### Bridge Smoke Test
+
+To verify the Status Bridge works end-to-end without launching the full GUI:
+```bash
+npm run test:bridge
+```
+This sends simulated hook events to the bridge and prints the resulting state manager output.
 
 ## 🏗 Architecture Overview
 

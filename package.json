@@ -8,7 +8,10 @@
     "build:main": "tsc -p tsconfig.main.json",
     "dev:main": "npm run build:main && cross-env NODE_ENV=development electron dist/main/index.js",
     "start": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:main\"",
-    "test:bridge": "tsx src/main/test-bridge.ts"
+    "test:bridge": "tsx src/main/test-bridge.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "repository": {
     "type": "git",
@@ -30,21 +33,26 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
     "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "^4.1.4",
     "autoprefixer": "^10.5.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^41.2.0",
     "electron-builder": "^26.8.1",
+    "jsdom": "^29.0.2",
     "postcss": "^8.5.9",
     "tailwindcss": "^4.2.2",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.8",
+    "vitest": "^4.1.4",
     "wait-on": "^9.0.5"
   }
 }

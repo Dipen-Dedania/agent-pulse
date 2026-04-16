@@ -62,9 +62,11 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     }, 120);
   }, []);
 
-  // Make transparent areas of the window click-through
+  // Make transparent areas of the window click-through (paused during drag)
+  const isDragging = useRef(false);
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
+      if (isDragging.current) return;
       const el = document.elementFromPoint(e.clientX, e.clientY);
       const isOverContent = el !== null && el !== document.documentElement && el !== document.body;
       window.electron.send('set-ignore-mouse', { ignore: !isOverContent });
@@ -95,6 +97,9 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     dragOrigin.current = { x: e.screenX, y: e.screenY };
+    isDragging.current = true;
+    // Fully capture mouse during drag — stop click-through
+    window.electron.send('set-ignore-mouse', { ignore: false });
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!dragOrigin.current) return;
@@ -106,6 +111,9 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
 
     const onMouseUp = () => {
       dragOrigin.current = null;
+      isDragging.current = false;
+      // Restore click-through
+      window.electron.send('set-ignore-mouse', { ignore: true });
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };

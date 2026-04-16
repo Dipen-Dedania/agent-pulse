@@ -65,16 +65,20 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
       configFile: '.github/hooks/agent-pulse-hooks.json',
       description:
         'Agent Pulse installs a hook script and registers it in .github/hooks/agent-pulse-hooks.json ' +
-        'in your workspace. VS Code Copilot spawns the script on SessionStart, UserPromptSubmit, ' +
-        'PreToolUse, PostToolUse, and Stop events, passing event JSON via stdin. To activate, point ' +
-        'VS Code\'s chat.hookFilesLocations setting at that directory, or use the /hooks command in chat.',
+        'in your workspace. VS Code Copilot spawns the script on all lifecycle events (SessionStart, ' +
+        'UserPromptSubmit, PreToolUse, PostToolUse, PreCompact, SubagentStart, SubagentStop, Stop), ' +
+        'passing event JSON via stdin. The script forwards it to the bridge and returns ' +
+        '{"continue":true} so Copilot proceeds normally.',
       snippet: JSON.stringify({
         hooks: {
-          SessionStart:     [{ type: 'command', command: '.github/hooks/agent-pulse.sh', timeout: 5 }],
-          UserPromptSubmit: [{ type: 'command', command: '.github/hooks/agent-pulse.sh', timeout: 5 }],
-          PreToolUse:       [{ type: 'command', command: '.github/hooks/agent-pulse.sh', timeout: 5 }],
-          PostToolUse:      [{ type: 'command', command: '.github/hooks/agent-pulse.sh', timeout: 5 }],
-          Stop:             [{ type: 'command', command: '.github/hooks/agent-pulse.sh', timeout: 5 }],
+          SessionStart:     [{ type: 'command', command: './.github/hooks/agent-pulse.sh', windows: 'powershell -ExecutionPolicy Bypass -File ".github\\hooks\\agent-pulse.ps1"', timeout: 5 }],
+          UserPromptSubmit: [{ type: 'command', command: './.github/hooks/agent-pulse.sh', windows: 'powershell -ExecutionPolicy Bypass -File ".github\\hooks\\agent-pulse.ps1"', timeout: 5 }],
+          PreToolUse:       [{ type: 'command', command: './.github/hooks/agent-pulse.sh', windows: 'powershell -ExecutionPolicy Bypass -File ".github\\hooks\\agent-pulse.ps1"', timeout: 5 }],
+          PostToolUse:      [{ type: 'command', command: './.github/hooks/agent-pulse.sh', windows: 'powershell -ExecutionPolicy Bypass -File ".github\\hooks\\agent-pulse.ps1"', timeout: 5 }],
+          PreCompact:       [{ type: 'command', command: './.github/hooks/agent-pulse.sh', windows: 'powershell -ExecutionPolicy Bypass -File ".github\\hooks\\agent-pulse.ps1"', timeout: 5 }],
+          SubagentStart:    [{ type: 'command', command: './.github/hooks/agent-pulse.sh', windows: 'powershell -ExecutionPolicy Bypass -File ".github\\hooks\\agent-pulse.ps1"', timeout: 5 }],
+          SubagentStop:     [{ type: 'command', command: './.github/hooks/agent-pulse.sh', windows: 'powershell -ExecutionPolicy Bypass -File ".github\\hooks\\agent-pulse.ps1"', timeout: 5 }],
+          Stop:             [{ type: 'command', command: './.github/hooks/agent-pulse.sh', windows: 'powershell -ExecutionPolicy Bypass -File ".github\\hooks\\agent-pulse.ps1"', timeout: 5 }],
         },
       }, null, 2),
     },

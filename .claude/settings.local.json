@@ -22,7 +22,10 @@
       "WebFetch(domain:developers.openai.com)",
       "WebFetch(domain:code.visualstudio.com)",
       "WebFetch(domain:kiro.dev)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(dir src/renderer/)",
+      "Bash(npm test:*)",
+      "Bash(npx vitest:*)"
     ],
     "deny": [
       "Read(./.env*)",

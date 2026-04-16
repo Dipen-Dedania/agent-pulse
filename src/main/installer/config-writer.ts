@@ -61,42 +61,49 @@ export class ConfigWriter {
     existing.hooks = existing.hooks ?? {};
 
     const hook = { command: hookCommand, timeout: 5 };
-    existing.hooks.preToolUse       = [hook];
-    existing.hooks.postToolUse      = [hook];
-    existing.hooks.postToolUseFailure = [hook];
-    existing.hooks.sessionStart     = [hook];
-    existing.hooks.sessionEnd       = [hook];
-    existing.hooks.stop             = [hook];
+    const events = ['preToolUse', 'postToolUse', 'postToolUseFailure', 'sessionStart', 'sessionEnd', 'stop'];
+    for (const event of events) {
+      const arr: any[] = existing.hooks[event] ?? [];
+      // Replace any previous Agent Pulse entry; preserve other hooks.
+      const filtered = arr.filter((h: any) => !h.command?.includes('agent-pulse'));
+      filtered.push(hook);
+      existing.hooks[event] = filtered;
+    }
 
     fs.writeFileSync(hooksConfigPath, JSON.stringify(existing, null, 2));
     return { success: true, path: hooksConfigPath };
   }
 
-  /** Bash script: reads Cursor's stdin JSON and POSTs to the bridge. */
+  /** Bash script: reads stdin JSON, POSTs to the bridge, exits 0 (success / allow). */
   private buildShellScript(): string {
     return `#!/usr/bin/env bash
-# Agent Pulse — Cursor hook (bash)
-# Cursor writes the event JSON to stdin; we forward it to the bridge.
+# Agent Pulse — hook script (bash)
+# Reads the event JSON from stdin and forwards it to the bridge.
 BODY=$(cat)
 curl -s -o /dev/null -X POST \\
   -H "Content-Type: application/json" \\
   -d "$BODY" \\
   "${this.bridgeUrl}" || true
+exit 0
 `;
   }
 
-  /** PowerShell script: reads Cursor's stdin JSON and POSTs to the bridge. */
+  /** PowerShell script: reads stdin JSON, POSTs to the bridge, exits 0 (success / allow). */
   private buildPowerShellScript(): string {
-    return `# Agent Pulse — Cursor hook (PowerShell)
-# Cursor writes the event JSON to stdin; we forward it to the bridge.
-$body = [Console]::In.ReadToEnd()
+    return `# Agent Pulse — hook script (PowerShell)
+# Reads the event JSON from stdin and forwards it to the bridge.
+# Use StreamReader with explicit UTF-8 (no BOM) to avoid prepending a BOM to the body.
+$reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
+$body = $reader.ReadToEnd()
+$reader.Close()
 try {
   Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
     -Method POST \`
     -ContentType "application/json" \`
-    -Body $body \`
+    -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
     -UseBasicParsing | Out-Null
 } catch { }
+exit 0
 `;
   }
 
@@ -122,20 +129,39 @@ try {
     fs.writeFileSync(shPath, shScript, { mode: 0o755 });
     fs.writeFileSync(ps1Path, ps1Script);
 
-    const isWindows = process.platform === 'win32';
-    const hookCommand = isWindows
-      ? `powershell -ExecutionPolicy Bypass -File "${ps1Path.replace(/\\/g, '/')}"`
-      : `"${shPath}"`;
+    // Build a cross-platform hook entry per the Copilot docs:
+    // `command` is the unix default, `windows` is the OS-specific override.
+    // For workspace installs use relative paths (portable across clones);
+    // for global installs use absolute paths.
+    let hook: Record<string, unknown>;
+    if (projectPath) {
+      hook = {
+        type: 'command',
+        command: './.github/hooks/agent-pulse.sh',
+        windows: `powershell -ExecutionPolicy Bypass -File ".github\\hooks\\agent-pulse.ps1"`,
+        timeout: 5,
+      };
+    } else {
+      hook = {
+        type: 'command',
+        command: `"${shPath.replace(/\\/g, '/')}"`,
+        windows: `powershell -ExecutionPolicy Bypass -File "${ps1Path.replace(/\\/g, '/')}"`,
+        timeout: 5,
+      };
+    }
 
-    // Write hooks.json — VS Code Copilot format uses PascalCase event names
+    // Write hooks.json — VS Code Copilot format uses PascalCase event names.
+    // Register all lifecycle events so the bubble tracks the full agent lifecycle.
     const hooksConfigPath = path.join(hooksDir, 'agent-pulse-hooks.json');
-    const hook = { type: 'command', command: hookCommand, timeout: 5 };
     const config = {
       hooks: {
         SessionStart:     [hook],
         UserPromptSubmit: [hook],
         PreToolUse:       [hook],
         PostToolUse:      [hook],
+        PreCompact:       [hook],
+        SubagentStart:    [hook],
+        SubagentStop:     [hook],
         Stop:             [hook],
       },
     };
@@ -207,7 +233,7 @@ try {
     const kiroDir = projectPath
       ? path.join(projectPath, '.kiro', 'hooks')
       : path.join(os.homedir(), '.kiro', 'hooks');
-    const hooksScriptDir = path.join(path.dirname(path.dirname(kiroDir)), 'hooks-scripts');
+    const hooksScriptDir = path.join(path.dirname(kiroDir), 'hooks-scripts');
 
     if (!fs.existsSync(kiroDir)) {
       fs.mkdirSync(kiroDir, { recursive: true });
@@ -246,7 +272,11 @@ try {
   }
 
   private writeClaudeCodeHook() {
-    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    const claudeDir = path.join(os.homedir(), '.claude');
+    if (!fs.existsSync(claudeDir)) {
+      fs.mkdirSync(claudeDir, { recursive: true });
+    }
+    const settingsPath = path.join(claudeDir, 'settings.json');
 
     // Read existing settings so we don't clobber them
     let settings: any = {};
@@ -355,7 +385,7 @@ try {
       const hookFilePath = path.join(kiroDir, 'agent-pulse.kiro.hook');
       if (fs.existsSync(hookFilePath)) fs.unlinkSync(hookFilePath);
 
-      const hooksScriptDir = path.join(path.dirname(path.dirname(kiroDir)), 'hooks-scripts');
+      const hooksScriptDir = path.join(path.dirname(kiroDir), 'hooks-scripts');
       const shPath  = path.join(hooksScriptDir, 'agent-pulse.sh');
       const ps1Path = path.join(hooksScriptDir, 'agent-pulse.ps1');
       if (fs.existsSync(shPath))  fs.unlinkSync(shPath);

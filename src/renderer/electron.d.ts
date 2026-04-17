@@ -1,0 +1,12 @@
+export interface IElectronAPI {
+  invoke: (channel: string, ...args: any[]) => Promise<any>;
+  send: (channel: string, ...args: any[]) => void;
+  on: (channel: string, callback: (event: any, ...args: any[]) => void) => void;
+  off: (channel: string, callback: (event: any, ...args: any[]) => void) => void;
+}
+
+declare global {
+  interface Window {
+    electron: IElectronAPI;
+  }
+}

@@ -263,6 +263,108 @@ describe('ConfigWriter — kiro', () => {
   });
 });
 
+// ── Gemini CLI ───────────────────────────────────────────────────────────────
+
+describe('ConfigWriter — gemini-cli', () => {
+  it('creates ~/.gemini/settings.json with hook entries', async () => {
+    await withFakeHome(async (writer) => {
+      const result = await writer.installHook('gemini-cli');
+      expect(result.success).toBe(true);
+
+      const settingsPath = path.join(tmpDir, '.gemini', 'settings.json');
+      expect(fs.existsSync(settingsPath)).toBe(true);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.hooks.SessionStart).toBeDefined();
+      expect(settings.hooks.BeforeTool).toBeDefined();
+      expect(settings.hooks.AfterAgent).toBeDefined();
+
+      const hook = settings.hooks.SessionStart[0].hooks[0];
+      expect(hook.name).toBe('agent-pulse');
+      expect(hook.type).toBe('command');
+    });
+  });
+
+  it('registers all 7 Gemini lifecycle events', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('gemini-cli');
+      const settingsPath = path.join(tmpDir, '.gemini', 'settings.json');
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      const events = Object.keys(settings.hooks);
+      expect(events).toEqual(expect.arrayContaining([
+        'SessionStart', 'SessionEnd', 'BeforeAgent', 'AfterAgent',
+        'BeforeTool', 'AfterTool', 'Notification',
+      ]));
+      expect(events).toHaveLength(7);
+    });
+  });
+
+  it('creates hook scripts (bash + ps1) under ~/.gemini/hooks/', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('gemini-cli');
+      const hooksDir = path.join(tmpDir, '.gemini', 'hooks');
+      expect(fs.existsSync(path.join(hooksDir, 'agent-pulse.sh'))).toBe(true);
+      expect(fs.existsSync(path.join(hooksDir, 'agent-pulse.ps1'))).toBe(true);
+    });
+  });
+
+  it('hook scripts inject tool identifier', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('gemini-cli');
+      const shPath = path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.sh');
+      const shContent = fs.readFileSync(shPath, 'utf8');
+      expect(shContent).toContain('"_ap_tool":"gemini-cli"');
+
+      const ps1Path = path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.ps1');
+      const ps1Content = fs.readFileSync(ps1Path, 'utf8');
+      expect(ps1Content).toContain('"_ap_tool":"gemini-cli"');
+    });
+  });
+
+  it('hook scripts exit 0', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('gemini-cli');
+      const shContent = fs.readFileSync(path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.sh'), 'utf8');
+      expect(shContent).toContain('exit 0');
+      const ps1Content = fs.readFileSync(path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.ps1'), 'utf8');
+      expect(ps1Content).toContain('exit 0');
+    });
+  });
+
+  it('preserves existing settings.json keys when merging', async () => {
+    await withFakeHome(async (writer) => {
+      const geminiDir = path.join(tmpDir, '.gemini');
+      fs.mkdirSync(geminiDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(geminiDir, 'settings.json'),
+        JSON.stringify({ theme: 'dark', model: 'gemini-2.5-pro' }, null, 2),
+      );
+
+      await writer.installHook('gemini-cli');
+      const settings = JSON.parse(fs.readFileSync(path.join(geminiDir, 'settings.json'), 'utf8'));
+      expect(settings.theme).toBe('dark');
+      expect(settings.model).toBe('gemini-2.5-pro');
+      expect(settings.hooks.SessionStart).toBeDefined();
+    });
+  });
+
+  it('uninstall removes hook entries and scripts', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('gemini-cli');
+      writer.uninstallHook('gemini-cli');
+
+      const settingsPath = path.join(tmpDir, '.gemini', 'settings.json');
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.hooks).toBeUndefined();
+
+      const shPath = path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.sh');
+      expect(fs.existsSync(shPath)).toBe(false);
+      const ps1Path = path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.ps1');
+      expect(fs.existsSync(ps1Path)).toBe(false);
+    });
+  });
+});
+
 // ── Unknown tool throws ───────────────────────────────────────────────────────
 
 describe('ConfigWriter — unknown tool', () => {

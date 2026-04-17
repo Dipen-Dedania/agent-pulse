@@ -227,7 +227,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       <motion.div
         onMouseDown={onMouseDown}
         animate={animations[state]}
-        className="relative w-16 h-16 rounded-full flex items-center justify-center cursor-grab active:cursor-grabbing select-none shrink-0"
+        className="relative w-12 h-12 rounded-full flex items-center justify-center cursor-grab active:cursor-grabbing select-none shrink-0"
         style={{
           background: `radial-gradient(circle, ${accent[state]} 0%, rgba(128,128,128,0.06) 100%)`,
           backdropFilter: 'blur(14px)',
@@ -242,7 +242,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           src={meta.icon}
           alt={meta.label}
           draggable={false}
-          className="w-8 h-8 object-contain"
+          className="w-6 h-6 object-contain"
           style={{ filter: isDark ? 'none' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }}
         />
 
@@ -251,7 +251,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
-            className="absolute w-[72px] h-[72px] rounded-full"
+            className="absolute w-[56px] h-[56px] rounded-full"
             style={{
               border: `2px dotted ${isDark ? 'rgba(245,158,11,0.55)' : 'rgba(217,119,6,0.5)'}`,
             }}
@@ -263,7 +263,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 2.5, repeat: Infinity, ease: 'linear' }}
-            className="absolute w-[72px] h-[72px] rounded-full"
+            className="absolute w-[56px] h-[56px] rounded-full"
             style={{
               border: `2px dashed ${isDark ? 'rgba(59,130,246,0.4)' : 'rgba(37,99,235,0.35)'}`,
             }}

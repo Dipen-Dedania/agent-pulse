@@ -18,6 +18,8 @@ export class ConfigWriter {
         return this.writeCodexHook(projectPath);
       case 'kiro':
         return this.writeKiroHook(projectPath);
+      case 'gemini-cli':
+        return this.writeGeminiCliHook(projectPath);
       default:
         throw new Error(`Hook installation for ${toolId} not yet implemented`);
     }
@@ -271,6 +273,91 @@ exit 0
     return { success: true, path: hookFilePath };
   }
 
+  private writeGeminiCliHook(projectPath?: string) {
+    const geminiDir = projectPath
+      ? path.join(projectPath, '.gemini')
+      : path.join(os.homedir(), '.gemini');
+    const hooksScriptDir = path.join(geminiDir, 'hooks');
+
+    if (!fs.existsSync(hooksScriptDir)) {
+      fs.mkdirSync(hooksScriptDir, { recursive: true });
+    }
+
+    // Write hook scripts — these inject "source":"gemini-cli" into the JSON
+    // so the bridge can reliably identify Gemini CLI payloads.
+    const shPath  = path.join(hooksScriptDir, 'agent-pulse.sh');
+    const ps1Path = path.join(hooksScriptDir, 'agent-pulse.ps1');
+
+    fs.writeFileSync(shPath, this.buildGeminiShellScript(), { mode: 0o755 });
+    fs.writeFileSync(ps1Path, this.buildGeminiPowerShellScript());
+
+    const isWindows = process.platform === 'win32';
+    const hookCommand = isWindows
+      ? `powershell -ExecutionPolicy Bypass -File "${ps1Path.replace(/\\/g, '/')}"`
+      : `"${shPath}"`;
+
+    // Write settings.json — Gemini CLI uses event-keyed arrays of matcher groups
+    const settingsPath = path.join(geminiDir, 'settings.json');
+    let settings: any = {};
+    if (fs.existsSync(settingsPath)) {
+      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { /* start fresh */ }
+    }
+    settings.hooks = settings.hooks ?? {};
+
+    const hookEntry = { name: 'agent-pulse', type: 'command', command: hookCommand, timeout: 5000 };
+    const group = { matcher: '*', hooks: [hookEntry] };
+    const events = ['SessionStart', 'SessionEnd', 'BeforeAgent', 'AfterAgent', 'BeforeTool', 'AfterTool', 'Notification'];
+
+    for (const event of events) {
+      const arr: any[] = settings.hooks[event] ?? [];
+      // Remove any existing agent-pulse entries for idempotency
+      const filtered = arr.filter((g: any) =>
+        !g.hooks?.some((h: any) => h.name === 'agent-pulse')
+      );
+      filtered.push(group);
+      settings.hooks[event] = filtered;
+    }
+
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    return { success: true, path: settingsPath };
+  }
+
+  /** Bash script for Gemini CLI: injects tool identifier before forwarding to bridge. */
+  private buildGeminiShellScript(): string {
+    return `#!/usr/bin/env bash
+# Agent Pulse — Gemini CLI hook script (bash)
+# Reads event JSON from stdin, injects a tool identifier, and forwards to bridge.
+BODY=$(cat)
+BODY=$(echo "$BODY" | sed 's/^{/{"_ap_tool":"gemini-cli",/')
+curl -s -o /dev/null -X POST \\
+  -H "Content-Type: application/json" \\
+  -d "$BODY" \\
+  "${this.bridgeUrl}" || true
+echo '{}'
+exit 0
+`;
+  }
+
+  /** PowerShell script for Gemini CLI: injects tool identifier before forwarding to bridge. */
+  private buildGeminiPowerShellScript(): string {
+    return `# Agent Pulse — Gemini CLI hook script (PowerShell)
+# Reads event JSON from stdin, injects a tool identifier, and forwards to bridge.
+$reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
+$body = $reader.ReadToEnd()
+$reader.Close()
+$body = $body -replace '^\\{', '{"_ap_tool":"gemini-cli",'
+try {
+  Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
+    -Method POST \`
+    -ContentType "application/json" \`
+    -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
+    -UseBasicParsing | Out-Null
+} catch { }
+Write-Output '{}'
+exit 0
+`;
+  }
+
   private writeClaudeCodeHook() {
     const claudeDir = path.join(os.homedir(), '.claude');
     if (!fs.existsSync(claudeDir)) {
@@ -388,6 +475,35 @@ exit 0
       const hooksScriptDir = path.join(path.dirname(kiroDir), 'hooks-scripts');
       const shPath  = path.join(hooksScriptDir, 'agent-pulse.sh');
       const ps1Path = path.join(hooksScriptDir, 'agent-pulse.ps1');
+      if (fs.existsSync(shPath))  fs.unlinkSync(shPath);
+      if (fs.existsSync(ps1Path)) fs.unlinkSync(ps1Path);
+      return { success: true };
+    }
+
+    if (toolId === 'gemini-cli') {
+      const geminiDir = projectPath
+        ? path.join(projectPath, '.gemini')
+        : path.join(os.homedir(), '.gemini');
+      const settingsPath = path.join(geminiDir, 'settings.json');
+      if (fs.existsSync(settingsPath)) {
+        try {
+          const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+          const events = ['SessionStart', 'SessionEnd', 'BeforeAgent', 'AfterAgent', 'BeforeTool', 'AfterTool', 'Notification'];
+          for (const event of events) {
+            if (settings.hooks?.[event]) {
+              settings.hooks[event] = settings.hooks[event].filter((g: any) =>
+                !g.hooks?.some((h: any) => h.name === 'agent-pulse')
+              );
+              if (settings.hooks[event].length === 0) delete settings.hooks[event];
+            }
+          }
+          if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks;
+          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        } catch { /* ignore */ }
+      }
+      // Remove hook scripts
+      const shPath  = path.join(geminiDir, 'hooks', 'agent-pulse.sh');
+      const ps1Path = path.join(geminiDir, 'hooks', 'agent-pulse.ps1');
       if (fs.existsSync(shPath))  fs.unlinkSync(shPath);
       if (fs.existsSync(ps1Path)) fs.unlinkSync(ps1Path);
       return { success: true };

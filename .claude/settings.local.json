@@ -25,7 +25,14 @@
       "Bash(npx tsc:*)",
       "Bash(dir src/renderer/)",
       "Bash(npm test:*)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "WebFetch(domain:geminicli.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(curl:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File \"C:/Users/ZTI Tech Lead/.gemini/hooks/agent-pulse.ps1\")",
+      "Bash(powershell.exe -NoProfile -Command 'powershell -ExecutionPolicy Bypass -File \"C:/Users/ZTI Tech Lead/.gemini/hooks/agent-pulse.ps1\"')",
+      "Bash(gemini --version)",
+      "Bash(xxd)"
     ],
     "deny": [
       "Read(./.env*)",

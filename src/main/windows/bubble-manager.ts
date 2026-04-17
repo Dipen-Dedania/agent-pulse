@@ -1,6 +1,16 @@
-import { BrowserWindow, ipcMain, screen } from 'electron';
+import { BrowserWindow, ipcMain, screen, app } from 'electron';
 import path from 'path';
 import { ToolId } from '../../common/types';
+
+function getAppIconPath(): string {
+  return path.join(
+    app.getAppPath(),
+    'public',
+    'assets',
+    'favicon',
+    'android-chrome-512x512.png',
+  );
+}
 
 export class BubbleManager {
   private bubbles: Map<ToolId, BrowserWindow> = new Map();
@@ -86,6 +96,7 @@ export class BubbleManager {
       movable: false,
       hasShadow: false,
       skipTaskbar: true,
+      icon: getAppIconPath(),
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -102,7 +113,7 @@ export class BubbleManager {
     if (process.env.NODE_ENV === 'development') {
       window.loadURL(`http://localhost:5173/bubble?toolId=${toolId}`);
     } else {
-      window.loadFile(path.join(__dirname, '../../../index.html'), {
+      window.loadFile(path.join(__dirname, '../../renderer/index.html'), {
         query: { toolId },
       });
     }

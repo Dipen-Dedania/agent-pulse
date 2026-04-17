@@ -8,6 +8,11 @@ import { ConfigWriter } from './installer/config-writer';
 import { loadConfig, saveConfig, UserConfig } from './user-config';
 import { ToolId } from '../common/types';
 
+// Windows uses this to group windows under our identity and show our taskbar icon.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.agentpulse.app');
+}
+
 class AgentPulseApp {
   private bubbleManager: BubbleManager;
   private settingsWindow: SettingsWindow;

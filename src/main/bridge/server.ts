@@ -32,7 +32,12 @@ const KIRO_WAITING_EVENTS = new Set<string>([]);
 const KIRO_WORKING_EVENTS = new Set(['agentSpawn', 'userPromptSubmit', 'preToolUse']);
 const KIRO_IDLE_EVENTS    = new Set(['postToolUse']);
 
-const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro'];
+// Gemini CLI hook event names → AgentState (detected via _ap_tool: 'gemini-cli' injected by our hook script)
+const GEMINI_WORKING_EVENTS = new Set(['SessionStart', 'BeforeAgent', 'BeforeTool', 'BeforeModel', 'BeforeToolSelection']);
+const GEMINI_WAITING_EVENTS = new Set(['AfterAgent', 'Notification']);
+const GEMINI_IDLE_EVENTS    = new Set(['SessionEnd', 'AfterTool', 'AfterModel']);
+
+const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'gemini-cli'];
 const VALID_STATES: AgentState[] = ['working', 'waiting', 'idle', 'error'];
 
 export class StatusBridgeServer {
@@ -151,28 +156,31 @@ export class StatusBridgeServer {
   }
 
   /**
-   * Accepts six formats (detection order matters — more specific markers first):
+   * Accepts seven formats (detection order matters — more specific markers first):
    *
    * 1. Our own format (curl tests):
    *    { toolId: 'claude-code', state: 'working', payload?: {...} }
    *
-   * 2. Cursor's native hook payload (camelCase events, has cursor_version):
+   * 2. Gemini CLI (has _ap_tool: 'gemini-cli' injected by our hook script):
+   *    { hook_event_name: 'BeforeAgent', _ap_tool: 'gemini-cli', session_id: '...', ... }
+   *
+   * 3. Cursor's native hook payload (camelCase events, has cursor_version):
    *    { hook_event_name: 'preToolUse', cursor_version: '...', conversation_id: '...', transcript_path: ... }
    *
-   * 3. Kiro hook payload (has kiro_version or unique agentSpawn event):
+   * 4. Kiro hook payload (has kiro_version or unique agentSpawn event):
    *    { hook_event_name: 'agentSpawn', session_id: '...', cwd: '...', ... }
    *
-   * 4. Claude Code CLI (PascalCase events, has permission_mode):
+   * 5. Claude Code CLI (PascalCase events, has permission_mode):
    *    { hook_event_name: 'PreToolUse', session_id: '...', permission_mode: '...', transcript_path: '...', ... }
    *    Checked before Copilot because both send transcript_path.
    *
-   * 5. VS Code Copilot hook payload (uses hookEventName camelCase key, or has transcript_path):
+   * 6. VS Code Copilot hook payload (uses hookEventName camelCase key, or has transcript_path):
    *    { hook_event_name: 'PreToolUse', session_id: '...', transcript_path: '...', ... }
    *
-   * 6. Codex native hook payload (PascalCase events, has turn_id):
+   * 7. Codex native hook payload (PascalCase events, has turn_id):
    *    { hook_event_name: 'PreToolUse', session_id: '...', turn_id: '...', cwd: '...', ... }
    *
-   * 7. Claude Code fallback (PascalCase events, no specific markers):
+   * 8. Claude Code fallback (PascalCase events, no specific markers):
    *    { hook_event_name: 'PreToolUse', session_id: '...', tool_name: '...', ... }
    */
   private normalizePayload(data: any): { toolId: ToolId; state: AgentState; payload: any } | null {
@@ -194,7 +202,32 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
       // Copilot may use either hookEventName (docs) or hook_event_name (actual).
       const eventName: string = data.hook_event_name ?? data.hookEventName;
 
-      // Format 4 — Cursor native hook (has cursor_version or conversation_id without session_id).
+      // Format 2 — Gemini CLI (injected _ap_tool field from our hook script).
+      // Checked first among hook formats since `_ap_tool` is definitive and avoids
+      // PascalCase ambiguity with CC/Codex events.  We use `_ap_tool` instead of
+      // `source` because Gemini CLI's own SessionStart payload includes a native
+      // `source` field (values: Startup | Resume | Clear) that would overwrite ours
+      // during JSON.parse (last duplicate key wins).
+      if (data._ap_tool === 'gemini-cli') {
+        let state: AgentState;
+        if (GEMINI_WAITING_EVENTS.has(eventName))      state = 'waiting';
+        else if (GEMINI_WORKING_EVENTS.has(eventName)) state = 'working';
+        else if (GEMINI_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else {
+          console.log(`Ignoring unmapped Gemini CLI event: ${eventName}`);
+          return null;
+        }
+        return {
+          toolId: 'gemini-cli',
+          state,
+          payload: {
+            sessionId:   data.session_id,
+            taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+          },
+        };
+      }
+
+      // Format 3 — Cursor native hook (has cursor_version or conversation_id without session_id).
       // MUST be checked before Copilot because Cursor also sends transcript_path.
       if (data.cursor_version !== undefined || (data.conversation_id && data.session_id === undefined)) {
         let state: AgentState;

@@ -256,6 +256,85 @@ describe('Kiro events', () => {
   });
 });
 
+// ── Gemini CLI ───────────────────────────────────────────────────────────────
+
+const gemini = (hook_event_name: string, extra: object = {}) => ({
+  hook_event_name,
+  _ap_tool: 'gemini-cli',
+  session_id: 'sess-gemini',
+  ...extra,
+});
+
+describe('Gemini CLI events', () => {
+  it('SessionStart → working', () => {
+    const r = normalizePayload(gemini('SessionStart'));
+    expect(r?.toolId).toBe('gemini-cli');
+    expect(r?.state).toBe('working');
+  });
+
+  it('BeforeAgent → working', () => {
+    expect(normalizePayload(gemini('BeforeAgent'))?.state).toBe('working');
+  });
+
+  it('BeforeTool → working', () => {
+    expect(normalizePayload(gemini('BeforeTool', { tool_name: 'write_file' }))?.state).toBe('working');
+  });
+
+  it('BeforeModel → working', () => {
+    expect(normalizePayload(gemini('BeforeModel'))?.state).toBe('working');
+  });
+
+  it('BeforeToolSelection → working', () => {
+    expect(normalizePayload(gemini('BeforeToolSelection'))?.state).toBe('working');
+  });
+
+  it('AfterAgent → waiting', () => {
+    expect(normalizePayload(gemini('AfterAgent'))?.state).toBe('waiting');
+  });
+
+  it('Notification → waiting', () => {
+    expect(normalizePayload(gemini('Notification'))?.state).toBe('waiting');
+  });
+
+  it('SessionEnd → idle', () => {
+    expect(normalizePayload(gemini('SessionEnd'))?.state).toBe('idle');
+  });
+
+  it('AfterTool → idle', () => {
+    expect(normalizePayload(gemini('AfterTool'))?.state).toBe('idle');
+  });
+
+  it('AfterModel → idle', () => {
+    expect(normalizePayload(gemini('AfterModel'))?.state).toBe('idle');
+  });
+
+  it('unknown Gemini event → null', () => {
+    expect(normalizePayload(gemini('UnknownEvent'))).toBeNull();
+  });
+
+  it('extracts session_id into payload.sessionId', () => {
+    const r = normalizePayload(gemini('BeforeAgent'));
+    expect(r?.payload.sessionId).toBe('sess-gemini');
+  });
+
+  it('extracts tool_name into payload.taskSummary', () => {
+    const r = normalizePayload(gemini('BeforeTool', { tool_name: 'read_file' }));
+    expect(r?.payload.taskSummary).toBe('Tool: read_file');
+  });
+
+  it('Gemini with PascalCase events is NOT misidentified as Claude Code', () => {
+    // Gemini uses PascalCase events like CC, but has _ap_tool: 'gemini-cli'
+    const payload = {
+      hook_event_name: 'SessionStart',
+      _ap_tool: 'gemini-cli',
+      session_id: 'gemini-sess-1',
+    };
+    const r = normalizePayload(payload);
+    expect(r?.toolId).toBe('gemini-cli');
+    expect(r?.toolId).not.toBe('claude-code');
+  });
+});
+
 // ── Format 1: Explicit toolId + state ────────────────────────────────────────
 
 describe('Explicit format (Format 1)', () => {

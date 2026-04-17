@@ -32,7 +32,9 @@
       "Bash(powershell -ExecutionPolicy Bypass -File \"C:/Users/ZTI Tech Lead/.gemini/hooks/agent-pulse.ps1\")",
       "Bash(powershell.exe -NoProfile -Command 'powershell -ExecutionPolicy Bypass -File \"C:/Users/ZTI Tech Lead/.gemini/hooks/agent-pulse.ps1\"')",
       "Bash(gemini --version)",
-      "Bash(xxd)"
+      "Bash(xxd)",
+      "Bash(gh pr *)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ],
     "deny": [
       "Read(./.env*)",

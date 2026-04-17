@@ -182,9 +182,21 @@ exit 0
       fs.mkdirSync(hooksScriptDir, { recursive: true });
     }
 
-    // Write bash hook script (Codex Windows support is disabled upstream)
-    const shPath = path.join(hooksScriptDir, 'agent-pulse.sh');
-    fs.writeFileSync(shPath, this.buildShellScript(), { mode: 0o755 });
+    // Write hook scripts. Both scripts inject `_ap_tool: "openai-codex"` so the
+    // bridge can identify Codex payloads even for events like SessionStart that
+    // don't carry a `turn_id`.
+    const shPath  = path.join(hooksScriptDir, 'agent-pulse.sh');
+    const ps1Path = path.join(hooksScriptDir, 'agent-pulse.ps1');
+    fs.writeFileSync(shPath, this.buildCodexShellScript(), { mode: 0o755 });
+    fs.writeFileSync(ps1Path, this.buildCodexPowerShellScript());
+
+    // On Windows, Codex spawns hooks via `cmd.exe /C <command>`, which can't
+    // execute a bare `.sh` file — it opens the "Open with…" dialog. Point at
+    // the PowerShell wrapper instead.
+    const isWindows = process.platform === 'win32';
+    const hookCommand = isWindows
+      ? `powershell -ExecutionPolicy Bypass -File "${ps1Path}"`
+      : shPath;
 
     // Write hooks.json — Codex uses the same nested matcher-group structure as Claude Code
     const hooksConfigPath = path.join(codexDir, 'hooks.json');
@@ -194,7 +206,7 @@ exit 0
     }
     existing.hooks = existing.hooks ?? {};
 
-    const group = { matcher: '*', hooks: [{ type: 'command', command: shPath, timeout: 10 }] };
+    const group = { matcher: '*', hooks: [{ type: 'command', command: hookCommand, timeout: 10 }] };
     existing.hooks.SessionStart      = [group];
     existing.hooks.UserPromptSubmit  = [group];
     existing.hooks.PreToolUse        = [group];
@@ -207,6 +219,40 @@ exit 0
     this.enableCodexHooksFlag(codexDir);
 
     return { success: true, path: hooksConfigPath };
+  }
+
+  /** Bash script for Codex: injects tool identifier before forwarding to bridge. */
+  private buildCodexShellScript(): string {
+    return `#!/usr/bin/env bash
+# Agent Pulse — Codex hook script (bash)
+# Reads event JSON from stdin, injects a tool identifier, and forwards to bridge.
+BODY=$(cat)
+BODY=$(echo "$BODY" | sed 's/^{/{"_ap_tool":"openai-codex",/')
+curl -s -o /dev/null -X POST \\
+  -H "Content-Type: application/json" \\
+  -d "$BODY" \\
+  "${this.bridgeUrl}" || true
+exit 0
+`;
+  }
+
+  /** PowerShell script for Codex: injects tool identifier before forwarding to bridge. */
+  private buildCodexPowerShellScript(): string {
+    return `# Agent Pulse — Codex hook script (PowerShell)
+# Reads event JSON from stdin, injects a tool identifier, and forwards to bridge.
+$reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
+$body = $reader.ReadToEnd()
+$reader.Close()
+$body = $body -replace '^\\{', '{"_ap_tool":"openai-codex",'
+try {
+  Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
+    -Method POST \`
+    -ContentType "application/json" \`
+    -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
+    -UseBasicParsing | Out-Null
+} catch { }
+exit 0
+`;
   }
 
   /** Ensures `[features]\ncodex_hooks = true` is present in ~/.codex/config.toml. */
@@ -460,8 +506,10 @@ exit 0
           fs.writeFileSync(hooksConfigPath, JSON.stringify(config, null, 2));
         } catch { /* ignore */ }
       }
-      const shPath = path.join(codexDir, 'hooks', 'agent-pulse.sh');
-      if (fs.existsSync(shPath)) fs.unlinkSync(shPath);
+      const shPath  = path.join(codexDir, 'hooks', 'agent-pulse.sh');
+      const ps1Path = path.join(codexDir, 'hooks', 'agent-pulse.ps1');
+      if (fs.existsSync(shPath))  fs.unlinkSync(shPath);
+      if (fs.existsSync(ps1Path)) fs.unlinkSync(ps1Path);
       return { success: true };
     }
 

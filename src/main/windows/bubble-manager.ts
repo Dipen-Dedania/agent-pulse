@@ -15,10 +15,10 @@ function getAppIconPath(): string {
 export class BubbleManager {
   private bubbles: Map<ToolId, BrowserWindow> = new Map();
 
-  private static readonly BUBBLE_SIZE = 100;
+  private static readonly BUBBLE_SIZE = 75;
   private static readonly TOOLTIP_HEIGHT = 110;
-  private static readonly EDGE_PADDING = 16;
-  private static readonly STACK_GAP = 8;
+  private static readonly EDGE_PADDING = 20;
+  private static readonly STACK_GAP = 4;
 
   public init() {
     ipcMain.on('set-ignore-mouse', (event, { ignore }: { ignore: boolean }) => {
@@ -57,7 +57,10 @@ export class BubbleManager {
       } else {
         win.setPosition(x, y + BubbleManager.TOOLTIP_HEIGHT);
         win.setSize(BubbleManager.BUBBLE_SIZE, BubbleManager.BUBBLE_SIZE);
-        win.setMaximumSize(BubbleManager.BUBBLE_SIZE, BubbleManager.BUBBLE_SIZE);
+        win.setMaximumSize(
+          BubbleManager.BUBBLE_SIZE,
+          BubbleManager.BUBBLE_SIZE,
+        );
       }
     });
   }

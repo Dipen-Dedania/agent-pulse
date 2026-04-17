@@ -202,7 +202,29 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
       // Copilot may use either hookEventName (docs) or hook_event_name (actual).
       const eventName: string = data.hook_event_name ?? data.hookEventName;
 
-      // Format 2 — Gemini CLI (injected _ap_tool field from our hook script).
+      // Format 2a — Codex (injected _ap_tool field from our hook script).
+      // Definitive marker — needed because Codex's SessionStart event has no
+      // `turn_id`, so the turn_id-based fallback below wouldn't catch it.
+      if (data._ap_tool === 'openai-codex') {
+        let state: AgentState;
+        if (CODEX_WAITING_EVENTS.has(eventName))      state = 'waiting';
+        else if (CODEX_WORKING_EVENTS.has(eventName)) state = 'working';
+        else if (CODEX_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else {
+          console.log(`Ignoring unmapped Codex event: ${eventName}`);
+          return null;
+        }
+        return {
+          toolId: 'openai-codex',
+          state,
+          payload: {
+            sessionId:   data.session_id,
+            taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+          },
+        };
+      }
+
+      // Format 2b — Gemini CLI (injected _ap_tool field from our hook script).
       // Checked first among hook formats since `_ap_tool` is definitive and avoids
       // PascalCase ambiguity with CC/Codex events.  We use `_ap_tool` instead of
       // `source` because Gemini CLI's own SessionStart payload includes a native

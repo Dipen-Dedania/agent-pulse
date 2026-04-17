@@ -13,9 +13,12 @@ const cc = (hook_event_name: string, extra: object = {}) => ({
 });
 
 const codex = (hook_event_name: string) => ({
+  _ap_tool: 'openai-codex',
   hook_event_name,
   session_id: 'sess-codex',
-  turn_id: 'turn-1',
+  // turn_id is only present on turn-scoped events (PreToolUse/PostToolUse/
+  // UserPromptSubmit/Stop). Detection relies on _ap_tool, not turn_id.
+  ...(hook_event_name === 'SessionStart' ? {} : { turn_id: 'turn-1' }),
   cwd: '/tmp',
 });
 

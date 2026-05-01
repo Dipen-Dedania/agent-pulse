@@ -6,6 +6,7 @@ import { ToolId } from '../../common/types';
 
 export interface ToolDetection {
   installed: boolean;
+  hookInstalled?: boolean;
   location?: string;
 }
 

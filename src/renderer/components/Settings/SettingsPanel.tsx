@@ -5,7 +5,8 @@ import { StatesReference } from './StatesReference';
 
 interface ToolConfig {
   enabled: boolean;
-  installed: boolean;
+  appInstalled: boolean;
+  hookInstalled: boolean;
   location?: string;
 }
 
@@ -138,7 +139,8 @@ export const SettingsPanel: React.FC = () => {
         const isObj = det && typeof det === 'object';
         initialTools[id] = {
           enabled: config?.enabledBubbles?.[id] ?? false,
-          installed: isObj ? !!det.installed : !!det,
+          appInstalled: isObj ? !!det.installed : !!det,
+          hookInstalled: isObj ? !!det.hookInstalled : false,
           location: isObj ? det.location : undefined,
         };
       });
@@ -159,7 +161,7 @@ export const SettingsPanel: React.FC = () => {
       if (result.success) {
         setTools((prev) => ({
           ...prev,
-          [toolId]: { ...prev[toolId], installed: true },
+          [toolId]: { ...prev[toolId], hookInstalled: true },
         }));
       }
     } catch (e) {
@@ -173,7 +175,7 @@ export const SettingsPanel: React.FC = () => {
       if (result.success) {
         setTools((prev) => ({
           ...prev,
-          [toolId]: { ...prev[toolId], installed: false },
+          [toolId]: { ...prev[toolId], hookInstalled: false },
         }));
       }
     } catch (e) {
@@ -236,7 +238,7 @@ export const SettingsPanel: React.FC = () => {
             const config = tools[toolId];
             if (!config) return null;
 
-            const toolDetected = !!config.location || config.installed;
+            const toolDetected = !!config.location || config.appInstalled;
 
             return (
               <div
@@ -270,17 +272,33 @@ export const SettingsPanel: React.FC = () => {
                     {toolDetected ? (
                       <>
                         <p className='text-xs text-slate-400 mt-0.5'>
-                          {config.installed
+                          {config.hookInstalled
                             ? '✓ Hook installed'
                             : 'Hook not installed'}
                         </p>
                         {config.location && (
-                          <p
-                            className='text-[10px] text-slate-500 mt-0.5 font-mono truncate'
-                            title={config.location}
+                          <button
+                            onClick={() =>
+                              window.electron.invoke(
+                                'open-path',
+                                config.location,
+                              )
+                            }
+                            className='flex items-center gap-1 mt-0.5 max-w-full cursor-pointer group text-left'
+                            title={`Open: ${config.location}`}
                           >
-                            {config.location}
-                          </p>
+                            <svg
+                              xmlns='http://www.w3.org/2000/svg'
+                              viewBox='0 0 16 16'
+                              fill='currentColor'
+                              className='w-2.5 h-2.5 text-slate-600 group-hover:text-blue-400 shrink-0 transition-colors'
+                            >
+                              <path d='M2 3.5A1.5 1.5 0 0 1 3.5 2h2.879a1.5 1.5 0 0 1 1.06.44l1.122 1.12A1.5 1.5 0 0 0 9.62 4H12.5A1.5 1.5 0 0 1 14 5.5v1H2v-3ZM2 8.5A1.5 1.5 0 0 1 3.5 7h9A1.5 1.5 0 0 1 14 8.5v4A1.5 1.5 0 0 1 12.5 14h-9A1.5 1.5 0 0 1 2 12.5v-4Z' />
+                            </svg>
+                            <span className='text-[10px] text-slate-500 group-hover:text-blue-400 font-mono truncate transition-colors'>
+                              {config.location}
+                            </span>
+                          </button>
                         )}
                       </>
                     ) : (
@@ -317,20 +335,20 @@ export const SettingsPanel: React.FC = () => {
                 <div className='flex gap-2'>
                   <button
                     onClick={() => handleInstallHook(toolId)}
-                    disabled={config.installed || !toolDetected}
+                    disabled={config.hookInstalled || !toolDetected}
                     className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                      config.installed
+                      config.hookInstalled
                         ? 'bg-green-500/15 text-green-400 border border-green-500/30 cursor-default'
                         : !toolDetected
                           ? 'bg-slate-700/40 text-slate-500 cursor-not-allowed'
                           : 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer'
                     }`}
                   >
-                    {config.installed ? 'Hook Active' : 'Install Hook'}
+                    {config.hookInstalled ? 'Hook Active' : 'Install Hook'}
                   </button>
                   <button
                     onClick={() => handleUninstallHook(toolId)}
-                    disabled={!config.installed}
+                    disabled={!config.hookInstalled}
                     className='flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-default text-slate-300 transition-all enabled:cursor-pointer'
                   >
                     Uninstall

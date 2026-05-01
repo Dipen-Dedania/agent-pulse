@@ -121,6 +121,16 @@ export class BubbleManager {
       });
     }
 
+    // Forward bubble console output to the main process so logs from the
+    // tiny click-through window are visible without opening DevTools on it.
+    if (!app.isPackaged) {
+      window.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+        if (message.includes('[Bubble:') || message.includes('chime')) {
+          console.log(`[bubble:${toolId}] ${message} (${sourceId}:${line}, level=${level})`);
+        }
+      });
+    }
+
     this.bubbles.set(toolId, window);
   }
 

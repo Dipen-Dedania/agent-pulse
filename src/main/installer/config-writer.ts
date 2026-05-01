@@ -7,6 +7,25 @@ import { ToolId } from '../../common/types';
 export class ConfigWriter {
   private bridgeUrl = BRIDGE_URL;
 
+  public isHookInstalled(toolId: ToolId, projectPath?: string): boolean {
+    switch (toolId) {
+      case 'claude-code':
+        return this.isClaudeCodeHookInstalled();
+      case 'cursor':
+        return this.isCursorHookInstalled(projectPath);
+      case 'vscode-copilot':
+        return this.isCopilotHookInstalled(projectPath);
+      case 'openai-codex':
+        return this.isCodexHookInstalled(projectPath);
+      case 'kiro':
+        return this.isKiroHookInstalled(projectPath);
+      case 'gemini-cli':
+        return this.isGeminiCliHookInstalled(projectPath);
+      default:
+        return false;
+    }
+  }
+
   public async installHook(toolId: ToolId, projectPath?: string) {
     switch (toolId) {
       case 'cursor':
@@ -75,6 +94,159 @@ export class ConfigWriter {
 
     fs.writeFileSync(hooksConfigPath, JSON.stringify(existing, null, 2));
     return { success: true, path: hooksConfigPath };
+  }
+
+  private readJson(filePath: string): any | null {
+    if (!fs.existsSync(filePath)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  private hasAllFiles(paths: string[]): boolean {
+    return paths.every((filePath) => fs.existsSync(filePath));
+  }
+
+  private hasAgentPulseCommand(entry: any): boolean {
+    const command = `${entry?.command ?? ''} ${entry?.windows ?? ''}`;
+    return command.includes('agent-pulse');
+  }
+
+  private hookArrayHasAgentPulseCommand(entries: any): boolean {
+    if (!Array.isArray(entries)) return false;
+    return entries.some((entry) =>
+      this.hasAgentPulseCommand(entry) ||
+      (Array.isArray(entry?.hooks) && entry.hooks.some((hook: any) => this.hasAgentPulseCommand(hook))),
+    );
+  }
+
+  private hookArrayHasAgentPulseHttp(entries: any): boolean {
+    if (!Array.isArray(entries)) return false;
+    return entries.some((entry) =>
+      Array.isArray(entry?.hooks) &&
+      entry.hooks.some((hook: any) => hook?.type === 'http' && hook?.url === this.bridgeUrl),
+    );
+  }
+
+  private hookArrayHasNamedAgentPulse(entries: any): boolean {
+    if (!Array.isArray(entries)) return false;
+    return entries.some((entry) =>
+      Array.isArray(entry?.hooks) &&
+      entry.hooks.some((hook: any) => hook?.name === 'agent-pulse' && this.hasAgentPulseCommand(hook)),
+    );
+  }
+
+  private isClaudeCodeHookInstalled(): boolean {
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    const settings = this.readJson(settingsPath);
+    if (!settings?.hooks) return false;
+
+    return ['PreToolUse', 'Stop', 'StopFailure'].every((event) =>
+      this.hookArrayHasAgentPulseHttp(settings.hooks[event]),
+    );
+  }
+
+  private isCursorHookInstalled(projectPath?: string): boolean {
+    const cursorDir = projectPath
+      ? path.join(projectPath, '.cursor')
+      : path.join(os.homedir(), '.cursor');
+    const hooksConfigPath = path.join(cursorDir, 'hooks.json');
+    const config = this.readJson(hooksConfigPath);
+    if (!config?.hooks) return false;
+
+    const scriptsExist = this.hasAllFiles([
+      path.join(cursorDir, 'hooks', 'agent-pulse.sh'),
+      path.join(cursorDir, 'hooks', 'agent-pulse.ps1'),
+    ]);
+    if (!scriptsExist) return false;
+
+    return ['preToolUse', 'postToolUse', 'postToolUseFailure', 'sessionStart', 'sessionEnd', 'stop'].every((event) =>
+      this.hookArrayHasAgentPulseCommand(config.hooks[event]),
+    );
+  }
+
+  private isCopilotHookInstalled(projectPath?: string): boolean {
+    const hooksDir = projectPath
+      ? path.join(projectPath, '.github', 'hooks')
+      : path.join(os.homedir(), '.copilot', 'hooks');
+    const hookFile = path.join(hooksDir, 'agent-pulse-hooks.json');
+    const config = this.readJson(hookFile);
+    if (!config?.hooks) return false;
+
+    const scriptsExist = this.hasAllFiles([
+      path.join(hooksDir, 'agent-pulse.sh'),
+      path.join(hooksDir, 'agent-pulse.ps1'),
+    ]);
+    if (!scriptsExist) return false;
+
+    return [
+      'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
+      'PreCompact', 'SubagentStart', 'SubagentStop', 'Stop',
+    ].every((event) => this.hookArrayHasAgentPulseCommand(config.hooks[event]));
+  }
+
+  private isCodexHookInstalled(projectPath?: string): boolean {
+    const codexDir = projectPath
+      ? path.join(projectPath, '.codex')
+      : path.join(os.homedir(), '.codex');
+    const hooksConfigPath = path.join(codexDir, 'hooks.json');
+    const config = this.readJson(hooksConfigPath);
+    if (!config?.hooks) return false;
+
+    const scriptsExist = this.hasAllFiles([
+      path.join(codexDir, 'hooks', 'agent-pulse.sh'),
+      path.join(codexDir, 'hooks', 'agent-pulse.ps1'),
+    ]);
+    if (!scriptsExist) return false;
+
+    const tomlPath = path.join(codexDir, 'config.toml');
+    const hooksFlagEnabled = fs.existsSync(tomlPath) && fs.readFileSync(tomlPath, 'utf8').includes('codex_hooks = true');
+    if (!hooksFlagEnabled) return false;
+
+    return ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'PermissionRequest'].every((event) =>
+      this.hookArrayHasAgentPulseCommand(config.hooks[event]),
+    );
+  }
+
+  private isKiroHookInstalled(projectPath?: string): boolean {
+    const kiroDir = projectPath
+      ? path.join(projectPath, '.kiro', 'hooks')
+      : path.join(os.homedir(), '.kiro', 'hooks');
+    const hookFilePath = path.join(kiroDir, 'agent-pulse.kiro.hook');
+    const config = this.readJson(hookFilePath);
+    if (!config?.hooks) return false;
+
+    const scriptsDir = path.join(path.dirname(kiroDir), 'hooks-scripts');
+    const scriptsExist = this.hasAllFiles([
+      path.join(scriptsDir, 'agent-pulse.sh'),
+      path.join(scriptsDir, 'agent-pulse.ps1'),
+    ]);
+    if (!scriptsExist) return false;
+
+    return ['agentSpawn', 'userPromptSubmit', 'preToolUse', 'postToolUse'].every((event) =>
+      this.hookArrayHasAgentPulseCommand(config.hooks[event]),
+    );
+  }
+
+  private isGeminiCliHookInstalled(projectPath?: string): boolean {
+    const geminiDir = projectPath
+      ? path.join(projectPath, '.gemini')
+      : path.join(os.homedir(), '.gemini');
+    const settingsPath = path.join(geminiDir, 'settings.json');
+    const settings = this.readJson(settingsPath);
+    if (!settings?.hooks) return false;
+
+    const scriptsExist = this.hasAllFiles([
+      path.join(geminiDir, 'hooks', 'agent-pulse.sh'),
+      path.join(geminiDir, 'hooks', 'agent-pulse.ps1'),
+    ]);
+    if (!scriptsExist) return false;
+
+    return ['SessionStart', 'SessionEnd', 'BeforeAgent', 'AfterAgent', 'BeforeTool', 'AfterTool', 'Notification'].every((event) =>
+      this.hookArrayHasNamedAgentPulse(settings.hooks[event]),
+    );
   }
 
   /** Bash script: reads stdin JSON, POSTs to the bridge, exits 0 (success / allow). */

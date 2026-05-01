@@ -1,4 +1,4 @@
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, shell } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
 import { SettingsWindow } from './windows/settings-window';
 import { StatusStateManager } from './bridge/state-manager';
@@ -75,7 +75,14 @@ class AgentPulseApp {
     });
 
     ipcMain.handle('detect-tools', async () => {
-      return await this.detector.detectAll();
+      const detected = await this.detector.detectAll();
+      for (const toolId of Object.keys(detected) as ToolId[]) {
+        detected[toolId] = {
+          ...detected[toolId],
+          hookInstalled: this.writer.isHookInstalled(toolId),
+        };
+      }
+      return detected;
     });
 
     ipcMain.handle('install-hook', async (_event, { toolId, projectPath }) => {
@@ -84,6 +91,10 @@ class AgentPulseApp {
 
     ipcMain.handle('uninstall-hook', async (_event, { toolId, projectPath }) => {
       return await this.writer.uninstallHook(toolId, projectPath);
+    });
+
+    ipcMain.handle('open-path', async (_event, filePath: string) => {
+      await shell.openPath(filePath);
     });
   }
 }

@@ -50,24 +50,35 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const prevState = useRef<AgentState | null>(null);
   const chimeRef = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
+    if (typeof Audio === 'undefined') return;
+    const audio = new Audio('./media/pop.wav');
+    audio.volume = 0.4;
+    audio.preload = 'auto';
+    audio.addEventListener('error', () => {
+      console.warn(`[Bubble:${toolId}] chime failed to load`, audio.error);
+    });
+    audio.addEventListener('canplaythrough', () => {
+      // console.log(`[Bubble:${toolId}] chime ready`);
+    });
+    chimeRef.current = audio;
+    audio.load();
+  }, [toolId]);
+  useEffect(() => {
     const prev = prevState.current;
     prevState.current = state;
     if (prev === null || prev === 'waiting' || state !== 'waiting') return;
-    if (typeof Audio === 'undefined') return;
-    if (!chimeRef.current) {
-      const audio = new Audio('./media/pop.wav');
-      audio.volume = 0.4;
-      chimeRef.current = audio;
-    }
     const audio = chimeRef.current;
+    if (!audio) return;
+    // console.log(`[Bubble:${toolId}] playing chime (${prev} → waiting)`);
     audio.currentTime = 0;
     const result = audio.play();
-    // Autoplay can be blocked until the user interacts with the window —
-    // swallow the rejection so it doesn't surface as an unhandled error.
-    if (result && typeof result.catch === 'function') {
-      result.catch(() => {});
+    if (result && typeof result.then === 'function') {
+      // result.then(
+      //   () => console.log(`[Bubble:${toolId}] chime started`),
+      //   (err) => console.warn(`[Bubble:${toolId}] chime play() rejected`, err),
+      // );
     }
-  }, [state]);
+  }, [state, toolId]);
 
   const onMouseEnter = useCallback(() => {
     if (!TOOLTIP_ENABLED) return;
@@ -103,23 +114,23 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   }, []);
 
   useEffect(() => {
-    console.log(`[Bubble:${toolId}] Registering status-update listener`);
+    // console.log(`[Bubble:${toolId}] Registering status-update listener`);
     const handler = (_event: any, incoming: ToolStatus) => {
-      console.log(`[Bubble:${toolId}] status-update received:`, incoming);
+      // console.log(`[Bubble:${toolId}] status-update received:`, incoming);
       if (incoming.toolId === toolId) {
-        console.log(
-          `[Bubble:${toolId}] Applying state update: ${incoming.state}`,
-        );
+        // console.log(
+        //   `[Bubble:${toolId}] Applying state update: ${incoming.state}`,
+        // );
         updateStatus(incoming);
       } else {
-        console.log(
-          `[Bubble:${toolId}] Ignoring update for ${incoming.toolId}`,
-        );
+        // console.log(
+        //   `[Bubble:${toolId}] Ignoring update for ${incoming.toolId}`,
+        // );
       }
     };
     window.electron.on('status-update', handler);
     return () => {
-      console.log(`[Bubble:${toolId}] Removing status-update listener`);
+      // console.log(`[Bubble:${toolId}] Removing status-update listener`);
       window.electron.off('status-update', handler);
     };
   }, [toolId, updateStatus]);

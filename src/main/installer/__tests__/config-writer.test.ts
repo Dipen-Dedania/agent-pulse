@@ -33,6 +33,7 @@ describe('ConfigWriter — claude-code', () => {
     await withFakeHome(async (writer) => {
       const result = await writer.installHook('claude-code');
       expect(result.success).toBe(true);
+      expect(writer.isHookInstalled('claude-code')).toBe(true);
 
       const settingsPath = path.join(tmpDir, '.claude', 'settings.json');
       expect(fs.existsSync(settingsPath)).toBe(true);
@@ -57,6 +58,27 @@ describe('ConfigWriter — claude-code', () => {
       const settingsPath = path.join(tmpDir, '.claude', 'settings.json');
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       expect(settings.hooks).toBeUndefined();
+      expect(writer.isHookInstalled('claude-code')).toBe(false);
+    });
+  });
+
+  it('recognizes legacy installs with the core Claude Code hooks', async () => {
+    await withFakeHome(async (writer) => {
+      const claudeDir = path.join(tmpDir, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      const httpHook = { type: 'http', url: 'http://localhost:4242/event', timeout: 5 };
+      fs.writeFileSync(
+        path.join(claudeDir, 'settings.json'),
+        JSON.stringify({
+          hooks: {
+            PreToolUse: [{ matcher: '*', hooks: [httpHook] }],
+            Stop: [{ hooks: [httpHook] }],
+            StopFailure: [{ hooks: [httpHook] }],
+          },
+        }, null, 2),
+      );
+
+      expect(writer.isHookInstalled('claude-code')).toBe(true);
     });
   });
 });
@@ -85,15 +107,27 @@ describe('ConfigWriter — cursor', () => {
     const projectPath = path.join(tmpDir, 'my-project');
     const writer = new ConfigWriter();
     await writer.installHook('cursor', projectPath);
+    expect(writer.isHookInstalled('cursor', projectPath)).toBe(true);
     writer.uninstallHook('cursor', projectPath);
 
     const shPath = path.join(projectPath, '.cursor', 'hooks', 'agent-pulse.sh');
     expect(fs.existsSync(shPath)).toBe(false);
+    expect(writer.isHookInstalled('cursor', projectPath)).toBe(false);
 
     const hooksJson = path.join(projectPath, '.cursor', 'hooks.json');
     const config = JSON.parse(fs.readFileSync(hooksJson, 'utf8'));
     // hooks key is removed entirely when all events are deleted
     expect(config.hooks).toBeUndefined();
+  });
+
+  it('does not treat a bare hooks.json as an installed hook', async () => {
+    const projectPath = path.join(tmpDir, 'my-project');
+    const cursorDir = path.join(projectPath, '.cursor');
+    fs.mkdirSync(cursorDir, { recursive: true });
+    fs.writeFileSync(path.join(cursorDir, 'hooks.json'), JSON.stringify({ version: 1 }, null, 2));
+
+    const writer = new ConfigWriter();
+    expect(writer.isHookInstalled('cursor', projectPath)).toBe(false);
   });
 });
 
@@ -105,6 +139,7 @@ describe('ConfigWriter — vscode-copilot', () => {
     const writer = new ConfigWriter();
     const result = await writer.installHook('vscode-copilot', projectPath);
     expect(result.success).toBe(true);
+    expect(writer.isHookInstalled('vscode-copilot', projectPath)).toBe(true);
 
     const hookFile = path.join(projectPath, '.github', 'hooks', 'agent-pulse-hooks.json');
     expect(fs.existsSync(hookFile)).toBe(true);
@@ -163,6 +198,7 @@ describe('ConfigWriter — vscode-copilot', () => {
 
     const hookFile = path.join(projectPath, '.github', 'hooks', 'agent-pulse-hooks.json');
     expect(fs.existsSync(hookFile)).toBe(false);
+    expect(writer.isHookInstalled('vscode-copilot', projectPath)).toBe(false);
   });
 });
 
@@ -173,6 +209,7 @@ describe('ConfigWriter — openai-codex', () => {
     await withFakeHome(async (writer) => {
       const result = await writer.installHook('openai-codex');
       expect(result.success).toBe(true);
+      expect(writer.isHookInstalled('openai-codex')).toBe(true);
 
       const hooksJson = path.join(tmpDir, '.codex', 'hooks.json');
       expect(fs.existsSync(hooksJson)).toBe(true);
@@ -196,6 +233,7 @@ describe('ConfigWriter — openai-codex', () => {
 
       const shPath = path.join(tmpDir, '.codex', 'hooks', 'agent-pulse.sh');
       expect(fs.existsSync(shPath)).toBe(false);
+      expect(writer.isHookInstalled('openai-codex')).toBe(false);
     });
   });
 });
@@ -208,6 +246,7 @@ describe('ConfigWriter — kiro', () => {
     const writer = new ConfigWriter();
     const result = await writer.installHook('kiro', projectPath);
     expect(result.success).toBe(true);
+    expect(writer.isHookInstalled('kiro', projectPath)).toBe(true);
 
     const hookFile = path.join(projectPath, '.kiro', 'hooks', 'agent-pulse.kiro.hook');
     expect(fs.existsSync(hookFile)).toBe(true);
@@ -252,6 +291,7 @@ describe('ConfigWriter — kiro', () => {
     const scriptsDir = path.join(projectPath, '.kiro', 'hooks-scripts');
     expect(fs.existsSync(path.join(scriptsDir, 'agent-pulse.sh'))).toBe(false);
     expect(fs.existsSync(path.join(scriptsDir, 'agent-pulse.ps1'))).toBe(false);
+    expect(writer.isHookInstalled('kiro', projectPath)).toBe(false);
   });
 
   it('falls back to ~/.kiro/hooks when no projectPath given', async () => {
@@ -272,6 +312,7 @@ describe('ConfigWriter — gemini-cli', () => {
     await withFakeHome(async (writer) => {
       const result = await writer.installHook('gemini-cli');
       expect(result.success).toBe(true);
+      expect(writer.isHookInstalled('gemini-cli')).toBe(true);
 
       const settingsPath = path.join(tmpDir, '.gemini', 'settings.json');
       expect(fs.existsSync(settingsPath)).toBe(true);
@@ -363,6 +404,7 @@ describe('ConfigWriter — gemini-cli', () => {
       expect(fs.existsSync(shPath)).toBe(false);
       const ps1Path = path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.ps1');
       expect(fs.existsSync(ps1Path)).toBe(false);
+      expect(writer.isHookInstalled('gemini-cli')).toBe(false);
     });
   });
 });

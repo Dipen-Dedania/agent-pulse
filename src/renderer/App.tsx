@@ -34,7 +34,7 @@ const App: React.FC = () => {
           alt='Agent Pulse'
           className='w-24 h-24 sm:w-20 sm:h-20 mx-auto mb-4 object-contain drop-shadow-[0_8px_32px_rgba(59,130,246,0.35)]'
         />
-        <h1 className='text-6xl font-extrabold tracking-tight mb-6 bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-400'>
+        <h1 className='text-6xl font-extrabold tracking-tight mb-6 pb-5 bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-400'>
           Agent Pulse
         </h1>
         <p className='text-xl text-slate-400 mb-10 leading-relaxed'>

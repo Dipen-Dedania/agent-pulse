@@ -15,7 +15,7 @@ function getAppIconPath(): string {
 export class BubbleManager {
   private bubbles: Map<ToolId, BrowserWindow> = new Map();
 
-  private static readonly BUBBLE_SIZE = 75;
+  private static readonly BUBBLE_SIZE = 70;
   private static readonly TOOLTIP_HEIGHT = 110;
   private static readonly EDGE_PADDING = 20;
   private static readonly STACK_GAP = 4;
@@ -113,10 +113,10 @@ export class BubbleManager {
     // Start click-through; renderer will toggle per-pixel via 'set-ignore-mouse'
     window.setIgnoreMouseEvents(true, { forward: true });
 
-    if (process.env.NODE_ENV === 'development') {
+    if (!app.isPackaged) {
       window.loadURL(`http://localhost:5173/bubble?toolId=${toolId}`);
     } else {
-      window.loadFile(path.join(__dirname, '../../renderer/index.html'), {
+      window.loadFile(path.join(app.getAppPath(), 'dist', 'renderer', 'index.html'), {
         query: { toolId },
       });
     }

@@ -1,6 +1,7 @@
 import http from 'http';
 import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
+import { BRIDGE_PORT } from './bridge/config';
 
 async function runTest() {
   console.log('🚀 Starting Status Bridge Smoke Test...');
@@ -20,7 +21,7 @@ async function runTest() {
     await new Promise((resolve) => {
       const req = http.request({
         hostname: 'localhost',
-        port: 4242,
+        port: BRIDGE_PORT,
         path: '/event',
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

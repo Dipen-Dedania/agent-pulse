@@ -1,10 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { BRIDGE_URL } from '../bridge/config';
 import { ToolId } from '../../common/types';
 
 export class ConfigWriter {
-  private bridgeUrl = 'http://localhost:4242/event';
+  private bridgeUrl = BRIDGE_URL;
 
   public async installHook(toolId: ToolId, projectPath?: string) {
     switch (toolId) {
@@ -212,6 +213,7 @@ exit 0
     existing.hooks.PreToolUse        = [group];
     existing.hooks.PostToolUse       = [group];
     existing.hooks.Stop              = [group];
+    existing.hooks.PermissionRequest = [group];
 
     fs.writeFileSync(hooksConfigPath, JSON.stringify(existing, null, 2));
 
@@ -427,9 +429,11 @@ exit 0
 
     settings.hooks = {
       ...(settings.hooks || {}),
-      PreToolUse:  [{ matcher: '*', hooks: [httpHook] }],
-      Stop:        [{ hooks: [httpHook] }],
-      StopFailure: [{ hooks: [httpHook] }],
+      PreToolUse:        [{ matcher: '*', hooks: [httpHook] }],
+      Stop:              [{ hooks: [httpHook] }],
+      StopFailure:       [{ hooks: [httpHook] }],
+      PermissionRequest: [{ hooks: [httpHook] }],
+      Elicitation:       [{ hooks: [httpHook] }],
     };
 
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
@@ -445,6 +449,8 @@ exit 0
         delete settings.hooks?.PreToolUse;
         delete settings.hooks?.Stop;
         delete settings.hooks?.StopFailure;
+        delete settings.hooks?.PermissionRequest;
+        delete settings.hooks?.Elicitation;
         if (settings.hooks && Object.keys(settings.hooks).length === 0) {
           delete settings.hooks;
         }
@@ -499,7 +505,7 @@ exit 0
       if (fs.existsSync(hooksConfigPath)) {
         try {
           const config = JSON.parse(fs.readFileSync(hooksConfigPath, 'utf8'));
-          for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) {
+          for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'PermissionRequest']) {
             delete config.hooks?.[event];
           }
           if (config.hooks && Object.keys(config.hooks).length === 0) delete config.hooks;

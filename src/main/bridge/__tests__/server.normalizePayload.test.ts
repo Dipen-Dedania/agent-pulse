@@ -60,16 +60,24 @@ describe('Claude Code events', () => {
     expect(normalizePayload(cc('UserPromptSubmit'))?.state).toBe('working');
   });
 
-  it('Stop → waiting', () => {
-    expect(normalizePayload(cc('Stop'))?.state).toBe('waiting');
+  it('Stop → idle-active', () => {
+    expect(normalizePayload(cc('Stop'))?.state).toBe('idle-active');
   });
 
-  it('PostToolUse → idle', () => {
-    expect(normalizePayload(cc('PostToolUse'))?.state).toBe('idle');
+  it('PermissionRequest → waiting', () => {
+    expect(normalizePayload(cc('PermissionRequest'))?.state).toBe('waiting');
   });
 
-  it('SessionEnd → idle', () => {
-    expect(normalizePayload(cc('SessionEnd'))?.state).toBe('idle');
+  it('Elicitation → waiting', () => {
+    expect(normalizePayload(cc('Elicitation'))?.state).toBe('waiting');
+  });
+
+  it('PostToolUse → idle-active', () => {
+    expect(normalizePayload(cc('PostToolUse'))?.state).toBe('idle-active');
+  });
+
+  it('SessionEnd → idle-active', () => {
+    expect(normalizePayload(cc('SessionEnd'))?.state).toBe('idle-active');
   });
 
   it('StopFailure → error', () => {
@@ -97,7 +105,7 @@ describe('Claude Code events', () => {
     };
     const r = normalizePayload(payload);
     expect(r?.toolId).toBe('claude-code');
-    expect(r?.state).toBe('waiting');
+    expect(r?.state).toBe('idle-active');
   });
 });
 
@@ -113,16 +121,16 @@ describe('Cursor events', () => {
     expect(normalizePayload(cursor('preToolUse'))?.state).toBe('working');
   });
 
-  it('postToolUse → idle', () => {
-    expect(normalizePayload(cursor('postToolUse'))?.state).toBe('idle');
+  it('postToolUse → idle-active', () => {
+    expect(normalizePayload(cursor('postToolUse'))?.state).toBe('idle-active');
   });
 
-  it('stop → waiting', () => {
-    expect(normalizePayload(cursor('stop'))?.state).toBe('waiting');
+  it('stop → idle-active', () => {
+    expect(normalizePayload(cursor('stop'))?.state).toBe('idle-active');
   });
 
-  it('sessionEnd → idle', () => {
-    expect(normalizePayload(cursor('sessionEnd'))?.state).toBe('idle');
+  it('sessionEnd → idle-active', () => {
+    expect(normalizePayload(cursor('sessionEnd'))?.state).toBe('idle-active');
   });
 
   it('postToolUseFailure → error', () => {
@@ -157,7 +165,7 @@ describe('Cursor events', () => {
     };
     const r = normalizePayload(payload);
     expect(r?.toolId).toBe('cursor');
-    expect(r?.state).toBe('idle');
+    expect(r?.state).toBe('idle-active');
   });
 });
 
@@ -185,16 +193,16 @@ describe('VS Code Copilot events', () => {
     expect(normalizePayload(copilot('SubagentStart'))?.state).toBe('working');
   });
 
-  it('PostToolUse → idle', () => {
-    expect(normalizePayload(copilot('PostToolUse'))?.state).toBe('idle');
+  it('PostToolUse → idle-active', () => {
+    expect(normalizePayload(copilot('PostToolUse'))?.state).toBe('idle-active');
   });
 
-  it('Stop → waiting', () => {
-    expect(normalizePayload(copilot('Stop'))?.state).toBe('waiting');
+  it('Stop → idle-active', () => {
+    expect(normalizePayload(copilot('Stop'))?.state).toBe('idle-active');
   });
 
-  it('SubagentStop → idle', () => {
-    expect(normalizePayload(copilot('SubagentStop'))?.state).toBe('idle');
+  it('SubagentStop → idle-active', () => {
+    expect(normalizePayload(copilot('SubagentStop'))?.state).toBe('idle-active');
   });
 
   it('unknown Copilot event → null', () => {
@@ -218,12 +226,16 @@ describe('OpenAI Codex events', () => {
     expect(normalizePayload(codex('PreToolUse'))?.state).toBe('working');
   });
 
-  it('PostToolUse → idle', () => {
-    expect(normalizePayload(codex('PostToolUse'))?.state).toBe('idle');
+  it('PostToolUse → idle-active', () => {
+    expect(normalizePayload(codex('PostToolUse'))?.state).toBe('idle-active');
   });
 
-  it('Stop → waiting', () => {
-    expect(normalizePayload(codex('Stop'))?.state).toBe('waiting');
+  it('Stop → idle-active', () => {
+    expect(normalizePayload(codex('Stop'))?.state).toBe('idle-active');
+  });
+
+  it('PermissionRequest → waiting', () => {
+    expect(normalizePayload(codex('PermissionRequest'))?.state).toBe('waiting');
   });
 
   it('unknown Codex event → null', () => {
@@ -250,8 +262,8 @@ describe('Kiro events', () => {
     expect(normalizePayload(kiroByVersion('preToolUse'))?.state).toBe('working');
   });
 
-  it('postToolUse → idle', () => {
-    expect(normalizePayload(kiroByVersion('postToolUse'))?.state).toBe('idle');
+  it('postToolUse → idle-active', () => {
+    expect(normalizePayload(kiroByVersion('postToolUse'))?.state).toBe('idle-active');
   });
 
   it('unknown Kiro event → null', () => {
@@ -291,24 +303,24 @@ describe('Gemini CLI events', () => {
     expect(normalizePayload(gemini('BeforeToolSelection'))?.state).toBe('working');
   });
 
-  it('AfterAgent → waiting', () => {
-    expect(normalizePayload(gemini('AfterAgent'))?.state).toBe('waiting');
+  it('AfterAgent → idle-active (agent loop ended, user not blocked)', () => {
+    expect(normalizePayload(gemini('AfterAgent'))?.state).toBe('idle-active');
   });
 
-  it('Notification → waiting', () => {
+  it('Notification → waiting (CLI is blocked on user attention)', () => {
     expect(normalizePayload(gemini('Notification'))?.state).toBe('waiting');
   });
 
-  it('SessionEnd → idle', () => {
-    expect(normalizePayload(gemini('SessionEnd'))?.state).toBe('idle');
+  it('SessionEnd → idle-active', () => {
+    expect(normalizePayload(gemini('SessionEnd'))?.state).toBe('idle-active');
   });
 
-  it('AfterTool → idle', () => {
-    expect(normalizePayload(gemini('AfterTool'))?.state).toBe('idle');
+  it('AfterTool → idle-active', () => {
+    expect(normalizePayload(gemini('AfterTool'))?.state).toBe('idle-active');
   });
 
-  it('AfterModel → idle', () => {
-    expect(normalizePayload(gemini('AfterModel'))?.state).toBe('idle');
+  it('AfterModel → idle-active', () => {
+    expect(normalizePayload(gemini('AfterModel'))?.state).toBe('idle-active');
   });
 
   it('unknown Gemini event → null', () => {

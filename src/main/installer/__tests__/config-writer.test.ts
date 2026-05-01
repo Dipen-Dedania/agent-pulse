@@ -41,6 +41,8 @@ describe('ConfigWriter — claude-code', () => {
       expect(settings.hooks.PreToolUse).toBeDefined();
       expect(settings.hooks.Stop).toBeDefined();
       expect(settings.hooks.StopFailure).toBeDefined();
+      expect(settings.hooks.PermissionRequest).toBeDefined();
+      expect(settings.hooks.Elicitation).toBeDefined();
       const hook = settings.hooks.PreToolUse[0].hooks[0];
       expect(hook.type).toBe('http');
       expect(hook.url).toBe('http://localhost:4242/event');

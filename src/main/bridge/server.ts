@@ -1,31 +1,34 @@
 import http from 'http';
 import { StatusStateManager } from './state-manager';
+import { BRIDGE_PORT } from './config';
 import { ToolId, AgentState } from '../../common/types';
 
 // Claude Code hook event names → AgentState
-// Stop = agent finished its turn and is waiting for user input / permission (amber)
-// SessionEnd = user ended the session entirely (grey/idle)
-const CC_WAITING_EVENTS = new Set(['Stop']);
+// `waiting` = agent is *blocked* on the user (permission grant / elicitation response).
+// `idle-active` = turn finished, session alive, ball is in the user's court but nothing is blocked.
+// PermissionRequest / Elicitation = blocked → waiting
+// Stop / PostToolUse / SessionEnd / TeammateIdle = turn boundary → idle-active
+const CC_WAITING_EVENTS = new Set(['PermissionRequest', 'Elicitation']);
 const CC_WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SubagentStart']);
-const CC_IDLE_EVENTS    = new Set(['PostToolUse', 'SessionEnd', 'TeammateIdle']);
+const CC_IDLE_EVENTS    = new Set(['Stop', 'PostToolUse', 'SessionEnd', 'TeammateIdle']);
 const CC_ERROR_EVENTS   = new Set(['StopFailure', 'PostToolUseFailure']);
 
 // Codex hook event names → AgentState (PascalCase, same as CC but detected via turn_id)
-const CODEX_WAITING_EVENTS = new Set(['Stop']);
+const CODEX_WAITING_EVENTS = new Set(['PermissionRequest']);
 const CODEX_WORKING_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse']);
-const CODEX_IDLE_EVENTS    = new Set(['PostToolUse']);
+const CODEX_IDLE_EVENTS    = new Set(['Stop', 'PostToolUse']);
 
 // Cursor hook event names → AgentState (camelCase per Cursor docs)
-const CURSOR_WAITING_EVENTS = new Set(['stop']);
+const CURSOR_WAITING_EVENTS = new Set<string>([]);
 const CURSOR_WORKING_EVENTS = new Set(['sessionStart', 'preToolUse', 'subagentStart']);
-const CURSOR_IDLE_EVENTS    = new Set(['postToolUse', 'sessionEnd', 'subagentStop']);
+const CURSOR_IDLE_EVENTS    = new Set(['stop', 'postToolUse', 'sessionEnd', 'subagentStop']);
 const CURSOR_ERROR_EVENTS   = new Set(['postToolUseFailure']);
 
 // VS Code Copilot hook event names → AgentState
 // Uses camelCase hookEventName field (distinguishes it from CC/Codex's hook_event_name)
-const COPILOT_WAITING_EVENTS = new Set(['Stop']);
+const COPILOT_WAITING_EVENTS = new Set<string>([]);
 const COPILOT_WORKING_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreCompact', 'PreToolUse', 'SubagentStart']);
-const COPILOT_IDLE_EVENTS    = new Set(['PostToolUse', 'SubagentStop']);
+const COPILOT_IDLE_EVENTS    = new Set(['Stop', 'PostToolUse', 'SubagentStop']);
 
 // Kiro hook event names → AgentState (hook_event_name field, has kiro_version or source='kiro')
 const KIRO_WAITING_EVENTS = new Set<string>([]);
@@ -33,17 +36,21 @@ const KIRO_WORKING_EVENTS = new Set(['agentSpawn', 'userPromptSubmit', 'preToolU
 const KIRO_IDLE_EVENTS    = new Set(['postToolUse']);
 
 // Gemini CLI hook event names → AgentState (detected via _ap_tool: 'gemini-cli' injected by our hook script)
+// `waiting` is reserved for events where the CLI is *blocked* on the user (Notification —
+// e.g. tool-confirmation prompts). `AfterAgent` only means the agent loop ended and the
+// next user prompt is welcome but not blocking, which matches our `idle-active` semantics
+// (analogous to Claude Code's `Stop`).
 const GEMINI_WORKING_EVENTS = new Set(['SessionStart', 'BeforeAgent', 'BeforeTool', 'BeforeModel', 'BeforeToolSelection']);
-const GEMINI_WAITING_EVENTS = new Set(['AfterAgent', 'Notification']);
-const GEMINI_IDLE_EVENTS    = new Set(['SessionEnd', 'AfterTool', 'AfterModel']);
+const GEMINI_WAITING_EVENTS = new Set(['Notification']);
+const GEMINI_IDLE_EVENTS    = new Set(['SessionEnd', 'AfterAgent', 'AfterTool', 'AfterModel']);
 
 const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'gemini-cli'];
-const VALID_STATES: AgentState[] = ['working', 'waiting', 'idle', 'error'];
+const VALID_STATES: AgentState[] = ['working', 'waiting', 'idle', 'idle-active', 'error'];
 
 export class StatusBridgeServer {
   private server: http.Server;
   private stateManager: StatusStateManager;
-  private port: number = 4242;
+  private port: number = BRIDGE_PORT;
 
   constructor(stateManager: StatusStateManager) {
     this.stateManager = stateManager;
@@ -137,7 +144,7 @@ export class StatusBridgeServer {
           if (toolName === 'agent_working') {
             this.stateManager.updateStatus('cursor', 'working', {});
           } else if (toolName === 'agent_idle') {
-            this.stateManager.updateStatus('cursor', 'idle', {});
+            this.stateManager.updateStatus('cursor', 'idle-active', {});
           }
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -209,7 +216,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         let state: AgentState;
         if (CODEX_WAITING_EVENTS.has(eventName))      state = 'waiting';
         else if (CODEX_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (CODEX_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else if (CODEX_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
           console.log(`Ignoring unmapped Codex event: ${eventName}`);
           return null;
@@ -234,7 +241,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         let state: AgentState;
         if (GEMINI_WAITING_EVENTS.has(eventName))      state = 'waiting';
         else if (GEMINI_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (GEMINI_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else if (GEMINI_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
           console.log(`Ignoring unmapped Gemini CLI event: ${eventName}`);
           return null;
@@ -255,7 +262,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         let state: AgentState;
         if (CURSOR_WAITING_EVENTS.has(eventName))      state = 'waiting';
         else if (CURSOR_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (CURSOR_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else if (CURSOR_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else if (CURSOR_ERROR_EVENTS.has(eventName))   state = 'error';
         else {
           console.log(`Ignoring unmapped Cursor event: ${eventName}`);
@@ -277,7 +284,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         let state: AgentState;
         if (KIRO_WAITING_EVENTS.has(eventName))      state = 'waiting';
         else if (KIRO_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (KIRO_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else if (KIRO_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
           console.log(`Ignoring unmapped Kiro event: ${eventName}`);
           return null;
@@ -298,7 +305,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         let state: AgentState;
         if (CC_WAITING_EVENTS.has(eventName))      state = 'waiting';
         else if (CC_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (CC_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else if (CC_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else if (CC_ERROR_EVENTS.has(eventName))   state = 'error';
         else {
           console.log(`Ignoring unmapped Claude Code event: ${eventName}`);
@@ -321,7 +328,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         let state: AgentState;
         if (COPILOT_WAITING_EVENTS.has(eventName))      state = 'waiting';
         else if (COPILOT_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (COPILOT_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else if (COPILOT_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
           console.log(`Ignoring unmapped Copilot event: ${eventName}`);
           return null;
@@ -341,7 +348,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         let state: AgentState;
         if (CODEX_WAITING_EVENTS.has(eventName))      state = 'waiting';
         else if (CODEX_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (CODEX_IDLE_EVENTS.has(eventName))    state = 'idle';
+        else if (CODEX_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
           console.log(`Ignoring unmapped Codex event: ${eventName}`);
           return null;
@@ -360,7 +367,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
       let state: AgentState;
       if (CC_WAITING_EVENTS.has(eventName))      state = 'waiting';
       else if (CC_WORKING_EVENTS.has(eventName)) state = 'working';
-      else if (CC_IDLE_EVENTS.has(eventName))    state = 'idle';
+      else if (CC_IDLE_EVENTS.has(eventName))    state = 'idle-active';
       else if (CC_ERROR_EVENTS.has(eventName))   state = 'error';
       else {
         console.log(`Ignoring unmapped Claude Code event: ${eventName}`);

@@ -54,10 +54,7 @@ export class ToolDetector {
     const home = os.homedir();
     const candidates =
       process.platform === 'win32'
-        ? [
-            path.join(home, 'AppData', 'Local', 'Programs', 'cursor'),
-            'C:\\Program Files\\Cursor',
-          ]
+        ? this.windowsCursorCandidates(home)
         : process.platform === 'darwin'
           ? ['/Applications/Cursor.app', path.join(home, 'Applications', 'Cursor.app')]
           : ['/usr/local/bin/cursor', '/usr/bin/cursor', '/opt/cursor'];
@@ -68,6 +65,21 @@ export class ToolDetector {
     const cliPath = this.whichCommand('cursor');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
+  }
+
+  private windowsCursorCandidates(home: string): string[] {
+    // Resolve Program Files dynamically — hard-coding `C:\Program Files` misses
+    // localized installs (some Windows SKUs use a translated folder name) and
+    // 32-bit installs under `Program Files (x86)`. Both env vars are populated
+    // by Windows itself.
+    const programFiles    = process.env['ProgramFiles']      ?? 'C:\\Program Files';
+    const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
+    return [
+      path.join(home, 'AppData', 'Local', 'Programs', 'cursor'),
+      path.join(home, 'AppData', 'Local', 'Programs', 'Cursor'),
+      path.join(programFiles, 'Cursor'),
+      path.join(programFilesX86, 'Cursor'),
+    ];
   }
 
   private detectVSCodeCopilot(): ToolDetection {

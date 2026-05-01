@@ -83,7 +83,7 @@ import { Bubble } from '../Bubble';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const ALL_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro'];
-const ALL_STATES: AgentState[] = ['idle', 'waiting', 'working', 'error'];
+const ALL_STATES: AgentState[] = ['idle', 'idle-active', 'waiting', 'working', 'error'];
 
 function renderBubble(toolId: ToolId) {
   const { container } = render(<Bubble toolId={toolId} />);
@@ -132,6 +132,28 @@ describe('Bubble animation behaviour', () => {
       });
     });
 
+    describe('state: idle-active', () => {
+      beforeEach(() => { mockState = 'idle-active'; });
+
+      it('has scale and opacity in animation variant', () => {
+        const anim = getAnimateValue(renderBubble(toolId));
+        expect(anim).not.toBeNull();
+        expect(anim).toHaveProperty('scale');
+        expect(anim).toHaveProperty('opacity');
+      });
+
+      it('does NOT render an orbiting ring', () => {
+        const container = renderBubble(toolId);
+        const rings = container.querySelectorAll('[data-testid="motion-div"]:not(.relative)');
+        expect(rings.length).toBe(0);
+      });
+
+      it('does NOT render an error dot', () => {
+        const container = renderBubble(toolId);
+        expect(container.querySelector('.-top-1.-right-1')).toBeNull();
+      });
+    });
+
     describe('state: waiting', () => {
       beforeEach(() => { mockState = 'waiting'; });
 
@@ -140,7 +162,7 @@ describe('Bubble animation behaviour', () => {
         expect(anim).toHaveProperty('opacity');
       });
 
-      it('renders the dotted amber orbiting ring', () => {
+      it('renders the dotted blue orbiting ring', () => {
         const container = renderBubble(toolId);
         const rings = container.querySelectorAll('[data-testid="motion-div"]:not(.relative)');
         expect(rings.length).toBe(1);
@@ -161,7 +183,7 @@ describe('Bubble animation behaviour', () => {
         expect(anim).toHaveProperty('scale');
       });
 
-      it('renders the dashed blue orbiting ring', () => {
+      it('renders the dashed green orbiting ring', () => {
         const container = renderBubble(toolId);
         const rings = container.querySelectorAll('[data-testid="motion-div"]:not(.relative)');
         expect(rings.length).toBe(1);

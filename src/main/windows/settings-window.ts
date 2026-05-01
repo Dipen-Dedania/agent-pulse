@@ -34,11 +34,14 @@ export class SettingsWindow {
       },
     });
 
-    // In production, we'd load the dist/renderer/index.html
-    if (process.env.NODE_ENV === 'development') {
+    // app.isPackaged is the canonical Electron signal: false during `electron .`,
+    // true once the app is bundled. Avoids the trap where NODE_ENV is unset (or
+    // leaked as "development") in a packaged build, which sent the window to a
+    // dead Vite URL.
+    if (!app.isPackaged) {
       this.window.loadURL('http://localhost:5173');
     } else {
-      this.window.loadFile(path.join(__dirname, '../../renderer/index.html'));
+      this.window.loadFile(path.join(app.getAppPath(), 'dist', 'renderer', 'index.html'));
     }
 
     this.window.on('closed', () => {

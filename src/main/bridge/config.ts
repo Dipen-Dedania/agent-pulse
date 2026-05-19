@@ -5,6 +5,8 @@
 // shortcut or the user's shell profile). Hook scripts bake the URL in at install
 // time, so changing the port requires reinstalling hooks from Settings.
 
+import { logger } from '../../common/logger';
+
 const DEFAULT_PORT = 4242;
 
 function resolvePort(): number {
@@ -12,7 +14,7 @@ function resolvePort(): number {
   if (!raw) return DEFAULT_PORT;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
-    console.warn(`[BridgeConfig] Ignoring invalid AGENT_PULSE_PORT="${raw}", falling back to ${DEFAULT_PORT}`);
+    logger.warn(`[BridgeConfig] Ignoring invalid AGENT_PULSE_PORT="${raw}", falling back to ${DEFAULT_PORT}`);
     return DEFAULT_PORT;
   }
   return n;

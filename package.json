@@ -10,6 +10,9 @@
     "build": "npm run build:main && npm run build:renderer",
     "dev:main": "npm run build:main && cross-env NODE_ENV=development electron dist/main/index.js",
     "start": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:main\"",
+    "start:info": "cross-env AGENT_PULSE_LOG_LEVEL=info npm start",
+    "start:warn": "cross-env AGENT_PULSE_LOG_LEVEL=warn npm start",
+    "start:error": "cross-env AGENT_PULSE_LOG_LEVEL=error npm start",
     "test:bridge": "tsx src/main/test-bridge.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -53,7 +56,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "public/assets/favicon/android-chrome-512x512.png"
@@ -68,7 +73,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "icon": "public/assets/favicon/android-chrome-512x512.png",
@@ -84,6 +92,7 @@
   },
   "dependencies": {
     "framer-motion": "^12.38.0",
+    "open": "^8.4.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "zustand": "^5.0.12"

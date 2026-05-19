@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ToolId } from '../../../common/types';
+import { ToolId, UsageStatus } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
+import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
+import { UsageSection, UsageConfigUI } from './UsageSection';
 
 interface ToolConfig {
   enabled: boolean;
@@ -123,32 +125,101 @@ export const SettingsPanel: React.FC = () => {
   );
   const [loading, setLoading] = useState(false);
   const [activeInfo, setActiveInfo] = useState<ToolId | null>(null);
+  const [usageConfig, setUsageConfig] = useState<UsageConfigUI | null>(null);
+  const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
+
+  const getBubbleStates = React.useCallback(async (
+    config?: { enabledBubbles?: Partial<Record<ToolId, boolean>> },
+  ): Promise<Partial<Record<ToolId, boolean>>> => {
+    try {
+      return await window.electron.invoke('get-bubble-states');
+    } catch (error) {
+      logger.warn('[SettingsPanel] get-bubble-states unavailable; using saved config', error);
+      return config?.enabledBubbles ?? {};
+    }
+  }, []);
 
   useEffect(() => {
     async function init() {
       setLoading(true);
-      const [detected, config] = await Promise.all([
-        window.electron.invoke('detect-tools'),
-        window.electron.invoke('get-config'),
-      ]);
-      const toolList = Object.keys(TOOL_META) as ToolId[];
-      const initialTools = {} as Record<ToolId, ToolConfig>;
-      toolList.forEach((id) => {
-        const det = detected[id];
-        // Back-compat: detector may return boolean or { installed, location }
-        const isObj = det && typeof det === 'object';
-        initialTools[id] = {
-          enabled: config?.enabledBubbles?.[id] ?? false,
-          appInstalled: isObj ? !!det.installed : !!det,
-          hookInstalled: isObj ? !!det.hookInstalled : false,
-          location: isObj ? det.location : undefined,
-        };
-      });
-      setTools(initialTools);
-      setLoading(false);
+      try {
+        const [detected, config] = await Promise.all([
+          window.electron.invoke('detect-tools'),
+          window.electron.invoke('get-config'),
+        ]);
+        const bubbleStates = await getBubbleStates(config);
+        const toolList = Object.keys(TOOL_META) as ToolId[];
+        const initialTools = {} as Record<ToolId, ToolConfig>;
+        toolList.forEach((id) => {
+          const det = detected[id];
+          // Back-compat: detector may return boolean or { installed, location }
+          const isObj = det && typeof det === 'object';
+          initialTools[id] = {
+            enabled: !!config?.enabledBubbles?.[id] && !!bubbleStates?.[id],
+            appInstalled: isObj ? !!det.installed : !!det,
+            hookInstalled: isObj ? !!det.hookInstalled : false,
+            location: isObj ? det.location : undefined,
+          };
+        });
+        setTools(initialTools);
+        if (config?.usage) setUsageConfig(config.usage);
+
+        const initialUsage = await window.electron.invoke('usage:get-current').catch(() => null);
+        if (initialUsage) setUsageStatus(initialUsage);
+      } catch (error) {
+        logger.error('[SettingsPanel] failed to initialize settings', error);
+      } finally {
+        setLoading(false);
+      }
     }
     init();
+  }, [getBubbleStates]);
+
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: UsageStatus) => setUsageStatus(incoming);
+    window.electron.on('usage:updated', handler);
+    return () => window.electron.off('usage:updated', handler);
   }, []);
+
+  const handleUsageConfigChange = async (partial: Partial<UsageConfigUI>) => {
+    try {
+      const updated = await window.electron.invoke('usage:update-config', partial);
+      setUsageConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update usage config', e);
+    }
+  };
+
+  const handleUsageRefresh = () => {
+    window.electron.send('usage:refresh-now');
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshBubbleStates() {
+      const bubbleStates = await getBubbleStates();
+      if (cancelled) return;
+      setTools((prev) => {
+        const next = { ...prev };
+        (Object.keys(next) as ToolId[]).forEach((id) => {
+          next[id] = { ...next[id], enabled: !!bubbleStates?.[id] };
+        });
+        return next;
+      });
+    }
+
+    const interval = window.setInterval(() => {
+      refreshBubbleStates().catch((error) => {
+        logger.warn('[SettingsPanel] failed to refresh bubble states', error);
+      });
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [getBubbleStates]);
 
   const handleToggleBubble = (toolId: ToolId, enabled: boolean) => {
     window.electron.send('toggle-bubble', { toolId, enabled });
@@ -358,6 +429,15 @@ export const SettingsPanel: React.FC = () => {
             );
           })}
         </div>
+      )}
+
+      {usageConfig && (
+        <UsageSection
+          config={usageConfig}
+          status={usageStatus}
+          onChange={handleUsageConfigChange}
+          onRefresh={handleUsageRefresh}
+        />
       )}
 
       <StatesReference />

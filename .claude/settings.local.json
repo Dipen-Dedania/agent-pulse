@@ -34,7 +34,8 @@
       "Bash(gemini --version)",
       "Bash(xxd)",
       "Bash(gh pr *)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Read(//c/Users/ZTI Tech Lead/.claude/**)"
     ],
     "deny": [
       "Read(./.env*)",

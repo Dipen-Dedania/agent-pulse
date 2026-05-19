@@ -604,8 +604,9 @@ exit 0
       PreToolUse:        [{ matcher: '*', hooks: [httpHook] }],
       Stop:              [{ hooks: [httpHook] }],
       StopFailure:       [{ hooks: [httpHook] }],
-      PermissionRequest: [{ hooks: [httpHook] }],
-      Elicitation:       [{ hooks: [httpHook] }],
+      PermissionRequest: [{ matcher: '*', hooks: [httpHook] }],
+      Elicitation:       [{ matcher: '*', hooks: [httpHook] }],
+      Notification:      [{ matcher: '*', hooks: [httpHook] }],
     };
 
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
@@ -623,6 +624,7 @@ exit 0
         delete settings.hooks?.StopFailure;
         delete settings.hooks?.PermissionRequest;
         delete settings.hooks?.Elicitation;
+        delete settings.hooks?.Notification;
         if (settings.hooks && Object.keys(settings.hooks).length === 0) {
           delete settings.hooks;
         }

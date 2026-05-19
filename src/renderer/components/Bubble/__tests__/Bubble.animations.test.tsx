@@ -10,7 +10,7 @@ vi.mock('../../../electron.d.ts', () => ({}));
 
 const mockElectron = {
   send: vi.fn(),
-  invoke: vi.fn(),
+  invoke: vi.fn().mockResolvedValue(undefined),
   on: vi.fn(),
   off: vi.fn(),
 };

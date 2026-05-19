@@ -1,12 +1,13 @@
 import { ToolId, ToolStatus, AgentState } from '../../common/types';
 import { app, BrowserWindow } from 'electron';
+import { logger } from '../../common/logger';
 
 export class StatusStateManager {
   private statuses: Map<ToolId, ToolStatus> = new Map();
 
   public updateStatus(toolId: ToolId, state: AgentState, details: any) {
     const current = this.statuses.get(toolId);
-    console.log(`[StateManager] updateStatus called: toolId=${toolId} state=${state}`);
+    logger.debug(`[StateManager] updateStatus called: toolId=${toolId} state=${state}`);
 
     const updatedStatus: ToolStatus = {
       toolId,
@@ -33,18 +34,23 @@ export class StatusStateManager {
       const { BrowserWindow } = require('electron');
       if (BrowserWindow && BrowserWindow.getAllWindows) {
         const windows = BrowserWindow.getAllWindows();
-        console.log(`[StateManager] Broadcasting status-update to ${windows.length} window(s):`, JSON.stringify(status));
+        logger.debug(`[StateManager] Broadcasting status-update to ${windows.length} window(s):`, JSON.stringify(status));
         windows.forEach((win: any, idx: number) => {
-          console.log(`[StateManager]   -> window[${idx}] title="${win.getTitle()}" destroyed=${win.isDestroyed()}`);
+          const webContentsDestroyed = win.webContents?.isDestroyed?.() ?? true;
+          const url = webContentsDestroyed ? '<webContents destroyed>' : win.webContents.getURL();
+          const bounds = win.isDestroyed() ? null : win.getBounds();
+          logger.debug(
+            `[StateManager]   -> window[${idx}] id=${win.id} title="${win.getTitle()}" visible=${win.isVisible()} minimized=${win.isMinimized()} destroyed=${win.isDestroyed()} webContentsDestroyed=${webContentsDestroyed} bounds=${JSON.stringify(bounds)} url="${url}"`,
+          );
           if (!win.isDestroyed()) {
             win.webContents.send('status-update', status);
           }
         });
       } else {
-        console.warn('[StateManager] BrowserWindow.getAllWindows not available');
+        logger.warn('[StateManager] BrowserWindow.getAllWindows not available');
       }
     } catch (e) {
-      console.error('[StateManager] broadcastStatus error:', e);
+      logger.error('[StateManager] broadcastStatus error:', e);
     }
   }
 }

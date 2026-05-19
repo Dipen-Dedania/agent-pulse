@@ -2,16 +2,30 @@ import http from 'http';
 import { StatusStateManager } from './state-manager';
 import { BRIDGE_PORT } from './config';
 import { ToolId, AgentState } from '../../common/types';
+import { logger } from '../../common/logger';
 
 // Claude Code hook event names → AgentState
 // `waiting` = agent is *blocked* on the user (permission grant / elicitation response).
 // `idle-active` = turn finished, session alive, ball is in the user's court but nothing is blocked.
 // PermissionRequest / Elicitation = blocked → waiting
+// Notification with notification_type `permission_prompt`/`idle_prompt` = blocked → waiting
 // Stop / PostToolUse / SessionEnd / TeammateIdle = turn boundary → idle-active
 const CC_WAITING_EVENTS = new Set(['PermissionRequest', 'Elicitation']);
 const CC_WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SubagentStart']);
 const CC_IDLE_EVENTS    = new Set(['Stop', 'PostToolUse', 'SessionEnd', 'TeammateIdle']);
 const CC_ERROR_EVENTS   = new Set(['StopFailure', 'PostToolUseFailure']);
+const CC_NOTIFICATION_WAITING_TYPES = new Set(['permission_prompt', 'idle_prompt']);
+
+function mapClaudeCodeEvent(eventName: string, data: any): AgentState | null {
+  if (eventName === 'Notification') {
+    return CC_NOTIFICATION_WAITING_TYPES.has(data.notification_type) ? 'waiting' : null;
+  }
+  if (CC_WAITING_EVENTS.has(eventName)) return 'waiting';
+  if (CC_WORKING_EVENTS.has(eventName)) return 'working';
+  if (CC_IDLE_EVENTS.has(eventName))    return 'idle-active';
+  if (CC_ERROR_EVENTS.has(eventName))   return 'error';
+  return null;
+}
 
 // Codex hook event names → AgentState (PascalCase, same as CC but detected via turn_id)
 const CODEX_WAITING_EVENTS = new Set(['PermissionRequest']);
@@ -59,7 +73,7 @@ export class StatusBridgeServer {
 
   public start() {
     this.server.listen(this.port, () => {
-      console.log(`Status Bridge running on port ${this.port}`);
+      logger.info(`Status Bridge running on port ${this.port}`);
     });
   }
 
@@ -71,24 +85,24 @@ export class StatusBridgeServer {
         try {
           // Strip UTF-8 BOM that PowerShell may prepend via [Console]::In.ReadToEnd()
           if (body.charCodeAt(0) === 0xFEFF) body = body.slice(1);
-          console.log(`[Bridge] Raw body received: ${body}`);
+          logger.debug(`[Bridge] Raw body received: ${body}`);
           const data = JSON.parse(body);
           const normalized = this.normalizePayload(data);
 
           if (!normalized) {
-            console.warn(`[Bridge] Unrecognized event payload: ${JSON.stringify(data)}`);
+            logger.warn(`[Bridge] Unrecognized event payload: ${JSON.stringify(data)}`);
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Unrecognized event format' }));
             return;
           }
 
           const { toolId, state, payload } = normalized;
-          console.log(`[Bridge] Normalized event: toolId=${toolId} state=${state} payload=${JSON.stringify(payload)}`);
+          logger.debug(`[Bridge] Normalized event: toolId=${toolId} state=${state} payload=${JSON.stringify(payload)}`);
           this.stateManager.updateStatus(toolId, state, payload);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ status: 'ok' }));
         } catch (e) {
-          console.error(`JSON parse error: ${e}`);
+          logger.error(`JSON parse error: ${e}`);
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Invalid JSON' }));
         }
@@ -138,7 +152,7 @@ export class StatusBridgeServer {
       req.on('end', () => {
         try {
           const rpc = JSON.parse(body);
-          console.log(`[Bridge/MCP] JSON-RPC call: ${JSON.stringify(rpc)}`);
+          logger.debug(`[Bridge/MCP] JSON-RPC call: ${JSON.stringify(rpc)}`);
           const toolName: string = rpc?.params?.name ?? rpc?.method ?? '';
 
           if (toolName === 'agent_working') {
@@ -150,7 +164,7 @@ export class StatusBridgeServer {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id ?? null, result: { content: [{ type: 'text', text: 'ok' }] } }));
         } catch (e) {
-          console.error(`[Bridge/MCP] parse error: ${e}`);
+          logger.error(`[Bridge/MCP] parse error: ${e}`);
           res.writeHead(400);
           res.end();
         }
@@ -218,7 +232,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         else if (CODEX_WORKING_EVENTS.has(eventName)) state = 'working';
         else if (CODEX_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
-          console.log(`Ignoring unmapped Codex event: ${eventName}`);
+          logger.debug(`Ignoring unmapped Codex event: ${eventName}`);
           return null;
         }
         return {
@@ -243,7 +257,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         else if (GEMINI_WORKING_EVENTS.has(eventName)) state = 'working';
         else if (GEMINI_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
-          console.log(`Ignoring unmapped Gemini CLI event: ${eventName}`);
+          logger.debug(`Ignoring unmapped Gemini CLI event: ${eventName}`);
           return null;
         }
         return {
@@ -265,7 +279,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         else if (CURSOR_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else if (CURSOR_ERROR_EVENTS.has(eventName))   state = 'error';
         else {
-          console.log(`Ignoring unmapped Cursor event: ${eventName}`);
+          logger.debug(`Ignoring unmapped Cursor event: ${eventName}`);
           return null;
         }
         return {
@@ -286,7 +300,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         else if (KIRO_WORKING_EVENTS.has(eventName)) state = 'working';
         else if (KIRO_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
-          console.log(`Ignoring unmapped Kiro event: ${eventName}`);
+          logger.debug(`Ignoring unmapped Kiro event: ${eventName}`);
           return null;
         }
         return {
@@ -302,13 +316,9 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
       // Format 5a — Claude Code CLI (has permission_mode, a CLI-specific field).
       // MUST be checked before Copilot because both send transcript_path.
       if (data.permission_mode !== undefined) {
-        let state: AgentState;
-        if (CC_WAITING_EVENTS.has(eventName))      state = 'waiting';
-        else if (CC_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (CC_IDLE_EVENTS.has(eventName))    state = 'idle-active';
-        else if (CC_ERROR_EVENTS.has(eventName))   state = 'error';
-        else {
-          console.log(`Ignoring unmapped Claude Code event: ${eventName}`);
+        const state = mapClaudeCodeEvent(eventName, data);
+        if (state === null) {
+          logger.debug(`Ignoring unmapped Claude Code event: ${eventName}${eventName === 'Notification' ? ` (notification_type=${data.notification_type})` : ''}`);
           return null;
         }
         return {
@@ -330,7 +340,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         else if (COPILOT_WORKING_EVENTS.has(eventName)) state = 'working';
         else if (COPILOT_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
-          console.log(`Ignoring unmapped Copilot event: ${eventName}`);
+          logger.debug(`Ignoring unmapped Copilot event: ${eventName}`);
           return null;
         }
         return {
@@ -350,7 +360,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         else if (CODEX_WORKING_EVENTS.has(eventName)) state = 'working';
         else if (CODEX_IDLE_EVENTS.has(eventName))    state = 'idle-active';
         else {
-          console.log(`Ignoring unmapped Codex event: ${eventName}`);
+          logger.debug(`Ignoring unmapped Codex event: ${eventName}`);
           return null;
         }
         return {
@@ -364,13 +374,9 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
       }
 
       // Format 2 — Claude Code native hook payload (has session_id, no turn_id)
-      let state: AgentState;
-      if (CC_WAITING_EVENTS.has(eventName))      state = 'waiting';
-      else if (CC_WORKING_EVENTS.has(eventName)) state = 'working';
-      else if (CC_IDLE_EVENTS.has(eventName))    state = 'idle-active';
-      else if (CC_ERROR_EVENTS.has(eventName))   state = 'error';
-      else {
-        console.log(`Ignoring unmapped Claude Code event: ${eventName}`);
+      const state = mapClaudeCodeEvent(eventName, data);
+      if (state === null) {
+        logger.debug(`Ignoring unmapped Claude Code event: ${eventName}${eventName === 'Notification' ? ` (notification_type=${data.notification_type})` : ''}`);
         return null;
       }
 

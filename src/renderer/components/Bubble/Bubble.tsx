@@ -1,7 +1,8 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
-import { ToolId, AgentState, ToolStatus } from '../../../common/types';
+import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow } from '../../../common/types';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
+import { logger } from '../../../common/logger';
 import { motion } from 'framer-motion';
 import { useStatusStore } from '../../store/useStatusStore';
 
@@ -35,6 +36,79 @@ function formatLastSeen(ts: number | undefined): string {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
+function formatRelativeReset(targetMs: number | undefined): string {
+  if (!targetMs) return '—';
+  const diff = targetMs - Date.now();
+  if (diff <= 0) return 'now';
+  const mins = Math.round(diff / 60_000);
+  if (mins < 60) return `in ${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `in ${hours}h`;
+  const days = Math.round(hours / 24);
+  return `in ${days}d`;
+}
+
+function fillColorForRemaining(remaining: number, isDark: boolean): string {
+  // Bar reads as an "opportunity gauge": full bar = lots of credit left.
+  // Green when plenty remains, amber as it depletes, red when nearly out.
+  if (remaining > 50) {
+    return isDark ? 'rgba(34,197,94,0.7)' : 'rgba(22,163,74,0.6)';
+  }
+  if (remaining > 20) {
+    return isDark ? 'rgba(245,158,11,0.75)' : 'rgba(217,119,6,0.65)';
+  }
+  return isDark ? 'rgba(239,68,68,0.8)' : 'rgba(220,38,38,0.7)';
+}
+
+interface UsageBarsProps {
+  status: UsageStatus;
+  isDark: boolean;
+}
+
+const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark }) => {
+  const isOk = status.state === 'ok' && !!status.snapshot;
+  const fiveHour: UsageWindow | undefined = status.snapshot?.fiveHour;
+  const sevenDay: UsageWindow | undefined = status.snapshot?.sevenDay;
+
+  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+
+  // Bar fill represents REMAINING credit, not consumed credit — so a full
+  // green bar = lots of headroom left, an empty red bar = nearly out.
+  const renderBar = (window: UsageWindow | undefined) => {
+    const remaining = isOk && window ? 100 - window.utilization : 0;
+    const fill = isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill;
+    const widthPct = isOk && window ? Math.max(2, Math.min(100, remaining)) : 0;
+    return (
+      <div
+        className='relative rounded-full overflow-hidden'
+        style={{ width: 50, height: 3, background: trackColor }}
+      >
+        {widthPct > 0 && (
+          <div
+            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
+            style={{ width: `${widthPct}%`, background: fill }}
+          />
+        )}
+      </div>
+    );
+  };
+
+  const tooltip = isOk && fiveHour && sevenDay
+    ? `5h: ${100 - fiveHour.utilization}% available · resets ${formatRelativeReset(fiveHour.resetsAt)}\n7d: ${100 - sevenDay.utilization}% available · resets ${formatRelativeReset(sevenDay.resetsAt)}`
+    : status.message ?? `Claude usage: ${status.state}`;
+
+  return (
+    <div
+      className='flex flex-col items-center gap-[2px] mt-1 pointer-events-auto'
+      title={tooltip}
+    >
+      {renderBar(fiveHour)}
+      {renderBar(sevenDay)}
+    </div>
+  );
+};
+
 export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const status = useStatusStore((state) => state.statuses[toolId]);
   const updateStatus = useStatusStore((state) => state.updateStatus);
@@ -43,6 +117,61 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const meta = TOOL_META[toolId];
   const [hovered, setHovered] = useState(false);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
+
+  // Subscribe to usage updates. Only meaningful for the Claude bubble, but
+  // we listen in every renderer so the IPC channel doesn't depend on bubble
+  // identity. Unused snapshots are cheap.
+  useEffect(() => {
+    if (toolId !== 'claude-code') return;
+    window.electron
+      .invoke('usage:get-current')
+      .then((s: UsageStatus) => setUsageStatus(s))
+      .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] usage:get-current failed`, e));
+
+    const handler = (_event: unknown, incoming: UsageStatus) => {
+      setUsageStatus(incoming);
+    };
+    window.electron.on('usage:updated', handler);
+    return () => window.electron.off('usage:updated', handler);
+  }, [toolId]);
+
+  useEffect(() => {
+    logger.debug(`[Bubble:${toolId}] mounted href=${window.location.href}`);
+
+    const onBeforeUnload = () => {
+      logger.debug(`[Bubble:${toolId}] beforeunload`);
+    };
+    const onPageHide = (event: PageTransitionEvent) => {
+      logger.debug(`[Bubble:${toolId}] pagehide persisted=${event.persisted}`);
+    };
+    const onVisibilityChange = () => {
+      logger.debug(`[Bubble:${toolId}] visibilitychange hidden=${document.hidden}`);
+    };
+    const onError = (event: ErrorEvent) => {
+      logger.error(
+        `[Bubble:${toolId}] window error message="${event.message}" source="${event.filename}" line=${event.lineno} col=${event.colno}`,
+      );
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      logger.error(`[Bubble:${toolId}] unhandledrejection`, event.reason);
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+
+    return () => {
+      logger.debug(`[Bubble:${toolId}] unmounted`);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+    };
+  }, [toolId]);
 
   // Subtle chime when the bubble flips into "waiting for input" so the user
   // can context-switch away without missing it. Tracks prior state to fire
@@ -55,7 +184,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     audio.volume = 0.4;
     audio.preload = 'auto';
     audio.addEventListener('error', () => {
-      console.warn(`[Bubble:${toolId}] chime failed to load`, audio.error);
+      logger.warn(`[Bubble:${toolId}] chime failed to load`, audio.error);
     });
     audio.addEventListener('canplaythrough', () => {
       // console.log(`[Bubble:${toolId}] chime ready`);
@@ -114,7 +243,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   }, []);
 
   useEffect(() => {
-    // console.log(`[Bubble:${toolId}] Registering status-update listener`);
+    logger.debug(`[Bubble:${toolId}] Registering status-update listener`);
     const handler = (_event: any, incoming: ToolStatus) => {
       // console.log(`[Bubble:${toolId}] status-update received:`, incoming);
       if (incoming.toolId === toolId) {
@@ -130,39 +259,63 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     };
     window.electron.on('status-update', handler);
     return () => {
-      // console.log(`[Bubble:${toolId}] Removing status-update listener`);
+      logger.debug(`[Bubble:${toolId}] Removing status-update listener`);
       window.electron.off('status-update', handler);
     };
   }, [toolId, updateStatus]);
 
   const dragOrigin = useRef<{ x: number; y: number } | null>(null);
 
+  // Pixels of movement required before a mousedown is treated as a drag.
+  // Anything below this is considered a click → focus the tool window.
+  const DRAG_THRESHOLD = 4;
+
   const onMouseDown = useCallback((e: React.MouseEvent) => {
-    dragOrigin.current = { x: e.screenX, y: e.screenY };
+    const startX = e.screenX;
+    const startY = e.screenY;
+    let hasDragged = false;
+
+    dragOrigin.current = { x: startX, y: startY };
     isDragging.current = true;
-    // Fully capture mouse during drag — stop click-through
     window.electron.send('set-ignore-mouse', { ignore: false });
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!dragOrigin.current) return;
-      const dx = ev.screenX - dragOrigin.current.x;
-      const dy = ev.screenY - dragOrigin.current.y;
-      dragOrigin.current = { x: ev.screenX, y: ev.screenY };
-      window.electron.send('move-bubble', { dx, dy });
+
+      // Promote to drag once the pointer has moved beyond the threshold
+      if (
+        !hasDragged &&
+        (Math.abs(ev.screenX - startX) > DRAG_THRESHOLD ||
+          Math.abs(ev.screenY - startY) > DRAG_THRESHOLD)
+      ) {
+        hasDragged = true;
+      }
+
+      if (hasDragged) {
+        const dx = ev.screenX - dragOrigin.current.x;
+        const dy = ev.screenY - dragOrigin.current.y;
+        dragOrigin.current = { x: ev.screenX, y: ev.screenY };
+        window.electron.send('move-bubble', { dx, dy });
+      }
     };
 
     const onMouseUp = () => {
       dragOrigin.current = null;
       isDragging.current = false;
-      // Restore click-through
       window.electron.send('set-ignore-mouse', { ignore: true });
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+
+      // No meaningful movement → treat as a click, bring the tool to front
+      if (!hasDragged) {
+        logger.debug(`[Bubble:${toolId}] click detected, sending focus-tool`);
+        window.electron.send('focus-tool', { toolId });
+      }
     };
 
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
-  }, []);
+  }, [toolId]);
 
   const { fill, glow, ring } = colorsFor(state, isDark);
   const borderColor = isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.12)';
@@ -283,7 +436,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       <motion.div
         onMouseDown={onMouseDown}
         animate={animations[state]}
-        className='relative w-12 h-12 rounded-full flex items-center justify-center cursor-grab active:cursor-grabbing select-none shrink-0'
+        className='relative w-12 h-12 rounded-full flex items-center justify-center cursor-pointer select-none shrink-0'
         style={{
           marginTop: '5px',
           background: `radial-gradient(circle, ${fill} 0%, rgba(128,128,128,0.06) 100%)`,
@@ -335,7 +488,33 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
             }}
           />
         )}
+
+        {/* Use-it-or-lose-it nudge badge — only on the Claude bubble, only when
+            either window has unused credit + an imminent reset. Distinct teal
+            colour to avoid colliding with the green/amber/red bar palette and
+            the working/waiting state animations. */}
+        {toolId === 'claude-code' &&
+          (usageStatus.nudgeActive?.fiveHour || usageStatus.nudgeActive?.sevenDay) && (
+            <div
+              className='absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center'
+              style={{
+                background: isDark ? 'rgba(20,184,166,0.95)' : 'rgba(13,148,136,0.95)',
+                boxShadow: isDark
+                  ? '0 0 8px rgba(20,184,166,0.7)'
+                  : '0 0 6px rgba(13,148,136,0.5)',
+              }}
+              title='Unused Claude credit about to reset'
+            >
+              <svg viewBox='0 0 24 24' className='w-2.5 h-2.5' fill='white'>
+                <path d='M13 2L4.09 13.6h7.41L11 22l8.91-11.6h-7.41L13 2z' />
+              </svg>
+            </div>
+          )}
       </motion.div>
+
+      {/* Claude subscription usage bars — only rendered for the Claude bubble.
+          Sits below the orb; window height was sized to fit (see BUBBLE_HEIGHT). */}
+      {toolId === 'claude-code' && <UsageBars status={usageStatus} isDark={isDark} />}
     </div>
   );
 };

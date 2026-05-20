@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ToolId, UsageStatus } from '../../../common/types';
+import { ToolId, UsageStatus, CodexUsageStatus } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
 import { UsageSection, UsageConfigUI } from './UsageSection';
+import { CodexUsageSection, CodexUsageConfigUI } from './CodexUsageSection';
 
 interface ToolConfig {
   enabled: boolean;
@@ -127,6 +128,8 @@ export const SettingsPanel: React.FC = () => {
   const [activeInfo, setActiveInfo] = useState<ToolId | null>(null);
   const [usageConfig, setUsageConfig] = useState<UsageConfigUI | null>(null);
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
+  const [codexUsageConfig, setCodexUsageConfig] = useState<CodexUsageConfigUI | null>(null);
+  const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
 
   const getBubbleStates = React.useCallback(async (
     config?: { enabledBubbles?: Partial<Record<ToolId, boolean>> },
@@ -163,9 +166,12 @@ export const SettingsPanel: React.FC = () => {
         });
         setTools(initialTools);
         if (config?.usage) setUsageConfig(config.usage);
+        if (config?.codexUsage) setCodexUsageConfig(config.codexUsage);
 
         const initialUsage = await window.electron.invoke('usage:get-current').catch(() => null);
         if (initialUsage) setUsageStatus(initialUsage);
+        const initialCodexUsage = await window.electron.invoke('codex-usage:get-current').catch(() => null);
+        if (initialCodexUsage) setCodexUsageStatus(initialCodexUsage);
       } catch (error) {
         logger.error('[SettingsPanel] failed to initialize settings', error);
       } finally {
@@ -181,6 +187,12 @@ export const SettingsPanel: React.FC = () => {
     return () => window.electron.off('usage:updated', handler);
   }, []);
 
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: CodexUsageStatus) => setCodexUsageStatus(incoming);
+    window.electron.on('codex-usage:updated', handler);
+    return () => window.electron.off('codex-usage:updated', handler);
+  }, []);
+
   const handleUsageConfigChange = async (partial: Partial<UsageConfigUI>) => {
     try {
       const updated = await window.electron.invoke('usage:update-config', partial);
@@ -192,6 +204,19 @@ export const SettingsPanel: React.FC = () => {
 
   const handleUsageRefresh = () => {
     window.electron.send('usage:refresh-now');
+  };
+
+  const handleCodexUsageConfigChange = async (partial: Partial<CodexUsageConfigUI>) => {
+    try {
+      const updated = await window.electron.invoke('codex-usage:update-config', partial);
+      setCodexUsageConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update Codex usage config', e);
+    }
+  };
+
+  const handleCodexUsageRefresh = () => {
+    window.electron.send('codex-usage:refresh-now');
   };
 
   useEffect(() => {
@@ -437,6 +462,15 @@ export const SettingsPanel: React.FC = () => {
           status={usageStatus}
           onChange={handleUsageConfigChange}
           onRefresh={handleUsageRefresh}
+        />
+      )}
+
+      {codexUsageConfig && (
+        <CodexUsageSection
+          config={codexUsageConfig}
+          status={codexUsageStatus}
+          onChange={handleCodexUsageConfigChange}
+          onRefresh={handleCodexUsageRefresh}
         />
       )}
 

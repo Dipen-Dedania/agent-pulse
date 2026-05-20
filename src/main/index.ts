@@ -1,15 +1,17 @@
-import { app, ipcMain, shell } from 'electron';
+import { app, ipcMain, shell, BrowserWindow } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
 import { SettingsWindow } from './windows/settings-window';
+import { TrayManager } from './windows/tray';
 import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
-import { loadConfig, saveConfig, UserConfig, UsageConfig } from './user-config';
+import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig } from './user-config';
 import { ToolId } from '../common/types';
 import { logger } from '../common/logger';
 import { installFileLogSink } from './file-log-sink';
 import { UsagePoller } from './usage/poller';
+import { CodexUsagePoller } from './codex-usage/poller';
 
 // Windows uses this to group windows under our identity and show our taskbar icon.
 if (process.platform === 'win32') {
@@ -19,22 +21,26 @@ if (process.platform === 'win32') {
 class AgentPulseApp {
   private bubbleManager: BubbleManager;
   private settingsWindow: SettingsWindow;
+  private trayManager: TrayManager;
   private stateManager: StatusStateManager;
   private bridgeServer: StatusBridgeServer;
   private detector: ToolDetector;
   private writer: ConfigWriter;
   private userConfig: UserConfig;
   private usagePoller: UsagePoller;
+  private codexUsagePoller: CodexUsagePoller;
 
   constructor() {
     this.stateManager = new StatusStateManager();
     this.bridgeServer = new StatusBridgeServer(this.stateManager);
     this.bubbleManager = new BubbleManager();
     this.settingsWindow = new SettingsWindow();
+    this.trayManager = new TrayManager();
     this.detector = new ToolDetector();
     this.writer = new ConfigWriter();
     this.userConfig = loadConfig();
     this.usagePoller = new UsagePoller(this.userConfig.usage);
+    this.codexUsagePoller = new CodexUsagePoller(this.userConfig.codexUsage);
   }
 
   public init() {
@@ -47,6 +53,16 @@ class AgentPulseApp {
       this.bubbleManager.init();
       this.usagePoller.init();
       this.usagePoller.start();
+      this.codexUsagePoller.init();
+      this.codexUsagePoller.start();
+
+      this.trayManager.init({
+        onShowSettings: () => this.settingsWindow.show(),
+        onQuit: () => {
+          (app as unknown as { isQuitting: boolean }).isQuitting = true;
+          app.quit();
+        },
+      });
 
       // Restore bubbles from last saved state
       const enabled = this.userConfig.enabledBubbles;
@@ -56,14 +72,18 @@ class AgentPulseApp {
       this.settingsWindow.show();
     });
 
+    // Tray keeps the app alive — never auto-quit when windows close.
+    // The only path to quit is the tray's "Quit Agent Pulse" menu item.
     app.on('window-all-closed', () => {
-      logger.info(`[AgentPulseApp] window-all-closed platform=${process.platform}`);
-      if (process.platform !== 'darwin') app.quit();
+      logger.info(`[AgentPulseApp] window-all-closed platform=${process.platform} — staying alive (tray)`);
     });
 
     app.on('before-quit', () => {
       logger.info('[AgentPulseApp] before-quit');
+      (app as unknown as { isQuitting: boolean }).isQuitting = true;
       this.usagePoller.stop();
+      this.codexUsagePoller.stop();
+      this.trayManager.destroy();
     });
 
     app.on('will-quit', () => {
@@ -125,7 +145,24 @@ class AgentPulseApp {
       this.userConfig.usage = { ...this.userConfig.usage, ...partial };
       saveConfig(this.userConfig);
       this.usagePoller.applyConfig(this.userConfig.usage);
-      return this.userConfig.usage;
+      // Broadcast so bubble UIs (which never call get-config on their own)
+      // can react to display-only flags like showSevenDayBar without a poll cycle.
+      const updated = this.userConfig.usage;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('usage:config-updated', updated);
+      }
+      return updated;
+    });
+
+    ipcMain.handle('codex-usage:update-config', (_event, partial: Partial<CodexUsageConfig>) => {
+      this.userConfig.codexUsage = { ...this.userConfig.codexUsage, ...partial };
+      saveConfig(this.userConfig);
+      this.codexUsagePoller.applyConfig(this.userConfig.codexUsage);
+      const updated = this.userConfig.codexUsage;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('codex-usage:config-updated', updated);
+      }
+      return updated;
     });
   }
 }

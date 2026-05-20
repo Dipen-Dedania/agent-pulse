@@ -18,6 +18,9 @@ export class SettingsWindow {
 
   public show() {
     if (this.window) {
+      // Window may be hidden (closed-to-tray) — restore before focusing.
+      if (!this.window.isVisible()) this.window.show();
+      if (this.window.isMinimized()) this.window.restore();
       this.window.focus();
       return;
     }
@@ -43,6 +46,15 @@ export class SettingsWindow {
     } else {
       this.window.loadFile(path.join(app.getAppPath(), 'dist', 'renderer', 'index.html'));
     }
+
+    // Close-to-tray: keep the window alive across X-clicks so reopening from
+    // the tray is instant. Only let it actually close once the app is quitting.
+    this.window.on('close', (event) => {
+      if (!(app as unknown as { isQuitting?: boolean }).isQuitting) {
+        event.preventDefault();
+        this.window?.hide();
+      }
+    });
 
     this.window.on('closed', () => {
       this.window = null;

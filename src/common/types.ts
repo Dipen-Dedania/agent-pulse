@@ -60,3 +60,26 @@ export interface UsageStatus {
   message?: string;     // user-facing detail for non-ok states
   nudgeActive?: UsageNudgeFlags;
 }
+
+// ─── Codex (ChatGPT) subscription usage ──────────────────────────────────────
+// Sourced from ChatGPT's undocumented /backend-api/wham/usage endpoint.
+// Codex exposes a `primary_window` (always present) plus an optional
+// `secondary_window`. The bubble renders one bar per window that exists.
+
+export interface CodexUsageSnapshot {
+  primary: UsageWindow;
+  secondary?: UsageWindow;
+}
+
+export interface CodexUsageNudgeFlags {
+  primary: boolean;
+  secondary: boolean;
+}
+
+export interface CodexUsageStatus {
+  state: UsageState;
+  snapshot?: CodexUsageSnapshot;
+  lastUpdated?: number;
+  message?: string;
+  nudgeActive?: CodexUsageNudgeFlags;
+}

@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
-import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow } from '../../../common/types';
+import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus } from '../../../common/types';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
 import { logger } from '../../../common/logger';
@@ -63,9 +63,10 @@ function fillColorForRemaining(remaining: number, isDark: boolean): string {
 interface UsageBarsProps {
   status: UsageStatus;
   isDark: boolean;
+  showSevenDay: boolean;
 }
 
-const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark }) => {
+const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark, showSevenDay }) => {
   const isOk = status.state === 'ok' && !!status.snapshot;
   const fiveHour: UsageWindow | undefined = status.snapshot?.fiveHour;
   const sevenDay: UsageWindow | undefined = status.snapshot?.sevenDay;
@@ -95,7 +96,9 @@ const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark }) => {
   };
 
   const tooltip = isOk && fiveHour && sevenDay
-    ? `5h: ${100 - fiveHour.utilization}% available · resets ${formatRelativeReset(fiveHour.resetsAt)}\n7d: ${100 - sevenDay.utilization}% available · resets ${formatRelativeReset(sevenDay.resetsAt)}`
+    ? showSevenDay
+      ? `5h: ${100 - fiveHour.utilization}% available · resets ${formatRelativeReset(fiveHour.resetsAt)}\n7d: ${100 - sevenDay.utilization}% available · resets ${formatRelativeReset(sevenDay.resetsAt)}`
+      : `5h: ${100 - fiveHour.utilization}% available · resets ${formatRelativeReset(fiveHour.resetsAt)}`
     : status.message ?? `Claude usage: ${status.state}`;
 
   return (
@@ -104,7 +107,56 @@ const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark }) => {
       title={tooltip}
     >
       {renderBar(fiveHour)}
-      {renderBar(sevenDay)}
+      {showSevenDay && renderBar(sevenDay)}
+    </div>
+  );
+};
+
+interface CodexUsageBarsProps {
+  status: CodexUsageStatus;
+  isDark: boolean;
+}
+
+const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark }) => {
+  const isOk = status.state === 'ok' && !!status.snapshot;
+  const primary = status.snapshot?.primary;
+  const secondary = status.snapshot?.secondary;
+
+  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+
+  const renderBar = (window: UsageWindow | undefined) => {
+    const remaining = isOk && window ? 100 - window.utilization : 0;
+    const fill = isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill;
+    const widthPct = isOk && window ? Math.max(2, Math.min(100, remaining)) : 0;
+    return (
+      <div
+        className='relative rounded-full overflow-hidden'
+        style={{ width: 50, height: 3, background: trackColor }}
+      >
+        {widthPct > 0 && (
+          <div
+            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
+            style={{ width: `${widthPct}%`, background: fill }}
+          />
+        )}
+      </div>
+    );
+  };
+
+  const tooltip = isOk && primary
+    ? secondary
+      ? `Primary: ${100 - primary.utilization}% available · resets ${formatRelativeReset(primary.resetsAt)}\nSecondary: ${100 - secondary.utilization}% available · resets ${formatRelativeReset(secondary.resetsAt)}`
+      : `Weekly: ${100 - primary.utilization}% available · resets ${formatRelativeReset(primary.resetsAt)}`
+    : status.message ?? `Codex usage: ${status.state}`;
+
+  return (
+    <div
+      className='flex flex-col items-center gap-[2px] mt-1 pointer-events-auto'
+      title={tooltip}
+    >
+      {renderBar(primary)}
+      {secondary && renderBar(secondary)}
     </div>
   );
 };
@@ -118,6 +170,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const [hovered, setHovered] = useState(false);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
+  const [showSevenDay, setShowSevenDay] = useState(true);
+  const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
 
   // Subscribe to usage updates. Only meaningful for the Claude bubble, but
   // we listen in every renderer so the IPC channel doesn't depend on bubble
@@ -129,11 +183,45 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       .then((s: UsageStatus) => setUsageStatus(s))
       .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] usage:get-current failed`, e));
 
+    // Pull initial config so the bar visibility matches saved prefs on bubble launch.
+    window.electron
+      .invoke('get-config')
+      .then((cfg: { usage?: { showSevenDayBar?: boolean } } | null) => {
+        if (cfg?.usage && typeof cfg.usage.showSevenDayBar === 'boolean') {
+          setShowSevenDay(cfg.usage.showSevenDayBar);
+        }
+      })
+      .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] get-config failed`, e));
+
     const handler = (_event: unknown, incoming: UsageStatus) => {
       setUsageStatus(incoming);
     };
+    const configHandler = (_event: unknown, cfg: { showSevenDayBar?: boolean }) => {
+      if (typeof cfg?.showSevenDayBar === 'boolean') setShowSevenDay(cfg.showSevenDayBar);
+    };
     window.electron.on('usage:updated', handler);
-    return () => window.electron.off('usage:updated', handler);
+    window.electron.on('usage:config-updated', configHandler);
+    return () => {
+      window.electron.off('usage:updated', handler);
+      window.electron.off('usage:config-updated', configHandler);
+    };
+  }, [toolId]);
+
+  // Codex usage — only meaningful for the openai-codex bubble.
+  useEffect(() => {
+    if (toolId !== 'openai-codex') return;
+    window.electron
+      .invoke('codex-usage:get-current')
+      .then((s: CodexUsageStatus) => setCodexUsageStatus(s))
+      .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] codex-usage:get-current failed`, e));
+
+    const handler = (_event: unknown, incoming: CodexUsageStatus) => {
+      setCodexUsageStatus(incoming);
+    };
+    window.electron.on('codex-usage:updated', handler);
+    return () => {
+      window.electron.off('codex-usage:updated', handler);
+    };
   }, [toolId]);
 
   useEffect(() => {
@@ -510,11 +598,37 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
               </svg>
             </div>
           )}
+
+        {/* Same use-it-or-lose-it badge for the Codex bubble. */}
+        {toolId === 'openai-codex' &&
+          (codexUsageStatus.nudgeActive?.primary || codexUsageStatus.nudgeActive?.secondary) && (
+            <div
+              className='absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center'
+              style={{
+                background: isDark ? 'rgba(20,184,166,0.95)' : 'rgba(13,148,136,0.95)',
+                boxShadow: isDark
+                  ? '0 0 8px rgba(20,184,166,0.7)'
+                  : '0 0 6px rgba(13,148,136,0.5)',
+              }}
+              title='Unused Codex credit about to reset'
+            >
+              <svg viewBox='0 0 24 24' className='w-2.5 h-2.5' fill='white'>
+                <path d='M13 2L4.09 13.6h7.41L11 22l8.91-11.6h-7.41L13 2z' />
+              </svg>
+            </div>
+          )}
       </motion.div>
 
       {/* Claude subscription usage bars — only rendered for the Claude bubble.
           Sits below the orb; window height was sized to fit (see BUBBLE_HEIGHT). */}
-      {toolId === 'claude-code' && <UsageBars status={usageStatus} isDark={isDark} />}
+      {toolId === 'claude-code' && (
+        <UsageBars status={usageStatus} isDark={isDark} showSevenDay={showSevenDay} />
+      )}
+
+      {/* Codex subscription usage bars — only rendered for the Codex bubble. */}
+      {toolId === 'openai-codex' && (
+        <CodexUsageBars status={codexUsageStatus} isDark={isDark} />
+      )}
     </div>
   );
 };

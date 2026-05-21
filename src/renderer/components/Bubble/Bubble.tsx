@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
-import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus } from '../../../common/types';
+import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, AntigravityUsageStatus, AntigravityModelWindow } from '../../../common/types';
 import { GuardrailEvent } from '../../../common/guardrails';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
@@ -162,6 +162,72 @@ const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark }) => {
   );
 };
 
+// The Antigravity bubble surfaces exactly two models — the ones the user
+// cares about day-to-day. Matched against displayName (and modelKey as a
+// fallback) case-insensitively so format drift on either side won't drop
+// a bar silently.
+const BUBBLE_MODEL_MATCHERS: Array<RegExp> = [
+  /claude\s+opus\s+4\.6/i,
+  /gemini\s+3\.5\s+flash\s*\(\s*high\s*\)/i,
+];
+
+interface AntigravityUsageBarsProps {
+  status: AntigravityUsageStatus;
+  isDark: boolean;
+}
+
+const AntigravityUsageBars: React.FC<AntigravityUsageBarsProps> = ({ status, isDark }) => {
+  const isOk = status.state === 'ok' && !!status.snapshot;
+  const allModels: AntigravityModelWindow[] = isOk ? status.snapshot!.models : [];
+  const visible = BUBBLE_MODEL_MATCHERS
+    .map((re) => allModels.find((m) => re.test(m.displayName) || re.test(m.modelKey)))
+    .filter((m): m is AntigravityModelWindow => !!m);
+
+  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+
+  const renderBar = (model: AntigravityModelWindow | undefined) => {
+    const remaining = isOk && model ? 100 - model.utilization : 0;
+    const fill = isOk && model ? fillColorForRemaining(remaining, isDark) : inactiveFill;
+    const widthPct = isOk && model ? Math.max(2, Math.min(100, remaining)) : 0;
+    return (
+      <div
+        key={model?.modelKey ?? '_'}
+        className='relative rounded-full overflow-hidden'
+        style={{ width: 50, height: 3, background: trackColor }}
+      >
+        {widthPct > 0 && (
+          <div
+            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
+            style={{ width: `${widthPct}%`, background: fill }}
+          />
+        )}
+      </div>
+    );
+  };
+
+  const tooltip = isOk && visible.length > 0
+    ? visible
+        .map((m) => `${m.displayName}: ${Math.round(100 - m.utilization)}% · resets ${formatRelativeReset(m.resetsAt)}`)
+        .join('\n')
+    : isOk
+      ? 'Antigravity: no gated quotas reported.'
+      : status.message ?? `Antigravity usage: ${status.state}`;
+
+  // When OK but empty, render one placeholder bar so the bubble height
+  // stays consistent with other tools' usage display.
+  const bars = isOk && visible.length === 0 ? [undefined] : visible;
+
+  return (
+    <div
+      className='flex flex-col items-center gap-[2px] mt-1 pointer-events-auto'
+      title={tooltip}
+    >
+      {bars.map((m) => renderBar(m))}
+    </div>
+  );
+};
+
 export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const status = useStatusStore((state) => state.statuses[toolId]);
   const updateStatus = useStatusStore((state) => state.updateStatus);
@@ -173,6 +239,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
   const [showSevenDay, setShowSevenDay] = useState(true);
   const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
+  const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
 
   // Subscribe to usage updates. Only meaningful for the Claude bubble, but
   // we listen in every renderer so the IPC channel doesn't depend on bubble
@@ -222,6 +289,23 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     window.electron.on('codex-usage:updated', handler);
     return () => {
       window.electron.off('codex-usage:updated', handler);
+    };
+  }, [toolId]);
+
+  // Antigravity usage — only meaningful for the antigravity-cli bubble.
+  useEffect(() => {
+    if (toolId !== 'antigravity-cli') return;
+    window.electron
+      .invoke('antigravity-usage:get-current')
+      .then((s: AntigravityUsageStatus) => setAntigravityUsageStatus(s))
+      .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] antigravity-usage:get-current failed`, e));
+
+    const handler = (_event: unknown, incoming: AntigravityUsageStatus) => {
+      setAntigravityUsageStatus(incoming);
+    };
+    window.electron.on('antigravity-usage:updated', handler);
+    return () => {
+      window.electron.off('antigravity-usage:updated', handler);
     };
   }, [toolId]);
 
@@ -691,6 +775,27 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
               </svg>
             </div>
           )}
+
+        {/* Antigravity nudge — active when ANY model is about to reset with
+            unused quota above the threshold. */}
+        {toolId === 'antigravity-cli' &&
+          antigravityUsageStatus.nudgeActive &&
+          Object.values(antigravityUsageStatus.nudgeActive).some(Boolean) && (
+            <div
+              className='absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center'
+              style={{
+                background: isDark ? 'rgba(20,184,166,0.95)' : 'rgba(13,148,136,0.95)',
+                boxShadow: isDark
+                  ? '0 0 8px rgba(20,184,166,0.7)'
+                  : '0 0 6px rgba(13,148,136,0.5)',
+              }}
+              title='Unused Antigravity credit about to reset'
+            >
+              <svg viewBox='0 0 24 24' className='w-2.5 h-2.5' fill='white'>
+                <path d='M13 2L4.09 13.6h7.41L11 22l8.91-11.6h-7.41L13 2z' />
+              </svg>
+            </div>
+          )}
       </motion.div>
 
       {/* Claude subscription usage bars — only rendered for the Claude bubble.
@@ -702,6 +807,11 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       {/* Codex subscription usage bars — only rendered for the Codex bubble. */}
       {toolId === 'openai-codex' && (
         <CodexUsageBars status={codexUsageStatus} isDark={isDark} />
+      )}
+
+      {/* Antigravity per-model usage bars — only rendered for the Antigravity bubble. */}
+      {toolId === 'antigravity-cli' && (
+        <AntigravityUsageBars status={antigravityUsageStatus} isDark={isDark} />
       )}
     </div>
   );

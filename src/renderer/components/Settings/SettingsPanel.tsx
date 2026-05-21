@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { ToolId, UsageStatus, CodexUsageStatus } from '../../../common/types';
+import { ToolId, UsageStatus, CodexUsageStatus, AntigravityUsageStatus } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
 import { UsageSection, UsageConfigUI } from './UsageSection';
 import { CodexUsageSection, CodexUsageConfigUI } from './CodexUsageSection';
+import { AntigravityUsageSection, AntigravityUsageConfigUI } from './AntigravityUsageSection';
 import { GuardrailsTab } from './GuardrailsTab';
 
 interface ToolConfig {
@@ -125,7 +126,7 @@ type TabId = 'hooks' | 'usage' | 'guardrails';
 
 const TABS: { id: TabId; label: string; description: string }[] = [
   { id: 'hooks',      label: 'Hooks',      description: 'Manage which AI tools show a status bubble.' },
-  { id: 'usage',      label: 'Usage',      description: 'Monitor Claude and Codex plan usage.' },
+  { id: 'usage',      label: 'Usage',      description: 'Monitor Claude, Codex, and Antigravity plan usage.' },
   { id: 'guardrails', label: 'Guardrails', description: 'Block or warn on risky shell commands.' },
 ];
 
@@ -139,6 +140,8 @@ export const SettingsPanel: React.FC = () => {
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
   const [codexUsageConfig, setCodexUsageConfig] = useState<CodexUsageConfigUI | null>(null);
   const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
+  const [antigravityUsageConfig, setAntigravityUsageConfig] = useState<AntigravityUsageConfigUI | null>(null);
+  const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
   const [activeTab, setActiveTab] = useState<TabId>('hooks');
   const activeTabMeta = TABS.find((t) => t.id === activeTab)!;
 
@@ -178,11 +181,14 @@ export const SettingsPanel: React.FC = () => {
         setTools(initialTools);
         if (config?.usage) setUsageConfig(config.usage);
         if (config?.codexUsage) setCodexUsageConfig(config.codexUsage);
+        if (config?.antigravityUsage) setAntigravityUsageConfig(config.antigravityUsage);
 
         const initialUsage = await window.electron.invoke('usage:get-current').catch(() => null);
         if (initialUsage) setUsageStatus(initialUsage);
         const initialCodexUsage = await window.electron.invoke('codex-usage:get-current').catch(() => null);
         if (initialCodexUsage) setCodexUsageStatus(initialCodexUsage);
+        const initialAntigravityUsage = await window.electron.invoke('antigravity-usage:get-current').catch(() => null);
+        if (initialAntigravityUsage) setAntigravityUsageStatus(initialAntigravityUsage);
       } catch (error) {
         logger.error('[SettingsPanel] failed to initialize settings', error);
       } finally {
@@ -202,6 +208,12 @@ export const SettingsPanel: React.FC = () => {
     const handler = (_event: unknown, incoming: CodexUsageStatus) => setCodexUsageStatus(incoming);
     window.electron.on('codex-usage:updated', handler);
     return () => window.electron.off('codex-usage:updated', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: AntigravityUsageStatus) => setAntigravityUsageStatus(incoming);
+    window.electron.on('antigravity-usage:updated', handler);
+    return () => window.electron.off('antigravity-usage:updated', handler);
   }, []);
 
   const handleUsageConfigChange = async (partial: Partial<UsageConfigUI>) => {
@@ -228,6 +240,19 @@ export const SettingsPanel: React.FC = () => {
 
   const handleCodexUsageRefresh = () => {
     window.electron.send('codex-usage:refresh-now');
+  };
+
+  const handleAntigravityUsageConfigChange = async (partial: Partial<AntigravityUsageConfigUI>) => {
+    try {
+      const updated = await window.electron.invoke('antigravity-usage:update-config', partial);
+      setAntigravityUsageConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update Antigravity usage config', e);
+    }
+  };
+
+  const handleAntigravityUsageRefresh = () => {
+    window.electron.send('antigravity-usage:refresh-now');
   };
 
   useEffect(() => {
@@ -511,7 +536,15 @@ export const SettingsPanel: React.FC = () => {
               onRefresh={handleCodexUsageRefresh}
             />
           )}
-          {!usageConfig && !codexUsageConfig && (
+          {antigravityUsageConfig && (
+            <AntigravityUsageSection
+              config={antigravityUsageConfig}
+              status={antigravityUsageStatus}
+              onChange={handleAntigravityUsageConfigChange}
+              onRefresh={handleAntigravityUsageRefresh}
+            />
+          )}
+          {!usageConfig && !codexUsageConfig && !antigravityUsageConfig && (
             <p className='text-slate-400 text-sm'>Usage settings are loading…</p>
           )}
         </>

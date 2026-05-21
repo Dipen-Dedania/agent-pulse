@@ -83,3 +83,35 @@ export interface CodexUsageStatus {
   message?: string;
   nudgeActive?: CodexUsageNudgeFlags;
 }
+
+// ─── Antigravity IDE subscription usage ──────────────────────────────────────
+// Sourced from the Antigravity IDE's local gRPC-Web endpoint
+// (https://127.0.0.1:5362/exa.language_server_pb.LanguageServerService/
+// GetAvailableModels). The response lists every model the IDE knows about;
+// most are placeholders with remainingFraction=1 and no resetTime. We track
+// only the entries with a real resetTime — those are the gated/paid quotas.
+
+export interface AntigravityModelWindow {
+  modelKey: string;         // stable key, e.g. "claude-opus-4-6-thinking"
+  displayName: string;      // user-facing, e.g. "Claude Opus 4.6 (Thinking)"
+  utilization: number;      // 0–100 (= (1 − remainingFraction) × 100)
+  resetsAt: number;         // ms epoch
+  recommended?: boolean;
+  exhausted?: boolean;      // true when remainingFraction was 0 or omitted (proto default)
+}
+
+export interface AntigravityUsageSnapshot {
+  models: AntigravityModelWindow[];
+}
+
+// modelKey → true when the nudge ("use it or lose it") is active for that
+// specific model. Empty when no model qualifies.
+export type AntigravityUsageNudgeFlags = Record<string, boolean>;
+
+export interface AntigravityUsageStatus {
+  state: UsageState;
+  snapshot?: AntigravityUsageSnapshot;
+  lastUpdated?: number;
+  message?: string;
+  nudgeActive?: AntigravityUsageNudgeFlags;
+}

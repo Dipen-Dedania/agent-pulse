@@ -6,7 +6,7 @@ import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
-import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig } from './user-config';
+import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig, AntigravityUsageConfig } from './user-config';
 import { ToolId } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
@@ -15,6 +15,7 @@ import { logger } from '../common/logger';
 import { installFileLogSink } from './file-log-sink';
 import { UsagePoller } from './usage/poller';
 import { CodexUsagePoller } from './codex-usage/poller';
+import { AntigravityUsagePoller } from './antigravity-usage/poller';
 
 // Windows uses this to group windows under our identity and show our taskbar icon.
 if (process.platform === 'win32') {
@@ -32,6 +33,7 @@ class AgentPulseApp {
   private userConfig: UserConfig;
   private usagePoller: UsagePoller;
   private codexUsagePoller: CodexUsagePoller;
+  private antigravityUsagePoller: AntigravityUsagePoller;
 
   // Most-recent guardrail events kept in memory so a Settings window opened
   // after the fact still sees what happened. Capped at GUARDRAIL_LOG_SIZE.
@@ -52,6 +54,7 @@ class AgentPulseApp {
     this.writer = new ConfigWriter();
     this.usagePoller = new UsagePoller(this.userConfig.usage);
     this.codexUsagePoller = new CodexUsagePoller(this.userConfig.codexUsage);
+    this.antigravityUsagePoller = new AntigravityUsagePoller(this.userConfig.antigravityUsage);
   }
 
   public init() {
@@ -66,6 +69,8 @@ class AgentPulseApp {
       this.usagePoller.start();
       this.codexUsagePoller.init();
       this.codexUsagePoller.start();
+      this.antigravityUsagePoller.init();
+      this.antigravityUsagePoller.start();
 
       this.trayManager.init({
         onShowSettings: () => this.settingsWindow.show(),
@@ -94,6 +99,7 @@ class AgentPulseApp {
       (app as unknown as { isQuitting: boolean }).isQuitting = true;
       this.usagePoller.stop();
       this.codexUsagePoller.stop();
+      this.antigravityUsagePoller.stop();
       this.trayManager.destroy();
     });
 
@@ -172,6 +178,17 @@ class AgentPulseApp {
       const updated = this.userConfig.codexUsage;
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send('codex-usage:config-updated', updated);
+      }
+      return updated;
+    });
+
+    ipcMain.handle('antigravity-usage:update-config', (_event, partial: Partial<AntigravityUsageConfig>) => {
+      this.userConfig.antigravityUsage = { ...this.userConfig.antigravityUsage, ...partial };
+      saveConfig(this.userConfig);
+      this.antigravityUsagePoller.applyConfig(this.userConfig.antigravityUsage);
+      const updated = this.userConfig.antigravityUsage;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('antigravity-usage:config-updated', updated);
       }
       return updated;
     });

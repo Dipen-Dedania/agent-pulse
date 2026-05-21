@@ -30,10 +30,21 @@ export interface CodexUsageConfig {
   nudge: UsageNotificationConfig;
 }
 
+// Antigravity IDE has per-model quotas — the endpoint is local-only (queries
+// the IDE's embedded language server) so polling is cheap but only works
+// while the IDE is running. Hard floor is 60s, default 5min.
+export interface AntigravityUsageConfig {
+  enabled: boolean;
+  intervalMs: number;                  // hard floor 60_000 (1m) enforced by poller
+  capWarning: UsageNotificationConfig;
+  nudge: UsageNotificationConfig;
+}
+
 export interface UserConfig {
   enabledBubbles: Partial<Record<ToolId, boolean>>;
   usage: UsageConfig;
   codexUsage: CodexUsageConfig;
+  antigravityUsage: AntigravityUsageConfig;
   guardrails: GuardrailConfig;
 }
 
@@ -54,6 +65,12 @@ const DEFAULTS: UserConfig = {
   codexUsage: {
     enabled: true,
     intervalMs: 15 * 60 * 1000,
+    capWarning: { enabled: true, threshold: 20 },
+    nudge:      { enabled: false, threshold: 50 },
+  },
+  antigravityUsage: {
+    enabled: true,
+    intervalMs: 5 * 60 * 1000,
     capWarning: { enabled: true, threshold: 20 },
     nudge:      { enabled: false, threshold: 50 },
   },
@@ -92,6 +109,7 @@ export function loadConfig(): UserConfig {
       const parsed = JSON.parse(raw);
       const usage = parsed.usage ?? {};
       const codexUsage = parsed.codexUsage ?? {};
+      const antigravityUsage = parsed.antigravityUsage ?? {};
       const guardrails = parsed.guardrails ?? {};
       return {
         ...DEFAULTS,
@@ -108,6 +126,12 @@ export function loadConfig(): UserConfig {
           ...codexUsage,
           capWarning: { ...DEFAULTS.codexUsage.capWarning, ...(codexUsage.capWarning ?? {}) },
           nudge:      { ...DEFAULTS.codexUsage.nudge,      ...(codexUsage.nudge ?? {}) },
+        },
+        antigravityUsage: {
+          ...DEFAULTS.antigravityUsage,
+          ...antigravityUsage,
+          capWarning: { ...DEFAULTS.antigravityUsage.capWarning, ...(antigravityUsage.capWarning ?? {}) },
+          nudge:      { ...DEFAULTS.antigravityUsage.nudge,      ...(antigravityUsage.nudge ?? {}) },
         },
         guardrails: {
           enabled:         guardrails.enabled ?? DEFAULTS.guardrails.enabled,
@@ -130,6 +154,11 @@ export function loadConfig(): UserConfig {
       ...DEFAULTS.codexUsage,
       capWarning: { ...DEFAULTS.codexUsage.capWarning },
       nudge:      { ...DEFAULTS.codexUsage.nudge },
+    },
+    antigravityUsage: {
+      ...DEFAULTS.antigravityUsage,
+      capWarning: { ...DEFAULTS.antigravityUsage.capWarning },
+      nudge:      { ...DEFAULTS.antigravityUsage.nudge },
     },
     guardrails: {
       ...DEFAULTS.guardrails,

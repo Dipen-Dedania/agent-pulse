@@ -15,7 +15,7 @@ const TOOL_APP_NAME: Record<ToolId, { mac: string; linux: string }> = {
   'vscode-copilot': { mac: 'Visual Studio Code', linux: 'code' },
   'claude-code':    { mac: 'Terminal',            linux: 'x-terminal-emulator' },
   'openai-codex':   { mac: 'Terminal',            linux: 'x-terminal-emulator' },
-  'gemini-cli':     { mac: 'Terminal',            linux: 'x-terminal-emulator' },
+  'antigravity-cli':{ mac: 'Terminal',            linux: 'x-terminal-emulator' },
   'kiro':           { mac: 'Kiro',                linux: 'kiro' },
 };
 
@@ -31,7 +31,7 @@ const TOOL_WIN_PROCESS_NAMES: Record<ToolId, string[]> = {
   'kiro':           ['Kiro'],
   'claude-code':    ['claude', 'WindowsTerminal', 'pwsh', 'powershell', 'cmd'],
   'openai-codex':   ['codex',  'WindowsTerminal', 'pwsh', 'powershell', 'cmd'],
-  'gemini-cli':     ['gemini', 'WindowsTerminal', 'pwsh', 'powershell', 'cmd'],
+  'antigravity-cli':['agy', 'WindowsTerminal', 'pwsh', 'powershell', 'cmd'],
 };
 
 // Fallback launch paths for GUI tools that aren't running yet.

@@ -49,16 +49,14 @@ const KIRO_WAITING_EVENTS = new Set<string>([]);
 const KIRO_WORKING_EVENTS = new Set(['agentSpawn', 'userPromptSubmit', 'preToolUse']);
 const KIRO_IDLE_EVENTS    = new Set(['postToolUse']);
 
-// Gemini CLI hook event names → AgentState (detected via _ap_tool: 'gemini-cli' injected by our hook script)
-// `waiting` is reserved for events where the CLI is *blocked* on the user (Notification —
-// e.g. tool-confirmation prompts). `AfterAgent` only means the agent loop ended and the
-// next user prompt is welcome but not blocking, which matches our `idle-active` semantics
-// (analogous to Claude Code's `Stop`).
-const GEMINI_WORKING_EVENTS = new Set(['SessionStart', 'BeforeAgent', 'BeforeTool', 'BeforeModel', 'BeforeToolSelection']);
-const GEMINI_WAITING_EVENTS = new Set(['Notification']);
-const GEMINI_IDLE_EVENTS    = new Set(['SessionEnd', 'AfterAgent', 'AfterTool', 'AfterModel']);
+// Antigravity CLI hook event names → AgentState (detected via _ap_tool: 'antigravity-cli'
+// injected by our hook script). Antigravity supports five events; PreInvocation/PreToolUse/
+// PostToolUse keep the loop alive, while PostInvocation/Stop mark turn boundaries.
+// There is no `Notification`-style event, so `waiting` is unreachable for this tool.
+const ANTIGRAVITY_WORKING_EVENTS = new Set(['PreInvocation', 'PreToolUse', 'PostToolUse']);
+const ANTIGRAVITY_IDLE_EVENTS    = new Set(['PostInvocation', 'Stop']);
 
-const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'gemini-cli'];
+const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'antigravity-cli'];
 const VALID_STATES: AgentState[] = ['working', 'waiting', 'idle', 'idle-active', 'error'];
 
 export class StatusBridgeServer {
@@ -182,8 +180,8 @@ export class StatusBridgeServer {
    * 1. Our own format (curl tests):
    *    { toolId: 'claude-code', state: 'working', payload?: {...} }
    *
-   * 2. Gemini CLI (has _ap_tool: 'gemini-cli' injected by our hook script):
-   *    { hook_event_name: 'BeforeAgent', _ap_tool: 'gemini-cli', session_id: '...', ... }
+   * 2. Antigravity CLI (has _ap_tool: 'antigravity-cli' injected by our hook script):
+   *    { hook_event_name: 'PreToolUse', _ap_tool: 'antigravity-cli', session_id: '...', ... }
    *
    * 3. Cursor's native hook payload (camelCase events, has cursor_version):
    *    { hook_event_name: 'preToolUse', cursor_version: '...', conversation_id: '...', transcript_path: ... }
@@ -245,27 +243,29 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         };
       }
 
-      // Format 2b — Gemini CLI (injected _ap_tool field from our hook script).
+      // Format 2b — Antigravity CLI (injected _ap_tool field from our hook script).
       // Checked first among hook formats since `_ap_tool` is definitive and avoids
-      // PascalCase ambiguity with CC/Codex events.  We use `_ap_tool` instead of
-      // `source` because Gemini CLI's own SessionStart payload includes a native
-      // `source` field (values: Startup | Resume | Clear) that would overwrite ours
-      // during JSON.parse (last duplicate key wins).
-      if (data._ap_tool === 'gemini-cli') {
+      // PascalCase ambiguity with CC/Codex events. Antigravity uses Pre/Post Tool/Invocation
+      // plus Stop — no Notification-style event, so `waiting` is never produced here.
+      if (data._ap_tool === 'antigravity-cli') {
         let state: AgentState;
-        if (GEMINI_WAITING_EVENTS.has(eventName))      state = 'waiting';
-        else if (GEMINI_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (GEMINI_IDLE_EVENTS.has(eventName))    state = 'idle-active';
+        if (ANTIGRAVITY_WORKING_EVENTS.has(eventName)) state = 'working';
+        else if (ANTIGRAVITY_IDLE_EVENTS.has(eventName)) state = 'idle-active';
         else {
-          logger.debug(`Ignoring unmapped Gemini CLI event: ${eventName}`);
+          logger.debug(`Ignoring unmapped Antigravity CLI event: ${eventName}`);
           return null;
         }
+        // Antigravity uses camelCase fields and nests tool info under toolCall.
+        // Keep snake_case fallbacks for resilience if Google ever flips the
+        // naming, but prefer the documented camelCase shape.
+        const toolName: string | undefined =
+          data.toolCall?.name ?? data.tool_name;
         return {
-          toolId: 'gemini-cli',
+          toolId: 'antigravity-cli',
           state,
           payload: {
-            sessionId:   data.session_id,
-            taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+            sessionId:   data.conversationId ?? data.session_id,
+            taskSummary: toolName ? `Tool: ${toolName}` : undefined,
           },
         };
       }

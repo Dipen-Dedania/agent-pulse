@@ -57,6 +57,27 @@ const DEFAULTS: UserConfig = {
   },
 };
 
+// Map legacy ToolId keys in persisted configs to their current names so a
+// rename in code doesn't strand users on a dead bubble entry. The bubble
+// renderer crashes when TOOL_META[toolId] is undefined, so leaving an
+// unknown key in enabledBubbles produces a broken bubble window.
+const LEGACY_BUBBLE_KEY_RENAMES: Record<string, ToolId> = {
+  'gemini-cli': 'antigravity-cli',
+};
+
+function migrateEnabledBubbles(raw: unknown): Partial<Record<ToolId, boolean>> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Partial<Record<ToolId, boolean>> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== 'boolean') continue;
+    const renamed = LEGACY_BUBBLE_KEY_RENAMES[key];
+    const finalKey = (renamed ?? key) as ToolId;
+    // Don't overwrite an existing modern entry with a stale legacy value.
+    if (out[finalKey] === undefined) out[finalKey] = value;
+  }
+  return out;
+}
+
 export function loadConfig(): UserConfig {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
@@ -67,6 +88,7 @@ export function loadConfig(): UserConfig {
       return {
         ...DEFAULTS,
         ...parsed,
+        enabledBubbles: migrateEnabledBubbles(parsed.enabledBubbles),
         usage: {
           ...DEFAULTS.usage,
           ...usage,

@@ -1,159 +1,90 @@
-# Improvement list
+#command guardrail system
 
-# Claude Code subscription-usage polling
+This app already observes Claude Code hooks and tool calls. I now want you to design and implement a **command guardrail system** with two tiers of safety rules.
 
-Background poller that tracks **subscription quota usage** (5-hour and 7-day windows) by calling Anthropic's undocumented OAuth usage endpoint — the same one Claude Code itself uses for its statusline.
+High‑level intent
+- Goal: Add a reusable guardrail module that inspects commands before execution and classifies them into:
+  1) **Must block** (hard stop) category
+  2) **Should warn / soft guardrail** category
+- Scope: This is focused on shell / CLI commands (especially Bash or platform shell), but the design should make it easy to extend later.
+- Platforms: Support Windows, macOS and Linux.
 
-**Independent of hooks.** Hooks fire only during active sessions; this poller runs in the Electron main process and surfaces remaining quota even when Claude Code isn't actively in use.
+Context to load before coding
+1. Scan the repo to understand:
+   - How we currently watch hooks and tool calls
+   - Where command strings are available (e.g., PreToolUse JSON from Claude Code)
+   - Existing logging / UI surface to show warnings or blocks
+2. Identify the best place(s) to add:
+   - A central “guardrail engine” (pure JS/TS logic)
+   - Integration points with the existing hook watcher and Electron UI
 
-Scope is **Claude Code only**. Other tools' bubbles are unaffected.
+Behavioral requirements
+- **Tier 1: MUST‑BLOCK rules**
+  - Block clearly destructive or high‑risk commands (e.g., `rm -rf /`, `git reset --hard`, `git clean -fd`, mass `drop table`, pipe‑to‑shell like `curl ... | sh`, etc.).
+  - These rules should be OS‑aware so we don’t block legitimate platform‑specific commands incorrectly.
+  - When a Tier 1 rule matches:
+    - Do NOT allow execution.
+    - Emit a structured event (e.g., `{ level: "error", ruleId, command, reason }`).
+    - Provide a clear human‑readable message explaining why it was blocked and, when possible, suggest a safer alternative.
 
-## The endpoint
+- **Tier 2: SHOULD‑WARN rules**
+  - Catch commands that are not inherently fatal but are risky or often mistakes (e.g., `git push --force`, `npm install` in a pnpm repo, `docker system prune -a`, etc.).
+  - When a Tier 2 rule matches:
+    - Do NOT automatically block.
+    - Surface a prominent warning in the UI and/or log:
+      - Rule id, command, and a short explanation.
+    - Make it easy to:
+      - (a) upgrade a rule from Tier 2 → Tier 1
+      - (b) temporarily bypass a single warning (with explicit user confirmation)
 
-```
-GET https://api.anthropic.com/api/oauth/usage
-Authorization: Bearer <accessToken from ~/.claude/.credentials.json>
-anthropic-beta: oauth-2025-04-20
-Accept: application/json
-```
+Design + implementation expectations
+- Create a **config‑driven rule system**, not hard‑coded if/else everywhere:
+  - A rule should at least have: `id`, `pattern` (regex or matcher), `os` (one or more), `tier` ("mustBlock" | "warn"), `message`, and optional `suggestedFix`.
+  - Structure the rules so we can load:
+    - A “core” rule set (safe defaults)
+    - Project‑ or workspace‑specific overrides later.
+- Implement a pure function like `evaluateCommand(command, context) -> { decision, matchedRule, messages[] }`:
+  - `decision` ∈ { "allow", "warn", "block" }
+  - `context` may include OS, repo metadata, and any other relevant details.
+- Wire this evaluation function into the existing hook watcher flow where commands are currently observed.
+- Add **minimal but solid tests** for:
+  - At least one Tier 1 rule per OS
+  - A couple of Tier 2 rules
+  - No false positives on obviously safe commands
+- Keep changes surgical:
+  - Prefer small modules over large refactors.
+  - Use existing project style and conventions.
 
-Response shape (best-effort — handle variants):
+UX / developer experience
+- Provide a simple way for a developer to:
+  - Toggle guardrails on/off for debugging (but default is ON).
+  - Inspect which rule blocked/warned on a given command.
+  - Extend or override rules in a single place (e.g., `guardrails.config.ts`).
+- When appropriate, add **short inline docs / comments** explaining:
+  - How to add a new rule
+  - How the evaluation pipeline works
 
-```json
-{
-  "five_hour":  { "utilization": 42, "resets_at": 1742651200 },
-  "seven_day":  { "utilization": 18, "resets_at": 1743120000 }
-}
-```
+Workflow
+1. First, describe your understanding of the current hook watcher architecture and where command data flows.
+2. Propose a small design sketch for the guardrail module (files, functions, rule structure).
+3. Once I confirm (or after a short self‑check if everything is obvious), implement in small steps:
+   - Create the rule engine and a minimal initial rule set (both tiers).
+   - Integrate it into the hook watcher pipeline.
+   - Add tests.
+   - Add any UI/logging surfaces needed to make warnings and blocks visible.
+4. At the end, summarize:
+   - What rules exist (Tier 1 vs Tier 2, per OS)
+   - How to extend them
+   - How a future developer would plug this into additional tools (e.g., non‑Bash commands or other agents).
 
-- Field names vary: `utilization` or `used_percentage`. Handle both.
-- `resets_at` may be Unix seconds (number) or an ISO 8601 string. Handle both.
-- **Undocumented.** Wrap every call defensively; never crash on shape changes or 4xx/5xx.
+Constraints and guardrails for YOU
+- Prefer **config + pure functions** over framework magic.
+- No speculative abstraction: keep it as simple as possible while still cleanly extensible.
+- Touch only the files that are necessary for this feature.
+- If you’re unsure about a rule (e.g., whether it should be Tier 1 or Tier 2), call it out explicitly in comments or TODOs rather than guessing.
 
-## Credentials
-
-OAuth access token lives in Claude Code's credentials file:
-
-- **macOS:** Keychain entry `Claude Code-credentials`, accessed via `security find-generic-password -s "Claude Code-credentials" -w`. Fallback to file if Keychain entry is missing.
-- **Linux / Windows:** `<homedir>/.claude/.credentials.json` — read `.claudeAiOauth.accessToken`.
-
-**Re-read on every poll.** Claude Code rewrites the file when the token auto-refreshes; never cache in memory.
-
-## Architecture
-
-Project is **TypeScript + ESM**. Match existing patterns from `bridge/`, `installer/`, and `windows/`.
-
-### New files
-
-```
-src/main/usage/
-  poller.ts        UsagePoller class — polling loop, backoff, IPC, notifications
-  credentials.ts   readAccessToken() — cross-platform, no caching
-  parse.ts         parseUsageResponse() — field/timestamp variant handling
-
-src/main/usage/__tests__/
-  parse.test.ts    Field-name and timestamp variant coverage
-```
-
-### Files to modify
-
-```
-src/common/types.ts                          + UsageSnapshot, UsageStatus
-src/main/user-config.ts                       + usage: { enabled, intervalMs, warnThreshold }
-src/main/index.ts                             instantiate poller, wire IPC, before-quit cleanup
-src/main/windows/bubble-manager.ts            split BUBBLE_SIZE → WIDTH/HEIGHT (taller window)
-src/renderer/components/Bubble/Bubble.tsx     listen for usage:updated, render bars (claude-code only)
-src/renderer/components/Settings/SettingsPanel.tsx  + usage section
-```
-
-## Polling loop
-
-- Default interval: **10 minutes**, user-configurable.
-- Hard floor: **60 seconds** (the endpoint rate-limits aggressively).
-- Run one poll immediately on app `ready`; then interval-driven.
-- Stop cleanly on `before-quit`.
-- Use recursive `setTimeout` (not `setInterval`) so backoff can adjust the next delay without races.
-
-## Error handling
-
-| Condition | Behavior |
-|---|---|
-| **200 OK, shape valid** | Update snapshot, broadcast `usage:updated`, check threshold for notification. |
-| **200 OK, shape unrecognised** | Log warn, expose `status: 'unavailable'`. Keep normal interval. |
-| **401** | Set `status: 'unauthenticated'`. **Pause polling.** Resume on manual refresh, app restart, or `usage:refresh-now`. Surface message: *"Run any Claude Code command to refresh the token, then click Refresh."* |
-| **429** | Double next-poll delay (capped at 60 min). Reset to normal on next success. |
-| **5xx / network error** | Log warn, skip. Keep normal interval. |
-| **404 / 400 endpoint-moved** | Set `status: 'unavailable'`. Back off to 60 min — endpoint changed, not transient. |
-| **Missing credentials file** | Set `status: 'unauthenticated'`. Pause polling. |
-
-## IPC contract
-
-Match existing channel patterns (`ipcMain.on` for fire-and-forget, `ipcMain.handle` for invoke).
-
-| Channel | Direction | Purpose |
-|---|---|---|
-| `usage:get-current` | `handle` (renderer → main) | Returns latest `UsageStatus` snapshot. |
-| `usage:refresh-now` | `on` (renderer → main) | Trigger an immediate poll, bypassing backoff. |
-| `usage:updated` | `webContents.send` (main → renderer) | Broadcast on each successful poll **or** status change. |
-
-The renderer's Zustand store (or a new small store) holds the latest snapshot. The Claude bubble subscribes to it.
-
-## Settings UI (in `SettingsPanel.tsx`)
-
-A dedicated section, visually distinct from the per-tool grid since this is Claude-specific:
-
-- Master toggle: **"Track Claude usage"**
-- Interval input (seconds, min 60, default 600)
-- Warning threshold slider (1–99%, default 80)
-- Current snapshot display: "5h: 42% · resets in 2h 14m / 7d: 18% · resets in 4d"
-- Status pill: `OK` / `Unauthenticated` / `Unavailable` / `Rate-limited`
-- **Refresh now** button (calls `usage:refresh-now`)
-
-## Bubble UI — two progress bars below the Claude bubble
-
-The bubble's existing waiting/working rings stay untouched. Usage rides on a new surface below the orb.
-
-- Window height grows to fit (e.g. 70 × 86); width stays 70.
-- All bubble windows share the new height — non-Claude bubbles just leave the bottom transparent. Simpler than per-tool sizing; no visual cost (windows are transparent + click-through).
-- Two bars, ~50px × 3px, stacked with a 2px gap. **Top = 5h** (more urgent), **bottom = 7d**.
-- Fill color thresholds: `<50%` green · `<80%` amber · `≥80%` red. Reuse `stateColors.ts` palette where possible.
-- Track color: subtle (track @ ~10% opacity of fill).
-- Bars only render for `toolId === 'claude-code'` AND when `userConfig.usage.enabled` AND status is `ok`. For `unauthenticated` / `unavailable` show grayed-out empty tracks (keeps layout stable).
-- Hover the bar area → native `title` attribute with `5h: 42% · resets in 2h 14m / 7d: 18% · resets in 4d`. (Cheap stopgap; the proper bubble tooltip is disabled — `TOOLTIP_ENABLED = false` at `Bubble.tsx:10`.)
-- Bars are inert (no click handler); drag is only initiated from the orb itself.
-
-## Notifications
-
-Native `new Notification(...)` from the renderer (or `electron.Notification` from main — match what the codebase already uses if anything).
-
-- Fire when 5h or 7d crosses the configured threshold (default 80%).
-- Debounce: at most one notification per window per reset cycle. Store `lastNotifiedResetAt` per window in memory (not persisted — restarting the app is rare enough that re-notifying is acceptable).
-
-## Out of scope for MVP
-
-- **Rolling JSONL history log.** Mentioned in earlier spec but skipped here — no UI consumer yet. Add when there's a "trend sparkline" or similar.
-- **Per-tool window sizing.** All bubbles share the same height. Revisit if other tools grow surfaces of their own.
-- **Token refresh.** We can't refresh the OAuth token ourselves; users must run a Claude Code command.
-
-## What NOT to do
-
-- Don't put network calls in the renderer — CORS blocks it and credentials don't belong there.
-- Don't bundle or store the token anywhere outside Claude Code's own credential location.
-- Don't assume the endpoint will always exist — treat it as best-effort enrichment.
-- Don't `setInterval` from the renderer — pauses when windows are hidden.
-- Don't introduce new dependencies. Node `fetch`, `fs`, `child_process` are sufficient.
-
-## Style
-
-- Match the existing class-with-`init()` pattern (`StatusBridgeServer`, `BubbleManager`).
-- Use the shared `logger` from `src/common/logger.ts`. Log levels: `debug` for poll cycle, `info` for status changes, `warn` for transient errors, `error` for unexpected.
-- Component naming: PascalCase. Variables: camelCase. TS strict mode.
-
-## Deliverables
-
-1. `src/main/usage/poller.ts`, `credentials.ts`, `parse.ts` + parser unit tests.
-2. Type additions in `src/common/types.ts` and config extension in `src/main/user-config.ts`.
-3. Main-process wiring (`src/main/index.ts`).
-4. Bubble window size split (`bubble-manager.ts`) + bar rendering in `Bubble.tsx`.
-5. Settings panel section.
-6. Inline comments where the "undocumented endpoint" caveat or "open Claude Code to refresh" recovery path matters.
+Start by:
+- Reading the repo.
+- Mapping where commands appear today.
+- Proposing the initial Tier 1 and Tier 2 rule lists for macOS and Linux based on common dangerous patterns.
+Then wait for my confirmation or edits before wiring everything fully.

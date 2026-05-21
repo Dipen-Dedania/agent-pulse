@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { execFileSync } from 'child_process';
 import { BRIDGE_URL } from '../bridge/config';
 import { ToolId } from '../../common/types';
 
@@ -19,8 +20,8 @@ export class ConfigWriter {
         return this.isCodexHookInstalled(projectPath);
       case 'kiro':
         return this.isKiroHookInstalled(projectPath);
-      case 'gemini-cli':
-        return this.isGeminiCliHookInstalled(projectPath);
+      case 'antigravity-cli':
+        return this.isAntigravityCliHookInstalled(projectPath);
       default:
         return false;
     }
@@ -38,8 +39,8 @@ export class ConfigWriter {
         return this.writeCodexHook(projectPath);
       case 'kiro':
         return this.writeKiroHook(projectPath);
-      case 'gemini-cli':
-        return this.writeGeminiCliHook(projectPath);
+      case 'antigravity-cli':
+        return this.writeAntigravityCliHook(projectPath);
       default:
         throw new Error(`Hook installation for ${toolId} not yet implemented`);
     }
@@ -110,8 +111,12 @@ export class ConfigWriter {
   }
 
   private hasAgentPulseCommand(entry: any): boolean {
-    const command = `${entry?.command ?? ''} ${entry?.windows ?? ''}`;
-    return command.includes('agent-pulse');
+    // Lowercase + match either the long-name "agent-pulse" or its 8.3 short
+    // form "agent-~". The Antigravity installer rewrites the script path to
+    // 8.3 on Windows to dodge cmd.exe quoting issues with spaces in usernames,
+    // and that rewrite mangles "agent-pulse" → "AGENT-~1".
+    const command = `${entry?.command ?? ''} ${entry?.windows ?? ''}`.toLowerCase();
+    return command.includes('agent-pulse') || command.includes('agent-~');
   }
 
   private hookArrayHasAgentPulseCommand(entries: any): boolean {
@@ -127,14 +132,6 @@ export class ConfigWriter {
     return entries.some((entry) =>
       Array.isArray(entry?.hooks) &&
       entry.hooks.some((hook: any) => hook?.type === 'http' && hook?.url === this.bridgeUrl),
-    );
-  }
-
-  private hookArrayHasNamedAgentPulse(entries: any): boolean {
-    if (!Array.isArray(entries)) return false;
-    return entries.some((entry) =>
-      Array.isArray(entry?.hooks) &&
-      entry.hooks.some((hook: any) => hook?.name === 'agent-pulse' && this.hasAgentPulseCommand(hook)),
     );
   }
 
@@ -230,23 +227,78 @@ export class ConfigWriter {
     );
   }
 
-  private isGeminiCliHookInstalled(projectPath?: string): boolean {
-    const geminiDir = projectPath
-      ? path.join(projectPath, '.gemini')
-      : path.join(os.homedir(), '.gemini');
-    const settingsPath = path.join(geminiDir, 'settings.json');
-    const settings = this.readJson(settingsPath);
-    if (!settings?.hooks) return false;
+  private isAntigravityCliHookInstalled(projectPath?: string): boolean {
+    // Antigravity reads hooks from a dedicated hooks.json. Per docs, the global
+    // location is ~/.gemini/config/hooks.json and workspace is .agents/hooks.json.
+    // (Despite being CLI-related, hooks.json sits in `config/` — not under
+    // `antigravity-cli/`, which is reserved for runtime state like conversations.)
+    const { hooksJsonPath, scriptDir } = this.antigravityCliPaths(projectPath);
+    const config = this.readJson(hooksJsonPath);
+    const group = config?.['agent-pulse'];
+    if (!group) return false;
 
     const scriptsExist = this.hasAllFiles([
-      path.join(geminiDir, 'hooks', 'agent-pulse.sh'),
-      path.join(geminiDir, 'hooks', 'agent-pulse.ps1'),
+      path.join(scriptDir, 'agent-pulse.sh'),
+      path.join(scriptDir, 'agent-pulse.ps1'),
     ]);
     if (!scriptsExist) return false;
 
-    return ['SessionStart', 'SessionEnd', 'BeforeAgent', 'AfterAgent', 'BeforeTool', 'AfterTool', 'Notification'].every((event) =>
-      this.hookArrayHasNamedAgentPulse(settings.hooks[event]),
+    // PreToolUse / PostToolUse use the matcher-wrapped shape:
+    //   [{ matcher: '*', hooks: [{ type, command, ... }] }]
+    const matcherOk = ['PreToolUse', 'PostToolUse'].every((event) =>
+      this.hookArrayHasAgentPulseCommand(group[event]),
     );
+    // PreInvocation / PostInvocation / Stop have no matcher target — handler
+    // objects sit directly in the array: [{ type, command, ... }]
+    const flatOk = ['PreInvocation', 'PostInvocation', 'Stop'].every((event) =>
+      Array.isArray(group[event]) && group[event].some((h: any) => this.hasAgentPulseCommand(h)),
+    );
+
+    return matcherOk && flatOk;
+  }
+
+  /**
+   * Resolves a Windows path to its 8.3 short-name form (e.g. `C:\Users\Long
+   * Name\file.ps1` → `C:\Users\LONGNA~1\file.ps1`). Used to dodge cmd.exe's
+   * quote-mangling when a hook command's path contains spaces. The file must
+   * already exist on disk (the Win32 API needs to query the filesystem).
+   * Falls back to the original path if resolution fails or 8.3 generation
+   * is disabled on the volume.
+   */
+  private toWindowsShortPath(longPath: string): string {
+    if (process.platform !== 'win32') return longPath;
+    try {
+      const out = execFileSync(
+        'powershell',
+        ['-NoProfile', '-NonInteractive', '-Command',
+          `(New-Object -ComObject Scripting.FileSystemObject).GetFile('${longPath.replace(/'/g, "''")}').ShortPath`],
+        { encoding: 'utf8', windowsHide: true },
+      ).trim();
+      // If the volume has 8.3 disabled, ShortPath returns the long path unchanged
+      // — in that case there's nothing better we can do; the install will likely
+      // still fail at runtime, but at least we haven't made it worse.
+      return out && !out.includes(' ') ? out : longPath;
+    } catch {
+      return longPath;
+    }
+  }
+
+  private antigravityCliPaths(projectPath?: string) {
+    // Workspace install puts everything under .agents/. Global install splits
+    // hooks.json (under ~/.gemini/config/) from our scripts (in a sibling
+    // agent-pulse/ folder so we don't pollute config/) for cleanliness.
+    if (projectPath) {
+      const agentsDir = path.join(projectPath, '.agents');
+      return {
+        hooksJsonPath: path.join(agentsDir, 'hooks.json'),
+        scriptDir:     path.join(agentsDir, 'agent-pulse'),
+      };
+    }
+    const configDir = path.join(os.homedir(), '.gemini', 'config');
+    return {
+      hooksJsonPath: path.join(configDir, 'hooks.json'),
+      scriptDir:     path.join(configDir, 'agent-pulse'),
+    };
   }
 
   /** Bash script: reads stdin JSON, POSTs to the bridge, exits 0 (success / allow). */
@@ -493,87 +545,126 @@ exit 0
     return { success: true, path: hookFilePath };
   }
 
-  private writeGeminiCliHook(projectPath?: string) {
-    const geminiDir = projectPath
-      ? path.join(projectPath, '.gemini')
-      : path.join(os.homedir(), '.gemini');
-    const hooksScriptDir = path.join(geminiDir, 'hooks');
+  private writeAntigravityCliHook(projectPath?: string) {
+    const { hooksJsonPath, scriptDir } = this.antigravityCliPaths(projectPath);
 
-    if (!fs.existsSync(hooksScriptDir)) {
-      fs.mkdirSync(hooksScriptDir, { recursive: true });
+    if (!fs.existsSync(scriptDir)) {
+      fs.mkdirSync(scriptDir, { recursive: true });
     }
 
-    // Write hook scripts — these inject "source":"gemini-cli" into the JSON
-    // so the bridge can reliably identify Gemini CLI payloads.
-    const shPath  = path.join(hooksScriptDir, 'agent-pulse.sh');
-    const ps1Path = path.join(hooksScriptDir, 'agent-pulse.ps1');
+    const shPath  = path.join(scriptDir, 'agent-pulse.sh');
+    const ps1Path = path.join(scriptDir, 'agent-pulse.ps1');
 
-    fs.writeFileSync(shPath, this.buildGeminiShellScript(), { mode: 0o755 });
-    fs.writeFileSync(ps1Path, this.buildGeminiPowerShellScript());
+    fs.writeFileSync(shPath, this.buildAntigravityShellScript(), { mode: 0o755 });
+    fs.writeFileSync(ps1Path, this.buildAntigravityPowerShellScript());
 
+    // The hook command needs to include the event name as an argument so the
+    // script can tag the payload (Antigravity does not include the event name
+    // in stdin, unlike Gemini's `hook_event_name`). PowerShell's -File form
+    // accepts positional args after the script path.
     const isWindows = process.platform === 'win32';
-    const hookCommand = isWindows
-      ? `powershell -ExecutionPolicy Bypass -File "${ps1Path.replace(/\\/g, '/')}"`
-      : `"${shPath}"`;
+    // Windows: Antigravity spawns hook commands through cmd.exe, whose quote-
+    // stripping breaks a quoted path containing spaces (e.g. usernames like
+    // "ZTI Tech Lead"). PowerShell then sees a truncated -File arg, exits
+    // non-zero, and Antigravity reports "Agent execution terminated due to
+    // error". The 8.3 short path has no spaces, so no quoting is needed.
+    const ps1Arg = isWindows ? this.toWindowsShortPath(ps1Path) : shPath;
+    const cmdFor = (event: string): string =>
+      isWindows
+        ? `powershell -ExecutionPolicy Bypass -File ${ps1Arg} ${event}`
+        : `"${shPath}" ${event}`;
+    // Timeout = 10s: PowerShell cold start on Windows can take 2-3s before the
+    // script even reaches our HTTP POST. 5s left no margin.
+    const handlerFor = (event: string) => ({ type: 'command', command: cmdFor(event), timeout: 10 });
 
-    // Write settings.json — Gemini CLI uses event-keyed arrays of matcher groups
-    const settingsPath = path.join(geminiDir, 'settings.json');
-    let settings: any = {};
-    if (fs.existsSync(settingsPath)) {
-      try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { /* start fresh */ }
-    }
-    settings.hooks = settings.hooks ?? {};
-
-    const hookEntry = { name: 'agent-pulse', type: 'command', command: hookCommand, timeout: 5000 };
-    const group = { matcher: '*', hooks: [hookEntry] };
-    const events = ['SessionStart', 'SessionEnd', 'BeforeAgent', 'AfterAgent', 'BeforeTool', 'AfterTool', 'Notification'];
-
-    for (const event of events) {
-      const arr: any[] = settings.hooks[event] ?? [];
-      // Remove any existing agent-pulse entries for idempotency
-      const filtered = arr.filter((g: any) =>
-        !g.hooks?.some((h: any) => h.name === 'agent-pulse')
-      );
-      filtered.push(group);
-      settings.hooks[event] = filtered;
+    let config: any = {};
+    if (fs.existsSync(hooksJsonPath)) {
+      try { config = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf8')); } catch { /* start fresh */ }
     }
 
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-    return { success: true, path: settingsPath };
+    // Hook-group names sit at the top level of hooks.json (no `hooks` wrapper).
+    // PreToolUse/PostToolUse use the matcher-wrapped shape; the other three
+    // events are a flat list of handler objects (matcher N/A per docs).
+    config['agent-pulse'] = {
+      PreInvocation:  [handlerFor('PreInvocation')],
+      PreToolUse:     [{ matcher: '*', hooks: [handlerFor('PreToolUse')] }],
+      PostToolUse:    [{ matcher: '*', hooks: [handlerFor('PostToolUse')] }],
+      PostInvocation: [handlerFor('PostInvocation')],
+      Stop:           [handlerFor('Stop')],
+    };
+
+    if (!fs.existsSync(path.dirname(hooksJsonPath))) {
+      fs.mkdirSync(path.dirname(hooksJsonPath), { recursive: true });
+    }
+    fs.writeFileSync(hooksJsonPath, JSON.stringify(config, null, 2));
+    return { success: true, path: hooksJsonPath };
   }
 
-  /** Bash script for Gemini CLI: injects tool identifier before forwarding to bridge. */
-  private buildGeminiShellScript(): string {
+  /**
+   * Bash script for Antigravity CLI. argv[1] is the event name (passed by
+   * hooks.json) since Antigravity does not include it in the stdin payload.
+   * The script injects `_ap_tool` + `hook_event_name` into the JSON body and
+   * forwards it to the bridge. PreToolUse must emit `{"decision":"allow"}`
+   * (required field per docs); all other events emit `{}`.
+   */
+  private buildAntigravityShellScript(): string {
+    // Single-quote-close / interpolate $EVENT / single-quote-reopen avoids
+    // escaping every `"` inside the injected JSON fragment.
+    // PreToolUse needs decision:allow per docs (required field, otherwise agy
+    // may block). Stop's decision is also required — any value other than
+    // "continue" allows the stop, so we emit "allow" to be explicit.
     return `#!/usr/bin/env bash
-# Agent Pulse — Gemini CLI hook script (bash)
-# Reads event JSON from stdin, injects a tool identifier, and forwards to bridge.
+# Agent Pulse — Antigravity CLI hook script (bash)
+EVENT="\${1:-}"
 BODY=$(cat)
-BODY=$(echo "$BODY" | sed 's/^{/{"_ap_tool":"gemini-cli",/')
-curl -s -o /dev/null -X POST \\
+INJECT='"_ap_tool":"antigravity-cli","hook_event_name":"'"$EVENT"'",'
+BODY=$(printf '%s' "$BODY" | sed "s/^{/{$INJECT/")
+curl -s --max-time 3 -o /dev/null -X POST \\
   -H "Content-Type: application/json" \\
   -d "$BODY" \\
-  "${this.bridgeUrl}" || true
-echo '{}'
+  "${this.bridgeUrl}" 2>/dev/null || true
+case "$EVENT" in
+  PreToolUse|Stop) printf '{"decision":"allow"}' ;;
+  *)               printf '{}' ;;
+esac
 exit 0
 `;
   }
 
-  /** PowerShell script for Gemini CLI: injects tool identifier before forwarding to bridge. */
-  private buildGeminiPowerShellScript(): string {
-    return `# Agent Pulse — Gemini CLI hook script (PowerShell)
-# Reads event JSON from stdin, injects a tool identifier, and forwards to bridge.
+  /**
+   * PowerShell counterpart of the bash script. Hardened against the usual
+   * Windows pitfalls that pollute stdout (which would corrupt the JSON agy
+   * parses):
+   *   - $ProgressPreference silences Invoke-WebRequest's progress bar
+   *   - $ErrorActionPreference + try/catch silence transient HTTP errors
+   *   - [Console]::Out.Write avoids the trailing CRLF Write-Output adds
+   *   - -TimeoutSec 3 caps the bridge round-trip well under agy's timeout
+   */
+  private buildAntigravityPowerShellScript(): string {
+    return `# Agent Pulse — Antigravity CLI hook script (PowerShell)
+param([string]$Event = '')
+$ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
 $reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
 $body = $reader.ReadToEnd()
 $reader.Close()
-$body = $body -replace '^\\{', '{"_ap_tool":"gemini-cli",'
+$inject = '"_ap_tool":"antigravity-cli","hook_event_name":"' + $Event + '",'
+$body = $body -replace '^\\{', ('{' + $inject)
 try {
   Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
     -Method POST \`
     -ContentType "application/json" \`
     -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
-    -UseBasicParsing | Out-Null
+    -UseBasicParsing -TimeoutSec 3 | Out-Null
 } catch { }
-Write-Output '{}'
+
+if ($Event -eq 'PreToolUse' -or $Event -eq 'Stop') {
+  [Console]::Out.Write('{"decision":"allow"}')
+} else {
+  [Console]::Out.Write('{}')
+}
 exit 0
 `;
   }
@@ -708,30 +799,17 @@ exit 0
       return { success: true };
     }
 
-    if (toolId === 'gemini-cli') {
-      const geminiDir = projectPath
-        ? path.join(projectPath, '.gemini')
-        : path.join(os.homedir(), '.gemini');
-      const settingsPath = path.join(geminiDir, 'settings.json');
-      if (fs.existsSync(settingsPath)) {
+    if (toolId === 'antigravity-cli') {
+      const { hooksJsonPath, scriptDir } = this.antigravityCliPaths(projectPath);
+      if (fs.existsSync(hooksJsonPath)) {
         try {
-          const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-          const events = ['SessionStart', 'SessionEnd', 'BeforeAgent', 'AfterAgent', 'BeforeTool', 'AfterTool', 'Notification'];
-          for (const event of events) {
-            if (settings.hooks?.[event]) {
-              settings.hooks[event] = settings.hooks[event].filter((g: any) =>
-                !g.hooks?.some((h: any) => h.name === 'agent-pulse')
-              );
-              if (settings.hooks[event].length === 0) delete settings.hooks[event];
-            }
-          }
-          if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks;
-          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+          const config = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf8'));
+          delete config['agent-pulse'];
+          fs.writeFileSync(hooksJsonPath, JSON.stringify(config, null, 2));
         } catch { /* ignore */ }
       }
-      // Remove hook scripts
-      const shPath  = path.join(geminiDir, 'hooks', 'agent-pulse.sh');
-      const ps1Path = path.join(geminiDir, 'hooks', 'agent-pulse.ps1');
+      const shPath  = path.join(scriptDir, 'agent-pulse.sh');
+      const ps1Path = path.join(scriptDir, 'agent-pulse.ps1');
       if (fs.existsSync(shPath))  fs.unlinkSync(shPath);
       if (fs.existsSync(ps1Path)) fs.unlinkSync(ps1Path);
       return { success: true };

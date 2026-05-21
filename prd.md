@@ -130,4 +130,4 @@ Codex: https://developers.openai.com/codex/hooks
 Cursor: https://cursor.com/docs/hooks
 Claude Code: https://code.claude.com/docs/en/hooks
 Kiro: https://kiro.dev/docs/hooks/
-Gemini CLI: https://geminicli.com/docs/hooks/
+Antigravity CLI: https://www.antigravity.google/docs/hooks

@@ -1,4 +1,4 @@
-export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'gemini-cli';
+export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'antigravity-cli';
 export type AgentState = 'working' | 'waiting' | 'idle' | 'idle-active' | 'error';
 
 export interface NormalizedEvent {

@@ -271,81 +271,64 @@ describe('Kiro events', () => {
   });
 });
 
-// ── Gemini CLI ───────────────────────────────────────────────────────────────
+// ── Antigravity CLI ──────────────────────────────────────────────────────────
 
-const gemini = (hook_event_name: string, extra: object = {}) => ({
+// Antigravity stdin uses camelCase; our hook script injects _ap_tool +
+// hook_event_name before forwarding to the bridge.
+const antigravity = (hook_event_name: string, extra: object = {}) => ({
   hook_event_name,
-  _ap_tool: 'gemini-cli',
-  session_id: 'sess-gemini',
+  _ap_tool: 'antigravity-cli',
+  conversationId: 'conv-agy',
   ...extra,
 });
 
-describe('Gemini CLI events', () => {
-  it('SessionStart → working', () => {
-    const r = normalizePayload(gemini('SessionStart'));
-    expect(r?.toolId).toBe('gemini-cli');
+describe('Antigravity CLI events', () => {
+  it('PreInvocation → working', () => {
+    const r = normalizePayload(antigravity('PreInvocation'));
+    expect(r?.toolId).toBe('antigravity-cli');
     expect(r?.state).toBe('working');
   });
 
-  it('BeforeAgent → working', () => {
-    expect(normalizePayload(gemini('BeforeAgent'))?.state).toBe('working');
+  it('PreToolUse → working', () => {
+    expect(normalizePayload(antigravity('PreToolUse', { toolCall: { name: 'run_command', args: {} } }))?.state).toBe('working');
   });
 
-  it('BeforeTool → working', () => {
-    expect(normalizePayload(gemini('BeforeTool', { tool_name: 'write_file' }))?.state).toBe('working');
+  it('PostToolUse → working (loop continues)', () => {
+    expect(normalizePayload(antigravity('PostToolUse'))?.state).toBe('working');
   });
 
-  it('BeforeModel → working', () => {
-    expect(normalizePayload(gemini('BeforeModel'))?.state).toBe('working');
+  it('PostInvocation → idle-active (turn complete)', () => {
+    expect(normalizePayload(antigravity('PostInvocation'))?.state).toBe('idle-active');
   });
 
-  it('BeforeToolSelection → working', () => {
-    expect(normalizePayload(gemini('BeforeToolSelection'))?.state).toBe('working');
+  it('Stop → idle-active', () => {
+    expect(normalizePayload(antigravity('Stop'))?.state).toBe('idle-active');
   });
 
-  it('AfterAgent → idle-active (agent loop ended, user not blocked)', () => {
-    expect(normalizePayload(gemini('AfterAgent'))?.state).toBe('idle-active');
+  it('unknown Antigravity event → null', () => {
+    expect(normalizePayload(antigravity('UnknownEvent'))).toBeNull();
   });
 
-  it('Notification → waiting (CLI is blocked on user attention)', () => {
-    expect(normalizePayload(gemini('Notification'))?.state).toBe('waiting');
+  it('extracts conversationId into payload.sessionId', () => {
+    const r = normalizePayload(antigravity('PreToolUse'));
+    expect(r?.payload.sessionId).toBe('conv-agy');
   });
 
-  it('SessionEnd → idle-active', () => {
-    expect(normalizePayload(gemini('SessionEnd'))?.state).toBe('idle-active');
+  it('extracts toolCall.name into payload.taskSummary', () => {
+    const r = normalizePayload(antigravity('PreToolUse', { toolCall: { name: 'run_command', args: {} } }));
+    expect(r?.payload.taskSummary).toBe('Tool: run_command');
   });
 
-  it('AfterTool → idle-active', () => {
-    expect(normalizePayload(gemini('AfterTool'))?.state).toBe('idle-active');
-  });
-
-  it('AfterModel → idle-active', () => {
-    expect(normalizePayload(gemini('AfterModel'))?.state).toBe('idle-active');
-  });
-
-  it('unknown Gemini event → null', () => {
-    expect(normalizePayload(gemini('UnknownEvent'))).toBeNull();
-  });
-
-  it('extracts session_id into payload.sessionId', () => {
-    const r = normalizePayload(gemini('BeforeAgent'));
-    expect(r?.payload.sessionId).toBe('sess-gemini');
-  });
-
-  it('extracts tool_name into payload.taskSummary', () => {
-    const r = normalizePayload(gemini('BeforeTool', { tool_name: 'read_file' }));
-    expect(r?.payload.taskSummary).toBe('Tool: read_file');
-  });
-
-  it('Gemini with PascalCase events is NOT misidentified as Claude Code', () => {
-    // Gemini uses PascalCase events like CC, but has _ap_tool: 'gemini-cli'
+  it('Antigravity with PascalCase events is NOT misidentified as Claude Code', () => {
+    // Antigravity uses PascalCase events overlapping with CC (PreToolUse/PostToolUse/Stop),
+    // but the _ap_tool marker disambiguates.
     const payload = {
-      hook_event_name: 'SessionStart',
-      _ap_tool: 'gemini-cli',
-      session_id: 'gemini-sess-1',
+      hook_event_name: 'PreToolUse',
+      _ap_tool: 'antigravity-cli',
+      conversationId: 'agy-conv-1',
     };
     const r = normalizePayload(payload);
-    expect(r?.toolId).toBe('gemini-cli');
+    expect(r?.toolId).toBe('antigravity-cli');
     expect(r?.toolId).not.toBe('claude-code');
   });
 });

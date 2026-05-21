@@ -134,32 +134,30 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
       ],
     },
   },
-  'gemini-cli': {
-    label: 'Gemini CLI',
-    icon: './assets/gemini.png',
+  'antigravity-cli': {
+    label: 'Antigravity CLI',
+    icon: './assets/antigravity.png',
     hookInfo: {
       mechanism: 'Shell Hook',
-      configFile: '~/.gemini/settings.json',
+      configFile: '~/.gemini/config/hooks.json',
       description:
-        'Agent Pulse installs a shell hook script and registers it in ~/.gemini/settings.json. ' +
-        'Gemini CLI spawns the script on SessionStart, SessionEnd, BeforeAgent, AfterAgent, BeforeTool, ' +
-        'AfterTool, and Notification events, passing event JSON via stdin. ' +
-        'The script injects a tool identifier and forwards the payload to the bridge.',
+        'Agent Pulse writes a dedicated ~/.gemini/config/hooks.json and a shell hook script. ' +
+        'Antigravity CLI (agy) spawns the script on PreInvocation, PreToolUse, PostToolUse, ' +
+        'PostInvocation, and Stop events, passing event JSON via stdin. The event name is passed ' +
+        'as a command argument so the script can tag the payload before forwarding it to the bridge.',
       snippet: JSON.stringify({
-        hooks: {
-          SessionStart: [{ matcher: '*', hooks: [{ name: 'agent-pulse', type: 'command', command: '~/.gemini/hooks/agent-pulse.sh', timeout: 5000 }] }],
-          SessionEnd:   [{ matcher: '*', hooks: [{ name: 'agent-pulse', type: 'command', command: '~/.gemini/hooks/agent-pulse.sh', timeout: 5000 }] }],
-          BeforeAgent:  [{ matcher: '*', hooks: [{ name: 'agent-pulse', type: 'command', command: '~/.gemini/hooks/agent-pulse.sh', timeout: 5000 }] }],
-          AfterAgent:   [{ matcher: '*', hooks: [{ name: 'agent-pulse', type: 'command', command: '~/.gemini/hooks/agent-pulse.sh', timeout: 5000 }] }],
-          BeforeTool:   [{ matcher: '*', hooks: [{ name: 'agent-pulse', type: 'command', command: '~/.gemini/hooks/agent-pulse.sh', timeout: 5000 }] }],
-          AfterTool:    [{ matcher: '*', hooks: [{ name: 'agent-pulse', type: 'command', command: '~/.gemini/hooks/agent-pulse.sh', timeout: 5000 }] }],
-          Notification: [{ matcher: '*', hooks: [{ name: 'agent-pulse', type: 'command', command: '~/.gemini/hooks/agent-pulse.sh', timeout: 5000 }] }],
+        'agent-pulse': {
+          PreInvocation:  [{ type: 'command', command: '~/.gemini/config/agent-pulse/agent-pulse.sh PreInvocation',  timeout: 5 }],
+          PreToolUse:     [{ matcher: '*', hooks: [{ type: 'command', command: '~/.gemini/config/agent-pulse/agent-pulse.sh PreToolUse',  timeout: 5 }] }],
+          PostToolUse:    [{ matcher: '*', hooks: [{ type: 'command', command: '~/.gemini/config/agent-pulse/agent-pulse.sh PostToolUse', timeout: 5 }] }],
+          PostInvocation: [{ type: 'command', command: '~/.gemini/config/agent-pulse/agent-pulse.sh PostInvocation', timeout: 5 }],
+          Stop:           [{ type: 'command', command: '~/.gemini/config/agent-pulse/agent-pulse.sh Stop',           timeout: 5 }],
         },
       }, null, 2),
       troubleshooting: [
-        'Restart the Gemini CLI — existing sessions will not pick up new hook registrations.',
-        'Open ~/.gemini/settings.json and confirm the hook entries are present and point to an executable script.',
-        'If you use multiple shells, ensure the ~/.gemini/hooks/agent-pulse.sh file has execute permissions.',
+        'Restart `agy` — existing sessions will not pick up new hook registrations.',
+        'Open ~/.gemini/config/hooks.json and confirm the agent-pulse group is present.',
+        'On Unix, ensure ~/.gemini/config/agent-pulse/agent-pulse.sh has execute permissions.',
         ...COMMON_TROUBLESHOOTING,
       ],
     },

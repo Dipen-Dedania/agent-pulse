@@ -20,7 +20,7 @@ export class ToolDetector {
       'vscode-copilot': this.detectVSCodeCopilot(),
       'openai-codex': this.detectOpenAICodex(),
       'kiro': this.detectKiro(),
-      'gemini-cli': this.detectGeminiCli(),
+      'antigravity-cli': this.detectAntigravityCli(),
     };
   }
 
@@ -126,12 +126,15 @@ export class ToolDetector {
     return { installed: false };
   }
 
-  private detectGeminiCli(): ToolDetection {
+  private detectAntigravityCli(): ToolDetection {
+    // Antigravity CLI (agy) nests its config dir inside the legacy `.gemini`
+    // directory at `~/.gemini/antigravity-cli/` rather than its own top-level
+    // dot dir. Probe that first, then fall back to PATH lookup for the binary.
     const home = os.homedir();
-    const configDir = path.join(home, '.gemini');
+    const configDir = path.join(home, '.gemini', 'antigravity-cli');
     if (existsSync(configDir)) return { installed: true, location: configDir };
 
-    const cliPath = this.whichCommand('gemini');
+    const cliPath = this.whichCommand('agy');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }

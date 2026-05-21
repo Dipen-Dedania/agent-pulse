@@ -305,107 +305,149 @@ describe('ConfigWriter — kiro', () => {
   });
 });
 
-// ── Gemini CLI ───────────────────────────────────────────────────────────────
+// ── Antigravity CLI ──────────────────────────────────────────────────────────
 
-describe('ConfigWriter — gemini-cli', () => {
-  it('creates ~/.gemini/settings.json with hook entries', async () => {
+describe('ConfigWriter — antigravity-cli', () => {
+  const hooksJsonRelPath = path.join('.gemini', 'config', 'hooks.json');
+  const scriptRelDir     = path.join('.gemini', 'config', 'agent-pulse');
+
+  it('creates ~/.gemini/config/hooks.json with the agent-pulse group at top level', async () => {
     await withFakeHome(async (writer) => {
-      const result = await writer.installHook('gemini-cli');
+      const result = await writer.installHook('antigravity-cli');
       expect(result.success).toBe(true);
-      expect(writer.isHookInstalled('gemini-cli')).toBe(true);
+      expect(writer.isHookInstalled('antigravity-cli')).toBe(true);
 
-      const settingsPath = path.join(tmpDir, '.gemini', 'settings.json');
-      expect(fs.existsSync(settingsPath)).toBe(true);
+      const hooksJsonPath = path.join(tmpDir, hooksJsonRelPath);
+      expect(fs.existsSync(hooksJsonPath)).toBe(true);
 
-      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-      expect(settings.hooks.SessionStart).toBeDefined();
-      expect(settings.hooks.BeforeTool).toBeDefined();
-      expect(settings.hooks.AfterAgent).toBeDefined();
-
-      const hook = settings.hooks.SessionStart[0].hooks[0];
-      expect(hook.name).toBe('agent-pulse');
-      expect(hook.type).toBe('command');
+      const config = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf8'));
+      // Hook groups sit at the top level — NOT under a `hooks` key.
+      expect(config.hooks).toBeUndefined();
+      const group = config['agent-pulse'];
+      expect(group).toBeDefined();
+      // PreToolUse uses matcher-wrapped shape
+      expect(group.PreToolUse[0].matcher).toBe('*');
+      expect(group.PreToolUse[0].hooks[0].type).toBe('command');
+      // PreInvocation uses flat handler shape (matcher N/A)
+      expect(group.PreInvocation[0].type).toBe('command');
+      expect(group.PreInvocation[0].matcher).toBeUndefined();
     });
   });
 
-  it('registers all 7 Gemini lifecycle events', async () => {
+  it('passes the event name as a command-line arg to the script', async () => {
     await withFakeHome(async (writer) => {
-      await writer.installHook('gemini-cli');
-      const settingsPath = path.join(tmpDir, '.gemini', 'settings.json');
-      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-      const events = Object.keys(settings.hooks);
+      await writer.installHook('antigravity-cli');
+      const config = JSON.parse(fs.readFileSync(path.join(tmpDir, hooksJsonRelPath), 'utf8'));
+      const group = config['agent-pulse'];
+      // On Windows the script path is rewritten to its 8.3 short form
+      // (AGENT-~1.PS1) to dodge cmd.exe quote-mangling on usernames with spaces.
+      expect(group.PreInvocation[0].command).toMatch(/(agent-pulse\.(sh|ps1)("|)|AGENT-~\d\.PS1)\s+PreInvocation$/i);
+      expect(group.PreToolUse[0].hooks[0].command).toMatch(/\s+PreToolUse$/);
+      expect(group.Stop[0].command).toMatch(/\s+Stop$/);
+    });
+  });
+
+  it('registers all 5 Antigravity lifecycle events', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('antigravity-cli');
+      const config = JSON.parse(fs.readFileSync(path.join(tmpDir, hooksJsonRelPath), 'utf8'));
+      const events = Object.keys(config['agent-pulse']);
       expect(events).toEqual(expect.arrayContaining([
-        'SessionStart', 'SessionEnd', 'BeforeAgent', 'AfterAgent',
-        'BeforeTool', 'AfterTool', 'Notification',
+        'PreInvocation', 'PreToolUse', 'PostToolUse', 'PostInvocation', 'Stop',
       ]));
-      expect(events).toHaveLength(7);
+      expect(events).toHaveLength(5);
     });
   });
 
-  it('creates hook scripts (bash + ps1) under ~/.gemini/hooks/', async () => {
+  it('creates hook scripts (bash + ps1) under ~/.gemini/config/agent-pulse/', async () => {
     await withFakeHome(async (writer) => {
-      await writer.installHook('gemini-cli');
-      const hooksDir = path.join(tmpDir, '.gemini', 'hooks');
-      expect(fs.existsSync(path.join(hooksDir, 'agent-pulse.sh'))).toBe(true);
-      expect(fs.existsSync(path.join(hooksDir, 'agent-pulse.ps1'))).toBe(true);
+      await writer.installHook('antigravity-cli');
+      const dir = path.join(tmpDir, scriptRelDir);
+      expect(fs.existsSync(path.join(dir, 'agent-pulse.sh'))).toBe(true);
+      expect(fs.existsSync(path.join(dir, 'agent-pulse.ps1'))).toBe(true);
     });
   });
 
-  it('hook scripts inject tool identifier', async () => {
+  it('hook scripts inject _ap_tool and hook_event_name based on argv', async () => {
     await withFakeHome(async (writer) => {
-      await writer.installHook('gemini-cli');
-      const shPath = path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.sh');
-      const shContent = fs.readFileSync(shPath, 'utf8');
-      expect(shContent).toContain('"_ap_tool":"gemini-cli"');
+      await writer.installHook('antigravity-cli');
+      const shContent = fs.readFileSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.sh'), 'utf8');
+      expect(shContent).toContain('"_ap_tool":"antigravity-cli"');
+      expect(shContent).toContain('hook_event_name');
+      expect(shContent).toMatch(/EVENT="\$\{1:-\}"/);
 
-      const ps1Path = path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.ps1');
-      const ps1Content = fs.readFileSync(ps1Path, 'utf8');
-      expect(ps1Content).toContain('"_ap_tool":"gemini-cli"');
+      const ps1Content = fs.readFileSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.ps1'), 'utf8');
+      expect(ps1Content).toContain('"_ap_tool":"antigravity-cli"');
+      expect(ps1Content).toContain('hook_event_name');
+      expect(ps1Content).toMatch(/param\(\[string\]\$Event/);
+    });
+  });
+
+  it('PreToolUse and Stop emit decision:allow; other events emit empty object', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('antigravity-cli');
+      const shContent = fs.readFileSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.sh'), 'utf8');
+      expect(shContent).toContain('"decision":"allow"');
+      expect(shContent).toContain(`printf '{}'`);
+      expect(shContent).toMatch(/PreToolUse\|Stop/);
+      const ps1Content = fs.readFileSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.ps1'), 'utf8');
+      expect(ps1Content).toContain('"decision":"allow"');
+      expect(ps1Content).toMatch(/\[Console\]::Out\.Write\('\{\}'\)/);
+      expect(ps1Content).toMatch(/\$Event -eq 'PreToolUse' -or \$Event -eq 'Stop'/);
     });
   });
 
   it('hook scripts exit 0', async () => {
     await withFakeHome(async (writer) => {
-      await writer.installHook('gemini-cli');
-      const shContent = fs.readFileSync(path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.sh'), 'utf8');
+      await writer.installHook('antigravity-cli');
+      const shContent = fs.readFileSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.sh'), 'utf8');
       expect(shContent).toContain('exit 0');
-      const ps1Content = fs.readFileSync(path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.ps1'), 'utf8');
+      const ps1Content = fs.readFileSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.ps1'), 'utf8');
       expect(ps1Content).toContain('exit 0');
     });
   });
 
-  it('preserves existing settings.json keys when merging', async () => {
+  it('preserves other hook groups in hooks.json when merging', async () => {
     await withFakeHome(async (writer) => {
-      const geminiDir = path.join(tmpDir, '.gemini');
-      fs.mkdirSync(geminiDir, { recursive: true });
+      const configDir = path.join(tmpDir, '.gemini', 'config');
+      fs.mkdirSync(configDir, { recursive: true });
       fs.writeFileSync(
-        path.join(geminiDir, 'settings.json'),
-        JSON.stringify({ theme: 'dark', model: 'gemini-2.5-pro' }, null, 2),
+        path.join(configDir, 'hooks.json'),
+        JSON.stringify({ 'my-linter': { PostToolUse: [{ matcher: '*', hooks: [] }] } }, null, 2),
       );
 
-      await writer.installHook('gemini-cli');
-      const settings = JSON.parse(fs.readFileSync(path.join(geminiDir, 'settings.json'), 'utf8'));
-      expect(settings.theme).toBe('dark');
-      expect(settings.model).toBe('gemini-2.5-pro');
-      expect(settings.hooks.SessionStart).toBeDefined();
+      await writer.installHook('antigravity-cli');
+      const config = JSON.parse(fs.readFileSync(path.join(configDir, 'hooks.json'), 'utf8'));
+      expect(config['my-linter']).toBeDefined();
+      expect(config['agent-pulse']).toBeDefined();
     });
   });
 
-  it('uninstall removes hook entries and scripts', async () => {
+  it('uninstall removes the agent-pulse group and scripts', async () => {
     await withFakeHome(async (writer) => {
-      await writer.installHook('gemini-cli');
-      writer.uninstallHook('gemini-cli');
+      await writer.installHook('antigravity-cli');
+      writer.uninstallHook('antigravity-cli');
 
-      const settingsPath = path.join(tmpDir, '.gemini', 'settings.json');
-      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-      expect(settings.hooks).toBeUndefined();
+      const config = JSON.parse(fs.readFileSync(path.join(tmpDir, hooksJsonRelPath), 'utf8'));
+      expect(config['agent-pulse']).toBeUndefined();
 
-      const shPath = path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.sh');
-      expect(fs.existsSync(shPath)).toBe(false);
-      const ps1Path = path.join(tmpDir, '.gemini', 'hooks', 'agent-pulse.ps1');
-      expect(fs.existsSync(ps1Path)).toBe(false);
-      expect(writer.isHookInstalled('gemini-cli')).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.sh'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.ps1'))).toBe(false);
+      expect(writer.isHookInstalled('antigravity-cli')).toBe(false);
     });
+  });
+
+  it('workspace install writes to <project>/.agents/hooks.json', async () => {
+    const projectPath = path.join(tmpDir, 'my-project');
+    const writer = new ConfigWriter();
+    const result = await writer.installHook('antigravity-cli', projectPath);
+    expect(result.success).toBe(true);
+    expect(writer.isHookInstalled('antigravity-cli', projectPath)).toBe(true);
+
+    const hooksJson = path.join(projectPath, '.agents', 'hooks.json');
+    expect(fs.existsSync(hooksJson)).toBe(true);
+    const config = JSON.parse(fs.readFileSync(hooksJson, 'utf8'));
+    expect(config['agent-pulse']).toBeDefined();
   });
 });
 

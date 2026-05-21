@@ -5,6 +5,7 @@ import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
 import { UsageSection, UsageConfigUI } from './UsageSection';
 import { CodexUsageSection, CodexUsageConfigUI } from './CodexUsageSection';
+import { GuardrailsTab } from './GuardrailsTab';
 
 interface ToolConfig {
   enabled: boolean;
@@ -120,6 +121,14 @@ const HookInfoModal: React.FC<{
 
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
+type TabId = 'hooks' | 'usage' | 'guardrails';
+
+const TABS: { id: TabId; label: string; description: string }[] = [
+  { id: 'hooks',      label: 'Hooks',      description: 'Manage which AI tools show a status bubble.' },
+  { id: 'usage',      label: 'Usage',      description: 'Monitor Claude and Codex plan usage.' },
+  { id: 'guardrails', label: 'Guardrails', description: 'Block or warn on risky shell commands.' },
+];
+
 export const SettingsPanel: React.FC = () => {
   const [tools, setTools] = useState<Record<ToolId, ToolConfig>>(
     {} as Record<ToolId, ToolConfig>,
@@ -130,6 +139,8 @@ export const SettingsPanel: React.FC = () => {
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
   const [codexUsageConfig, setCodexUsageConfig] = useState<CodexUsageConfigUI | null>(null);
   const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
+  const [activeTab, setActiveTab] = useState<TabId>('hooks');
+  const activeTabMeta = TABS.find((t) => t.id === activeTab)!;
 
   const getBubbleStates = React.useCallback(async (
     config?: { enabledBubbles?: Partial<Record<ToolId, boolean>> },
@@ -316,13 +327,37 @@ export const SettingsPanel: React.FC = () => {
         />
         <div>
           <h1 className='text-3xl font-bold tracking-tight'>Agent Pulse</h1>
-          <p className='text-slate-400 mt-1 text-sm'>
-            Manage which AI tools show a status bubble.
-          </p>
+          <p className='text-slate-400 mt-1 text-sm'>{activeTabMeta.description}</p>
         </div>
       </div>
 
-      {loading ? (
+      {/* Tab navigation */}
+      <div
+        role='tablist'
+        aria-label='Settings sections'
+        className='mb-8 flex gap-1 p-1 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-xl w-fit shadow-lg'
+      >
+        {TABS.map((tab) => {
+          const isActive = tab.id === activeTab;
+          return (
+            <button
+              key={tab.id}
+              role='tab'
+              aria-selected={isActive}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
+                isActive
+                  ? 'bg-slate-700 text-white shadow-inner'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700/40'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === 'hooks' && (loading ? (
         <div className='flex items-center gap-3 text-slate-400'>
           <div className='w-4 h-4 border-2 border-slate-500 border-t-blue-400 rounded-full animate-spin' />
           Detecting tools…
@@ -454,27 +489,35 @@ export const SettingsPanel: React.FC = () => {
             );
           })}
         </div>
+      ))}
+
+      {activeTab === 'hooks' && !loading && <StatesReference />}
+
+      {activeTab === 'usage' && (
+        <>
+          {usageConfig && (
+            <UsageSection
+              config={usageConfig}
+              status={usageStatus}
+              onChange={handleUsageConfigChange}
+              onRefresh={handleUsageRefresh}
+            />
+          )}
+          {codexUsageConfig && (
+            <CodexUsageSection
+              config={codexUsageConfig}
+              status={codexUsageStatus}
+              onChange={handleCodexUsageConfigChange}
+              onRefresh={handleCodexUsageRefresh}
+            />
+          )}
+          {!usageConfig && !codexUsageConfig && (
+            <p className='text-slate-400 text-sm'>Usage settings are loading…</p>
+          )}
+        </>
       )}
 
-      {usageConfig && (
-        <UsageSection
-          config={usageConfig}
-          status={usageStatus}
-          onChange={handleUsageConfigChange}
-          onRefresh={handleUsageRefresh}
-        />
-      )}
-
-      {codexUsageConfig && (
-        <CodexUsageSection
-          config={codexUsageConfig}
-          status={codexUsageStatus}
-          onChange={handleCodexUsageConfigChange}
-          onRefresh={handleCodexUsageRefresh}
-        />
-      )}
-
-      <StatesReference />
+      {activeTab === 'guardrails' && <GuardrailsTab />}
 
       {activeInfo && (
         <HookInfoModal

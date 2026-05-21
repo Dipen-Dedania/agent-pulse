@@ -8,6 +8,9 @@ import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
 import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig } from './user-config';
 import { ToolId } from '../common/types';
+import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
+import { CORE_RULES } from './guardrails/rules.core';
+import { isPatternSafe } from './guardrails/engine';
 import { logger } from '../common/logger';
 import { installFileLogSink } from './file-log-sink';
 import { UsagePoller } from './usage/poller';
@@ -30,15 +33,23 @@ class AgentPulseApp {
   private usagePoller: UsagePoller;
   private codexUsagePoller: CodexUsagePoller;
 
+  // Most-recent guardrail events kept in memory so a Settings window opened
+  // after the fact still sees what happened. Capped at GUARDRAIL_LOG_SIZE.
+  private guardrailLog: import('../common/guardrails').GuardrailEvent[] = [];
+  private static readonly GUARDRAIL_LOG_SIZE = 50;
+
   constructor() {
     this.stateManager = new StatusStateManager();
-    this.bridgeServer = new StatusBridgeServer(this.stateManager);
+    this.userConfig = loadConfig();
+    this.bridgeServer = new StatusBridgeServer(this.stateManager, {
+      getGuardrailConfig: () => this.userConfig.guardrails,
+      onGuardrailEvent: (event) => this.handleGuardrailEvent(event),
+    });
     this.bubbleManager = new BubbleManager();
     this.settingsWindow = new SettingsWindow();
     this.trayManager = new TrayManager();
     this.detector = new ToolDetector();
     this.writer = new ConfigWriter();
-    this.userConfig = loadConfig();
     this.usagePoller = new UsagePoller(this.userConfig.usage);
     this.codexUsagePoller = new CodexUsagePoller(this.userConfig.codexUsage);
   }
@@ -164,6 +175,59 @@ class AgentPulseApp {
       }
       return updated;
     });
+
+    // ── Guardrails IPC ────────────────────────────────────────────────────
+    // Returns built-in rule metadata so the UI can render the rule list
+    // without duplicating it. (Patterns are stringified — RegExp doesn't
+    // serialize across IPC.)
+    ipcMain.handle('guardrails:list-core-rules', () => {
+      return CORE_RULES.map(r => ({
+        ...r,
+        pattern: r.pattern instanceof RegExp ? r.pattern.source : r.pattern,
+        flags:   r.pattern instanceof RegExp ? r.pattern.flags  : (r.flags ?? 'i'),
+      }));
+    });
+
+    ipcMain.handle('guardrails:get-config', () => this.userConfig.guardrails);
+
+    ipcMain.handle('guardrails:update-config', (_event, partial: Partial<GuardrailConfig>) => {
+      this.userConfig.guardrails = { ...this.userConfig.guardrails, ...partial };
+      saveConfig(this.userConfig);
+      return this.userConfig.guardrails;
+    });
+
+    // Validate a regex pattern before saving. Returns { ok, reason? }.
+    ipcMain.handle('guardrails:validate-pattern', (_event, pattern: string) => {
+      return isPatternSafe(pattern);
+    });
+
+    // Append a new custom rule (after pattern validation). Throws on invalid.
+    ipcMain.handle('guardrails:add-custom-rule', (_event, rule: GuardrailRule) => {
+      const check = typeof rule.pattern === 'string' ? isPatternSafe(rule.pattern) : { ok: true };
+      if (!check.ok) throw new Error(`Invalid pattern: ${check.reason}`);
+      const next = [...this.userConfig.guardrails.customRules, { ...rule, source: 'user' as const }];
+      this.userConfig.guardrails = { ...this.userConfig.guardrails, customRules: next };
+      saveConfig(this.userConfig);
+      return this.userConfig.guardrails;
+    });
+
+    ipcMain.handle('guardrails:remove-custom-rule', (_event, ruleId: string) => {
+      const next = this.userConfig.guardrails.customRules.filter(r => r.id !== ruleId);
+      this.userConfig.guardrails = { ...this.userConfig.guardrails, customRules: next };
+      saveConfig(this.userConfig);
+      return this.userConfig.guardrails;
+    });
+
+    ipcMain.handle('guardrails:get-recent-events', () => this.guardrailLog);
+  }
+
+  // Push a guardrail event to every renderer window and append to the
+  // in-memory ring so the Settings log shows history when opened post-event.
+  private handleGuardrailEvent(event: import('../common/guardrails').GuardrailEvent) {
+    this.guardrailLog = [event, ...this.guardrailLog].slice(0, AgentPulseApp.GUARDRAIL_LOG_SIZE);
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('guardrail:event', event);
+    }
   }
 }
 

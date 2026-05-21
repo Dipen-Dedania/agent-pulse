@@ -1,5 +1,6 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus } from '../../../common/types';
+import { GuardrailEvent } from '../../../common/guardrails';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
 import { logger } from '../../../common/logger';
@@ -352,6 +353,28 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     };
   }, [toolId, updateStatus]);
 
+  // Guardrail signal — amber pulse for warn (~6s auto-fade), red dot for
+  // block (persistent until the next event or click). Each bubble listens
+  // independently and filters by toolId.
+  const [guardrailSignal, setGuardrailSignal] = useState<GuardrailEvent | null>(null);
+  useEffect(() => {
+    const handler = (_e: unknown, evt: GuardrailEvent) => {
+      if (evt.toolId !== toolId) return;
+      setGuardrailSignal(evt);
+      if (evt.decision === 'warn') {
+        const t = window.setTimeout(() => setGuardrailSignal((cur) => (cur === evt ? null : cur)), 6000);
+        return () => window.clearTimeout(t);
+      }
+    };
+    window.electron.on('guardrail:event', handler);
+    return () => window.electron.off('guardrail:event', handler);
+  }, [toolId]);
+
+  const dismissGuardrailSignal = useCallback(() => {
+    setGuardrailSignal(null);
+    window.electron.send('open-settings');
+  }, []);
+
   const dragOrigin = useRef<{ x: number; y: number } | null>(null);
 
   // Pixels of movement required before a mousedown is treated as a drag.
@@ -575,6 +598,57 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
               boxShadow: `0 0 6px ${glow}`,
             }}
           />
+        )}
+
+        {/* Guardrail ring — amber pulse on warn, solid red on block. Sits
+            outside the orb so it doesn't fight the working/waiting orbits. */}
+        {guardrailSignal && (
+          <motion.div
+            animate={
+              guardrailSignal.decision === 'block'
+                ? { opacity: 1 }
+                : {
+                    opacity: [0.4, 1, 0.4],
+                    boxShadow: [
+                      '0 0 0px 0px rgba(245,158,11,0.0)',
+                      '0 0 10px 4px rgba(245,158,11,0.7)',
+                      '0 0 0px 0px rgba(245,158,11,0.0)',
+                    ],
+                  }
+            }
+            transition={
+              guardrailSignal.decision === 'block'
+                ? { duration: 0.2 }
+                : { duration: 1.2, repeat: Infinity, ease: 'easeInOut' }
+            }
+            className='absolute w-[58px] h-[58px] rounded-full pointer-events-none'
+            style={{
+              border: `2px solid ${
+                guardrailSignal.decision === 'block'
+                  ? (isDark ? 'rgba(239,68,68,0.95)' : 'rgba(220,38,38,0.95)')
+                  : (isDark ? 'rgba(245,158,11,0.85)' : 'rgba(217,119,6,0.85)')
+              }`,
+            }}
+          />
+        )}
+
+        {/* Guardrail badge — click opens Settings (where the events log is). */}
+        {guardrailSignal && (
+          <button
+            onClick={(e) => { e.stopPropagation(); dismissGuardrailSignal(); }}
+            className='absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center cursor-pointer'
+            style={{
+              background: guardrailSignal.decision === 'block'
+                ? (isDark ? 'rgba(239,68,68,0.95)' : 'rgba(220,38,38,0.95)')
+                : (isDark ? 'rgba(245,158,11,0.95)' : 'rgba(217,119,6,0.95)'),
+              boxShadow: guardrailSignal.decision === 'block'
+                ? '0 0 6px rgba(239,68,68,0.8)'
+                : '0 0 6px rgba(245,158,11,0.7)',
+            }}
+            title={`${guardrailSignal.decision === 'block' ? 'Blocked' : 'Warning'}: ${guardrailSignal.matched.map(m => m.message).join(' | ')}`}
+          >
+            <span className='text-white text-[9px] font-bold leading-none'>!</span>
+          </button>
         )}
 
         {/* Use-it-or-lose-it nudge badge — only on the Claude bubble, only when

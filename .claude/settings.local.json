@@ -42,7 +42,8 @@
       "Bash(\"/c/Users/ZTI Tech Lead/AppData/Local/agy/bin/agy.exe\" help)",
       "Bash(\"/c/Users/ZTI Tech Lead/AppData/Local/agy/bin/agy.exe\" help install)",
       "mcp__chrome-devtools__wait_for",
-      "WebFetch(domain:agentpedia.codes)"
+      "WebFetch(domain:agentpedia.codes)",
+      "Bash(npx vite *)"
     ],
     "deny": [
       "Read(./.env*)",

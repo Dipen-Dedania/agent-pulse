@@ -2,7 +2,15 @@ import http from 'http';
 import { StatusStateManager } from './state-manager';
 import { BRIDGE_PORT } from './config';
 import { ToolId, AgentState } from '../../common/types';
+import { GuardrailConfig, GuardrailEvent, GuardrailEvaluation } from '../../common/guardrails';
+import { evaluateCommand, detectOs } from '../guardrails/engine';
+import { extractCommand } from '../guardrails/extractCommand';
 import { logger } from '../../common/logger';
+
+export interface BridgeOptions {
+  getGuardrailConfig?: () => GuardrailConfig;
+  onGuardrailEvent?: (event: GuardrailEvent) => void;
+}
 
 // Claude Code hook event names → AgentState
 // `waiting` = agent is *blocked* on the user (permission grant / elicitation response).
@@ -63,9 +71,11 @@ export class StatusBridgeServer {
   private server: http.Server;
   private stateManager: StatusStateManager;
   private port: number = BRIDGE_PORT;
+  private options: BridgeOptions;
 
-  constructor(stateManager: StatusStateManager) {
+  constructor(stateManager: StatusStateManager, options: BridgeOptions = {}) {
     this.stateManager = stateManager;
+    this.options = options;
     this.server = http.createServer((req, res) => this.handleRequest(req, res));
   }
 
@@ -96,6 +106,20 @@ export class StatusBridgeServer {
 
           const { toolId, state, payload } = normalized;
           logger.debug(`[Bridge] Normalized event: toolId=${toolId} state=${state} payload=${JSON.stringify(payload)}`);
+
+          // Guardrail evaluation runs only on tool-call entry. For non-shell
+          // tools or non-PreToolUse events, extractCommand returns null and
+          // we fall through to the normal status broadcast path.
+          const evaluation = this.evaluateGuardrails(toolId, data);
+
+          if (evaluation && evaluation.eval.decision === 'block') {
+            // Hard stop — don't propagate working state for a command we're
+            // refusing. The state stays whatever it was.
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(buildBlockResponse(toolId, evaluation.eval)));
+            return;
+          }
+
           this.stateManager.updateStatus(toolId, state, payload);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ status: 'ok' }));
@@ -174,6 +198,41 @@ export class StatusBridgeServer {
     res.end();
   }
 
+  // Run extracted command (if any) through the guardrail engine and emit
+  // a guardrail event via the options callback when the decision isn't allow.
+  // Returns the evaluation + extracted command so the request handler can
+  // decide whether to respond with a block payload.
+  private evaluateGuardrails(toolId: ToolId, raw: any):
+    { command: string; eval: GuardrailEvaluation } | null {
+    const command = extractCommand(toolId, raw);
+    if (!command) return null;
+
+    const config = this.options.getGuardrailConfig?.();
+    const evaluation = evaluateCommand(command, { os: detectOs(), toolId, config });
+    if (evaluation.decision === 'allow') {
+      return { command, eval: evaluation };
+    }
+
+    const event: GuardrailEvent = {
+      ts: Date.now(),
+      toolId,
+      command,
+      decision: evaluation.decision,
+      matched: evaluation.matched,
+      blockable: evaluation.blockable,
+    };
+    try {
+      this.options.onGuardrailEvent?.(event);
+    } catch (e) {
+      logger.warn('[Bridge] onGuardrailEvent threw', e);
+    }
+    logger.info(
+      `[Bridge/Guardrail] ${evaluation.decision.toUpperCase()} toolId=${toolId} ` +
+      `rules=${evaluation.matched.map(m => m.ruleId).join(',')} command=${JSON.stringify(command)}`,
+    );
+    return { command, eval: evaluation };
+  }
+
   /**
    * Accepts seven formats (detection order matters — more specific markers first):
    *
@@ -205,6 +264,37 @@ export class StatusBridgeServer {
   private normalizePayload(data: any): { toolId: ToolId; state: AgentState; payload: any } | null {
     return normalizePayload(data);
   }
+}
+
+// Build a hook-response body that asks the originating tool to deny the
+// pending tool call. Each tool documents a different shape; we emit all the
+// fields each one cares about so a single payload works everywhere.
+//
+// - Claude Code: `hookSpecificOutput.permissionDecision = "deny"` (CC PreToolUse).
+// - Antigravity: `{ decision: "deny", reason: "..." }` (our hook script checks this).
+// - Tools that don't honour these fields ignore them; the response still
+//   returns 200 OK so the hook script doesn't error out.
+export function buildBlockResponse(toolId: ToolId, evaluation: GuardrailEvaluation): any {
+  const reason = evaluation.matched
+    .map(m => m.message + (m.suggestedFix ? ` ${m.suggestedFix}` : ''))
+    .join(' | ') || 'Blocked by Agent Pulse guardrail.';
+  const ruleIds = evaluation.matched.map(m => m.ruleId).join(',');
+
+  // Lowest common denominator: top-level `decision`/`reason` covers Antigravity
+  // and any other tool that reads the obvious field. `hookSpecificOutput` is
+  // Claude Code's documented shape for PreToolUse permission gating.
+  return {
+    status: 'blocked',
+    decision: 'block',
+    reason,
+    matchedRules: ruleIds,
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+    continue: false,
+  };
 }
 
 // Exported for unit testing

@@ -63,25 +63,16 @@ UX / developer experience
 - When appropriate, add **short inline docs / comments** explaining:
   - How to add a new rule
   - How the evaluation pipeline works
+- Allow end users to add their commands into the list as well. 
+- User can also disable the individual rules based on priority. This will be saved for future uses as a preference. 
 
 Workflow
-1. First, describe your understanding of the current hook watcher architecture and where command data flows.
-2. Propose a small design sketch for the guardrail module (files, functions, rule structure).
-3. Once I confirm (or after a short self‑check if everything is obvious), implement in small steps:
-   - Create the rule engine and a minimal initial rule set (both tiers).
-   - Integrate it into the hook watcher pipeline.
-   - Add tests.
-   - Add any UI/logging surfaces needed to make warnings and blocks visible.
-4. At the end, summarize:
-   - What rules exist (Tier 1 vs Tier 2, per OS)
-   - How to extend them
-   - How a future developer would plug this into additional tools (e.g., non‑Bash commands or other agents).
+1. First, describe your understanding of the current hook watcher architecture and where command data flows. Brainstrom and ask question to get clarity if needed.  
+2.Once I confirm, implement everything.
 
 Constraints and guardrails for YOU
 - Prefer **config + pure functions** over framework magic.
-- No speculative abstraction: keep it as simple as possible while still cleanly extensible.
 - Touch only the files that are necessary for this feature.
-- If you’re unsure about a rule (e.g., whether it should be Tier 1 or Tier 2), call it out explicitly in comments or TODOs rather than guessing.
 
 Start by:
 - Reading the repo.

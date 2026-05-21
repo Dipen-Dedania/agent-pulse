@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { ToolId } from '../common/types';
+import { GuardrailConfig } from '../common/guardrails';
 import { logger } from '../common/logger';
 
 // Cap warning fires when REMAINING credit ≤ threshold (i.e. you're about
@@ -33,6 +34,7 @@ export interface UserConfig {
   enabledBubbles: Partial<Record<ToolId, boolean>>;
   usage: UsageConfig;
   codexUsage: CodexUsageConfig;
+  guardrails: GuardrailConfig;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse-config.json');
@@ -54,6 +56,11 @@ const DEFAULTS: UserConfig = {
     intervalMs: 15 * 60 * 1000,
     capWarning: { enabled: true, threshold: 20 },
     nudge:      { enabled: false, threshold: 50 },
+  },
+  guardrails: {
+    enabled: true,
+    disabledRuleIds: [],
+    customRules: [],
   },
 };
 
@@ -85,6 +92,7 @@ export function loadConfig(): UserConfig {
       const parsed = JSON.parse(raw);
       const usage = parsed.usage ?? {};
       const codexUsage = parsed.codexUsage ?? {};
+      const guardrails = parsed.guardrails ?? {};
       return {
         ...DEFAULTS,
         ...parsed,
@@ -100,6 +108,11 @@ export function loadConfig(): UserConfig {
           ...codexUsage,
           capWarning: { ...DEFAULTS.codexUsage.capWarning, ...(codexUsage.capWarning ?? {}) },
           nudge:      { ...DEFAULTS.codexUsage.nudge,      ...(codexUsage.nudge ?? {}) },
+        },
+        guardrails: {
+          enabled:         guardrails.enabled ?? DEFAULTS.guardrails.enabled,
+          disabledRuleIds: Array.isArray(guardrails.disabledRuleIds) ? guardrails.disabledRuleIds : [],
+          customRules:     Array.isArray(guardrails.customRules)     ? guardrails.customRules     : [],
         },
       };
     }
@@ -117,6 +130,11 @@ export function loadConfig(): UserConfig {
       ...DEFAULTS.codexUsage,
       capWarning: { ...DEFAULTS.codexUsage.capWarning },
       nudge:      { ...DEFAULTS.codexUsage.nudge },
+    },
+    guardrails: {
+      ...DEFAULTS.guardrails,
+      disabledRuleIds: [...DEFAULTS.guardrails.disabledRuleIds],
+      customRules:     [...DEFAULTS.guardrails.customRules],
     },
   };
 }

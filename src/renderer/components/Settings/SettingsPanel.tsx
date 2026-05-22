@@ -15,6 +15,66 @@ interface ToolConfig {
   location?: string;
 }
 
+interface AutoLaunchState {
+  enabled: boolean;
+  effective: boolean;
+  packaged: boolean;
+}
+
+// ── General Section (app-level toggles) ─────────────────────────────────────
+
+const GeneralSection: React.FC = () => {
+  const [state, setState] = useState<AutoLaunchState | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.electron
+      .invoke('auto-launch:get')
+      .then((s: AutoLaunchState) => { if (!cancelled) setState(s); })
+      .catch((e: unknown) => logger.error('[GeneralSection] failed to load auto-launch state', e));
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleToggle = async () => {
+    if (!state) return;
+    try {
+      const next = await window.electron.invoke('auto-launch:set', !state.enabled);
+      setState(next);
+    } catch (e) {
+      logger.error('[GeneralSection] failed to set auto-launch', e);
+    }
+  };
+
+  if (!state) return null;
+  const checked = state.enabled;
+
+  return (
+    <div className='mb-6 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl flex items-center gap-4'>
+      <div className='flex-1'>
+        <p className='font-semibold text-white leading-tight'>Launch on startup</p>
+        <p className='text-xs text-slate-400 mt-1'>
+          {state.packaged
+            ? 'Start Agent Pulse automatically when you sign in. Works on Windows, macOS, and Linux.'
+            : 'Auto-launch is only applied to packaged installs. Toggle is remembered for the next build.'}
+        </p>
+      </div>
+      <button
+        onClick={handleToggle}
+        className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
+          checked ? 'bg-blue-500' : 'bg-slate-600'
+        }`}
+        aria-label='Toggle launch on startup'
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+            checked ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        />
+      </button>
+    </div>
+  );
+};
+
 // ── Hook Info Modal ──────────────────────────────────────────────────────────
 
 const HookInfoModal: React.FC<{
@@ -388,6 +448,8 @@ export const SettingsPanel: React.FC = () => {
           Detecting tools…
         </div>
       ) : (
+        <>
+        <GeneralSection />
         <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
           {(Object.keys(TOOL_META) as ToolId[]).map((toolId) => {
             const meta = TOOL_META[toolId];
@@ -413,10 +475,18 @@ export const SettingsPanel: React.FC = () => {
                     />
                   </div>
                   <div className='flex-1 min-w-0'>
-                    <div className='flex items-center gap-1.5'>
+                    <div className='flex items-center gap-1.5 flex-wrap'>
                       <p className='font-semibold text-white leading-tight'>
                         {meta.label}
                       </p>
+                      {meta.badges?.map((badge) => (
+                        <span
+                          key={badge}
+                          className='px-1.5 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[10px] font-semibold uppercase tracking-wide'
+                        >
+                          {badge}
+                        </span>
+                      ))}
                       <button
                         onClick={() => setActiveInfo(toolId)}
                         className='flex-shrink-0 w-4 h-4 rounded-full bg-slate-600/70 hover:bg-blue-500/60 border border-slate-500/50 hover:border-blue-400/50 text-slate-400 hover:text-blue-300 text-[9px] font-bold flex items-center justify-center cursor-pointer transition-colors'
@@ -514,6 +584,7 @@ export const SettingsPanel: React.FC = () => {
             );
           })}
         </div>
+        </>
       ))}
 
       {activeTab === 'hooks' && !loading && <StatesReference />}

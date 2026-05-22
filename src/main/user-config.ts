@@ -46,6 +46,7 @@ export interface UserConfig {
   codexUsage: CodexUsageConfig;
   antigravityUsage: AntigravityUsageConfig;
   guardrails: GuardrailConfig;
+  autoLaunch: boolean;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse-config.json');
@@ -79,6 +80,7 @@ const DEFAULTS: UserConfig = {
     disabledRuleIds: [],
     customRules: [],
   },
+  autoLaunch: false,
 };
 
 // Map legacy ToolId keys in persisted configs to their current names so a

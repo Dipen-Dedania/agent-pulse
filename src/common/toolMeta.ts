@@ -12,6 +12,9 @@ export interface ToolMeta {
   label: string;
   icon: string; // path relative to public/assets
   hookInfo: HookInfo;
+  // Short tags shown under the tool name (e.g. "CLI", "IDE"). Optional —
+  // omit when a single label is unambiguous.
+  badges?: string[];
 }
 
 const COMMON_TROUBLESHOOTING = [
@@ -135,16 +138,18 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
     },
   },
   'antigravity-cli': {
-    label: 'Antigravity CLI',
+    label: 'Antigravity',
+    badges: ['CLI', 'IDE'],
     icon: './assets/antigravity.png',
     hookInfo: {
       mechanism: 'Shell Hook',
       configFile: '~/.gemini/config/hooks.json',
       description:
         'Agent Pulse writes a dedicated ~/.gemini/config/hooks.json and a shell hook script. ' +
-        'Antigravity CLI (agy) spawns the script on PreInvocation, PreToolUse, PostToolUse, ' +
-        'PostInvocation, and Stop events, passing event JSON via stdin. The event name is passed ' +
-        'as a command argument so the script can tag the payload before forwarding it to the bridge.',
+        'Both the Antigravity CLI (agy) and the Antigravity IDE read the same hooks file, so a ' +
+        'single install lights up both surfaces. They spawn the script on PreInvocation, PreToolUse, ' +
+        'PostToolUse, PostInvocation, and Stop events, passing event JSON via stdin. The event name ' +
+        'is passed as a command argument so the script can tag the payload before forwarding it to the bridge.',
       snippet: JSON.stringify({
         'agent-pulse': {
           PreInvocation:  [{ type: 'command', command: '~/.gemini/config/agent-pulse/agent-pulse.sh PreInvocation',  timeout: 5 }],

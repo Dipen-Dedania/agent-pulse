@@ -16,10 +16,18 @@ import { installFileLogSink } from './file-log-sink';
 import { UsagePoller } from './usage/poller';
 import { CodexUsagePoller } from './codex-usage/poller';
 import { AntigravityUsagePoller } from './antigravity-usage/poller';
+import { isAutoLaunchEnabled, setAutoLaunch } from './auto-launch';
 
 // Windows uses this to group windows under our identity and show our taskbar icon.
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.agentpulse.app');
+}
+
+// Single-instance lock: a second launch should resurface the running instance,
+// not spawn a parallel one (which would also collide on the bridge port 4242).
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
 }
 
 class AgentPulseApp {
@@ -61,6 +69,13 @@ class AgentPulseApp {
     app.whenReady().then(() => installFileLogSink());
     this.bridgeServer.start();
 
+    // Second-instance handler: surface settings window so the user sees a
+    // response to clicking the shortcut again, instead of nothing happening.
+    app.on('second-instance', () => {
+      logger.info('[AgentPulseApp] second-instance detected — focusing settings');
+      this.settingsWindow.show();
+    });
+
     app.on('ready', () => {
       logger.info('[AgentPulseApp] app ready');
       this.setupIpc();
@@ -71,6 +86,10 @@ class AgentPulseApp {
       this.codexUsagePoller.start();
       this.antigravityUsagePoller.init();
       this.antigravityUsagePoller.start();
+
+      // Sync the OS login-item state to whatever we persisted. Cheap and
+      // self-healing if the user toggled it externally.
+      setAutoLaunch(this.userConfig.autoLaunch);
 
       this.trayManager.init({
         onShowSettings: () => this.settingsWindow.show(),
@@ -236,6 +255,24 @@ class AgentPulseApp {
     });
 
     ipcMain.handle('guardrails:get-recent-events', () => this.guardrailLog);
+
+    // ── Auto-launch IPC ───────────────────────────────────────────────────
+    ipcMain.handle('auto-launch:get', () => ({
+      enabled: this.userConfig.autoLaunch,
+      effective: isAutoLaunchEnabled(),
+      packaged: app.isPackaged,
+    }));
+
+    ipcMain.handle('auto-launch:set', (_event, enabled: boolean) => {
+      const applied = setAutoLaunch(enabled);
+      this.userConfig.autoLaunch = applied;
+      saveConfig(this.userConfig);
+      return {
+        enabled: applied,
+        effective: isAutoLaunchEnabled(),
+        packaged: app.isPackaged,
+      };
+    });
   }
 
   // Push a guardrail event to every renderer window and append to the

@@ -1,24 +1,58 @@
-import { ToolId, ToolStatus, AgentState } from '../../common/types';
+import { ToolId, ToolStatus, AgentState, NormalizedEvent } from '../../common/types';
 import { app, BrowserWindow } from 'electron';
 import { logger } from '../../common/logger';
 
+export type EventStreamListener = (event: NormalizedEvent) => void;
+
 export class StatusStateManager {
   private statuses: Map<ToolId, ToolStatus> = new Map();
+  private eventListeners: Set<EventStreamListener> = new Set();
 
   public updateStatus(toolId: ToolId, state: AgentState, details: any) {
     const current = this.statuses.get(toolId);
+    const timestamp = Date.now();
     logger.debug(`[StateManager] updateStatus called: toolId=${toolId} state=${state}`);
 
     const updatedStatus: ToolStatus = {
       toolId,
       state,
-      lastUpdated: Date.now(),
+      lastUpdated: timestamp,
       activeAgents: details.activeAgents || (current?.activeAgents || 0),
       currentTask: details.taskSummary,
     };
 
     this.statuses.set(toolId, updatedStatus);
     this.broadcastStatus(updatedStatus);
+
+    // Event-stream subscribers (timeline persistence, transcript reader, etc.)
+    // run in setImmediate so their work never blocks the HTTP response in the
+    // bridge handler — the bridge already responded before this returns.
+    const eventPayload: NormalizedEvent = {
+      toolId,
+      state,
+      timestamp,
+      payload: {
+        sessionId:      details.sessionId,
+        taskSummary:    details.taskSummary,
+        activeAgents:   details.activeAgents,
+        errorMessage:   details.errorMessage,
+        cwd:            details.cwd,
+        agentPid:       details.agentPid,
+        transcriptPath: details.transcriptPath,
+        model:          details.model,
+      },
+    };
+    setImmediate(() => {
+      for (const listener of this.eventListeners) {
+        try { listener(eventPayload); }
+        catch (e) { logger.warn('[StateManager] event listener threw:', e); }
+      }
+    });
+  }
+
+  public onEvent(listener: EventStreamListener): () => void {
+    this.eventListeners.add(listener);
+    return () => { this.eventListeners.delete(listener); };
   }
 
   public getStatus(toolId: ToolId) {

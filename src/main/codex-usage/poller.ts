@@ -35,10 +35,13 @@ const WINDOW_LABEL: Record<WindowKey, string> = {
   secondary: 'secondary',
 };
 
+export type CodexUsageStatusListener = (status: CodexUsageStatus) => void;
+
 export class CodexUsagePoller {
   private status: CodexUsageStatus = { state: 'unknown' };
   private timer: NodeJS.Timeout | null = null;
   private config: CodexUsageConfig;
+  private listeners: Set<CodexUsageStatusListener> = new Set();
   private lastCapNotified: Record<WindowKey, number> = { primary: 0, secondary: 0 };
   private lastNudgeNotified: Record<WindowKey, number> = { primary: 0, secondary: 0 };
   private currentDelayMs: number;
@@ -108,6 +111,11 @@ export class CodexUsagePoller {
 
   public getStatus(): CodexUsageStatus {
     return this.status;
+  }
+
+  public subscribe(listener: CodexUsageStatusListener): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────
@@ -237,6 +245,10 @@ export class CodexUsagePoller {
       if (!win.isDestroyed()) {
         win.webContents.send('codex-usage:updated', this.status);
       }
+    }
+    for (const listener of this.listeners) {
+      try { listener(this.status); }
+      catch (e) { logger.warn('[CodexUsagePoller] listener threw:', e); }
     }
   }
 

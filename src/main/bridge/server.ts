@@ -297,6 +297,31 @@ export function buildBlockResponse(toolId: ToolId, evaluation: GuardrailEvaluati
   };
 }
 
+// Pulls fields we forward to the timeline subscribers off the raw hook payload.
+// These are shared across every tool format (each hook script injects what it
+// can; null is fine for tools that don't expose a field).
+function extractCommonFields(data: any): {
+  cwd?: string;
+  agentPid?: number;
+  transcriptPath?: string;
+} {
+  const cwd = typeof data.cwd === 'string' ? data.cwd : undefined;
+  const pidRaw = data.agent_pid ?? data.agentPid ?? data.ap_pid;
+  const agentPid =
+    typeof pidRaw === 'number'
+      ? pidRaw
+      : typeof pidRaw === 'string' && /^\d+$/.test(pidRaw)
+        ? parseInt(pidRaw, 10)
+        : undefined;
+  const transcriptPath =
+    typeof data.transcript_path === 'string'
+      ? data.transcript_path
+      : typeof data.transcriptPath === 'string'
+        ? data.transcriptPath
+        : undefined;
+  return { cwd, agentPid, transcriptPath };
+}
+
 // Exported for unit testing
 export function normalizePayload(data: any): { toolId: ToolId; state: AgentState; payload: any } | null {
     // Format 1 — explicit toolId + state
@@ -310,6 +335,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
     if (data.hook_event_name || data.hookEventName) {
       // Copilot may use either hookEventName (docs) or hook_event_name (actual).
       const eventName: string = data.hook_event_name ?? data.hookEventName;
+      const common = extractCommonFields(data);
 
       // Format 2a — Codex (injected _ap_tool field from our hook script).
       // Definitive marker — needed because Codex's SessionStart event has no
@@ -329,6 +355,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
           payload: {
             sessionId:   data.session_id,
             taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+            ...common,
           },
         };
       }
@@ -356,6 +383,8 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
           payload: {
             sessionId:   data.conversationId ?? data.session_id,
             taskSummary: toolName ? `Tool: ${toolName}` : undefined,
+            model:       typeof data.model === 'string' ? data.model : undefined,
+            ...common,
           },
         };
       }
@@ -379,6 +408,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
             sessionId:    data.conversation_id,
             taskSummary:  data.tool_name ? `Tool: ${data.tool_name}` : undefined,
             errorMessage: data.error_message,
+            ...common,
           },
         };
       }
@@ -399,6 +429,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
           payload: {
             sessionId:   data.session_id,
             taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+            ...common,
           },
         };
       }
@@ -418,6 +449,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
             sessionId:    data.session_id,
             taskSummary:  data.tool_name ? `Tool: ${data.tool_name}` : undefined,
             errorMessage: data.error,
+            ...common,
           },
         };
       }
@@ -439,6 +471,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
           payload: {
             sessionId:   data.session_id ?? data.sessionId,
             taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+            ...common,
           },
         };
       }
@@ -459,11 +492,12 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
           payload: {
             sessionId:   data.session_id,
             taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+            ...common,
           },
         };
       }
 
-      // Format 2 — Claude Code native hook payload (has session_id, no turn_id)
+      // Format 7 — Claude Code native hook payload (has session_id, no turn_id)
       const state = mapClaudeCodeEvent(eventName, data);
       if (state === null) {
         logger.debug(`Ignoring unmapped Claude Code event: ${eventName}${eventName === 'Notification' ? ` (notification_type=${data.notification_type})` : ''}`);
@@ -477,6 +511,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
           sessionId:    data.session_id,
           taskSummary:  data.tool_name ? `Tool: ${data.tool_name}` : undefined,
           errorMessage: data.error,
+          ...common,
         },
       };
     }

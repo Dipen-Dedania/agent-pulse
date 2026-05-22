@@ -39,6 +39,8 @@ const LOCAL_DOWN_BACKOFF_MS = 2 * 60_000;
 const NUDGE_LEAD_MS = 30 * 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 
+export type AntigravityUsageStatusListener = (status: AntigravityUsageStatus) => void;
+
 export class AntigravityUsagePoller {
   private status: AntigravityUsageStatus = { state: 'unknown' };
   private timer: NodeJS.Timeout | null = null;
@@ -48,6 +50,7 @@ export class AntigravityUsagePoller {
   private lastNudgeNotified = new Set<string>();
   private currentDelayMs: number;
   private stopped = false;
+  private listeners: Set<AntigravityUsageStatusListener> = new Set();
 
   constructor(config: AntigravityUsageConfig) {
     this.config = config;
@@ -113,6 +116,11 @@ export class AntigravityUsagePoller {
 
   public getStatus(): AntigravityUsageStatus {
     return this.status;
+  }
+
+  public subscribe(listener: AntigravityUsageStatusListener): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────
@@ -308,6 +316,10 @@ export class AntigravityUsagePoller {
       if (!win.isDestroyed()) {
         win.webContents.send('antigravity-usage:updated', this.status);
       }
+    }
+    for (const listener of this.listeners) {
+      try { listener(this.status); }
+      catch (e) { logger.warn('[AntigravityUsagePoller] listener threw:', e); }
     }
   }
 

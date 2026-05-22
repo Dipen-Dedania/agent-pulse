@@ -301,12 +301,21 @@ export class ConfigWriter {
     };
   }
 
-  /** Bash script: reads stdin JSON, POSTs to the bridge, exits 0 (success / allow). */
+  /**
+   * Bash script: reads stdin JSON, injects cwd + agent_pid so the timeline can
+   * associate the event with a project + agent process, then forwards to the
+   * bridge. Injection uses sed at the top-level object boundary (after the
+   * opening `{`) so we don't have to parse JSON in bash.
+   */
   private buildShellScript(): string {
     return `#!/usr/bin/env bash
 # Agent Pulse — hook script (bash)
-# Reads the event JSON from stdin and forwards it to the bridge.
+# Reads the event JSON from stdin, injects cwd + agent_pid for the timeline,
+# and forwards to the bridge.
 BODY=$(cat)
+CWD_ESCAPED=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+INJECT='"cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"','
+BODY=$(printf '%s' "$BODY" | sed "s/^{/{$INJECT/")
 curl -s -o /dev/null -X POST \\
   -H "Content-Type: application/json" \\
   -d "$BODY" \\
@@ -315,14 +324,21 @@ exit 0
 `;
   }
 
-  /** PowerShell script: reads stdin JSON, POSTs to the bridge, exits 0 (success / allow). */
+  /**
+   * PowerShell counterpart of the bash script. Injects cwd + agent_pid the
+   * same way (top-level object regex), uses ConvertTo-Json for proper string
+   * escaping on the cwd, and forwards UTF-8 (no BOM) to the bridge.
+   */
   private buildPowerShellScript(): string {
     return `# Agent Pulse — hook script (PowerShell)
-# Reads the event JSON from stdin and forwards it to the bridge.
-# Use StreamReader with explicit UTF-8 (no BOM) to avoid prepending a BOM to the body.
+# Reads the event JSON from stdin, injects cwd + agent_pid for the timeline,
+# and forwards to the bridge using UTF-8 without BOM.
 $reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
 $body = $reader.ReadToEnd()
 $reader.Close()
+$cwdJson = ($PWD.Path | ConvertTo-Json -Compress)
+$inject = '"cwd":' + $cwdJson + ',"agent_pid":' + $PID + ','
+$body = $body -replace '^\\{', ('{' + $inject)
 try {
   Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
     -Method POST \`
@@ -447,13 +463,18 @@ exit 0
     return { success: true, path: hooksConfigPath };
   }
 
-  /** Bash script for Codex: injects tool identifier before forwarding to bridge. */
+  /**
+   * Bash script for Codex: injects tool identifier + cwd + agent_pid before
+   * forwarding to bridge.
+   */
   private buildCodexShellScript(): string {
     return `#!/usr/bin/env bash
 # Agent Pulse — Codex hook script (bash)
-# Reads event JSON from stdin, injects a tool identifier, and forwards to bridge.
+# Reads event JSON from stdin, injects identifier + cwd + agent_pid, and forwards to bridge.
 BODY=$(cat)
-BODY=$(echo "$BODY" | sed 's/^{/{"_ap_tool":"openai-codex",/')
+CWD_ESCAPED=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+INJECT='"_ap_tool":"openai-codex","cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"','
+BODY=$(printf '%s' "$BODY" | sed "s/^{/{$INJECT/")
 curl -s -o /dev/null -X POST \\
   -H "Content-Type: application/json" \\
   -d "$BODY" \\
@@ -462,14 +483,19 @@ exit 0
 `;
   }
 
-  /** PowerShell script for Codex: injects tool identifier before forwarding to bridge. */
+  /**
+   * PowerShell script for Codex: injects identifier + cwd + agent_pid before
+   * forwarding to bridge.
+   */
   private buildCodexPowerShellScript(): string {
     return `# Agent Pulse — Codex hook script (PowerShell)
-# Reads event JSON from stdin, injects a tool identifier, and forwards to bridge.
+# Reads event JSON from stdin, injects identifier + cwd + agent_pid, and forwards to bridge.
 $reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
 $body = $reader.ReadToEnd()
 $reader.Close()
-$body = $body -replace '^\\{', '{"_ap_tool":"openai-codex",'
+$cwdJson = ($PWD.Path | ConvertTo-Json -Compress)
+$inject = '"_ap_tool":"openai-codex","cwd":' + $cwdJson + ',"agent_pid":' + $PID + ','
+$body = $body -replace '^\\{', ('{' + $inject)
 try {
   Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
     -Method POST \`
@@ -617,7 +643,8 @@ exit 0
 # Agent Pulse — Antigravity CLI hook script (bash)
 EVENT="\${1:-}"
 BODY=$(cat)
-INJECT='"_ap_tool":"antigravity-cli","hook_event_name":"'"$EVENT"'",'
+CWD_ESCAPED=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+INJECT='"_ap_tool":"antigravity-cli","hook_event_name":"'"$EVENT"'","cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"','
 BODY=$(printf '%s' "$BODY" | sed "s/^{/{$INJECT/")
 curl -s --max-time 3 -o /dev/null -X POST \\
   -H "Content-Type: application/json" \\
@@ -650,7 +677,8 @@ $ErrorActionPreference = 'SilentlyContinue'
 $reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
 $body = $reader.ReadToEnd()
 $reader.Close()
-$inject = '"_ap_tool":"antigravity-cli","hook_event_name":"' + $Event + '",'
+$cwdJson = ($PWD.Path | ConvertTo-Json -Compress)
+$inject = '"_ap_tool":"antigravity-cli","hook_event_name":"' + $Event + '","cwd":' + $cwdJson + ',"agent_pid":' + $PID + ','
 $body = $body -replace '^\\{', ('{' + $inject)
 try {
   Invoke-WebRequest -Uri "${this.bridgeUrl}" \`

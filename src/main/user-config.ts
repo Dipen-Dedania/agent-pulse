@@ -40,6 +40,12 @@ export interface AntigravityUsageConfig {
   nudge: UsageNotificationConfig;
 }
 
+// Pulse Timeline (Analytics tab) settings. Persists across launches; lightweight.
+export interface AnalyticsConfig {
+  redactTaskText: boolean;  // when true, task summaries are written as null
+  idleGapMinutes: number;   // minimum gap to close a session; floor enforced at 1 min
+}
+
 export interface UserConfig {
   enabledBubbles: Partial<Record<ToolId, boolean>>;
   usage: UsageConfig;
@@ -47,6 +53,7 @@ export interface UserConfig {
   antigravityUsage: AntigravityUsageConfig;
   guardrails: GuardrailConfig;
   autoLaunch: boolean;
+  analytics: AnalyticsConfig;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse-config.json');
@@ -81,6 +88,10 @@ const DEFAULTS: UserConfig = {
     customRules: [],
   },
   autoLaunch: false,
+  analytics: {
+    redactTaskText: false,
+    idleGapMinutes: 5,
+  },
 };
 
 // Map legacy ToolId keys in persisted configs to their current names so a
@@ -113,6 +124,7 @@ export function loadConfig(): UserConfig {
       const codexUsage = parsed.codexUsage ?? {};
       const antigravityUsage = parsed.antigravityUsage ?? {};
       const guardrails = parsed.guardrails ?? {};
+      const analytics = parsed.analytics ?? {};
       return {
         ...DEFAULTS,
         ...parsed,
@@ -139,6 +151,10 @@ export function loadConfig(): UserConfig {
           enabled:         guardrails.enabled ?? DEFAULTS.guardrails.enabled,
           disabledRuleIds: Array.isArray(guardrails.disabledRuleIds) ? guardrails.disabledRuleIds : [],
           customRules:     Array.isArray(guardrails.customRules)     ? guardrails.customRules     : [],
+        },
+        analytics: {
+          redactTaskText: typeof analytics.redactTaskText === 'boolean' ? analytics.redactTaskText : DEFAULTS.analytics.redactTaskText,
+          idleGapMinutes: typeof analytics.idleGapMinutes === 'number' && analytics.idleGapMinutes >= 1 ? analytics.idleGapMinutes : DEFAULTS.analytics.idleGapMinutes,
         },
       };
     }
@@ -167,6 +183,7 @@ export function loadConfig(): UserConfig {
       disabledRuleIds: [...DEFAULTS.guardrails.disabledRuleIds],
       customRules:     [...DEFAULTS.guardrails.customRules],
     },
+    analytics: { ...DEFAULTS.analytics },
   };
 }
 

@@ -6,7 +6,7 @@ import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
-import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig, AntigravityUsageConfig } from './user-config';
+import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig, AntigravityUsageConfig, AnalyticsConfig } from './user-config';
 import { ToolId } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
@@ -17,6 +17,7 @@ import { UsagePoller } from './usage/poller';
 import { CodexUsagePoller } from './codex-usage/poller';
 import { AntigravityUsagePoller } from './antigravity-usage/poller';
 import { isAutoLaunchEnabled, setAutoLaunch } from './auto-launch';
+import { bootTimeline, TimelineHandle } from './timeline';
 
 // Windows uses this to group windows under our identity and show our taskbar icon.
 if (process.platform === 'win32') {
@@ -42,6 +43,7 @@ class AgentPulseApp {
   private usagePoller: UsagePoller;
   private codexUsagePoller: CodexUsagePoller;
   private antigravityUsagePoller: AntigravityUsagePoller;
+  private timeline: TimelineHandle | null = null;
 
   // Most-recent guardrail events kept in memory so a Settings window opened
   // after the fact still sees what happened. Capped at GUARDRAIL_LOG_SIZE.
@@ -87,6 +89,19 @@ class AgentPulseApp {
       this.antigravityUsagePoller.init();
       this.antigravityUsagePoller.start();
 
+      // Boot Pulse Timeline persistence. Subscribers wire up *after* the
+      // pollers are init'd so we don't miss their first emit. If better-
+      // sqlite3 is missing or won't load, this returns null and the rest of
+      // the app keeps running.
+      this.timeline = bootTimeline({
+        stateManager: this.stateManager,
+        usagePoller: this.usagePoller,
+        codexUsagePoller: this.codexUsagePoller,
+        antigravityUsagePoller: this.antigravityUsagePoller,
+        redactTaskText: this.userConfig.analytics.redactTaskText,
+        idleGapMinutes: this.userConfig.analytics.idleGapMinutes,
+      });
+
       // Sync the OS login-item state to whatever we persisted. Cheap and
       // self-healing if the user toggled it externally.
       setAutoLaunch(this.userConfig.autoLaunch);
@@ -119,6 +134,7 @@ class AgentPulseApp {
       this.usagePoller.stop();
       this.codexUsagePoller.stop();
       this.antigravityUsagePoller.stop();
+      this.timeline?.shutdown();
       this.trayManager.destroy();
     });
 
@@ -255,6 +271,22 @@ class AgentPulseApp {
     });
 
     ipcMain.handle('guardrails:get-recent-events', () => this.guardrailLog);
+
+    // ── Analytics IPC ─────────────────────────────────────────────────────
+    ipcMain.handle('analytics:update-config', (_event, partial: Partial<AnalyticsConfig>) => {
+      const next = { ...this.userConfig.analytics, ...partial };
+      // Clamp idle-gap to a sane floor; 0/negative would close every event.
+      if (typeof next.idleGapMinutes === 'number' && next.idleGapMinutes < 1) {
+        next.idleGapMinutes = 1;
+      }
+      this.userConfig.analytics = next;
+      saveConfig(this.userConfig);
+      this.timeline?.updateOptions({
+        redactTaskText: next.redactTaskText,
+        idleGapMinutes: next.idleGapMinutes,
+      });
+      return next;
+    });
 
     // ── Auto-launch IPC ───────────────────────────────────────────────────
     ipcMain.handle('auto-launch:get', () => ({

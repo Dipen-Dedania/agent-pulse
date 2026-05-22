@@ -22,7 +22,8 @@
     "dist:win": "npm run build && electron-builder --win --publish never",
     "dist:mac": "npm run build && electron-builder --mac --publish never",
     "dist:linux": "npm run build && electron-builder --linux --publish never",
-    "dist:all": "npm run build && electron-builder -mwl --publish never"
+    "dist:all": "npm run build && electron-builder -mwl --publish never",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3"
   },
   "repository": {
     "type": "git",
@@ -91,6 +92,7 @@
     }
   },
   "dependencies": {
+    "better-sqlite3": "^12.0.0",
     "framer-motion": "^12.38.0",
     "open": "^8.4.2",
     "react": "^19.2.5",
@@ -98,6 +100,8 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@tailwindcss/postcss": "^4.2.2",
     "@tailwindcss/vite": "^4.2.2",
     "@testing-library/jest-dom": "^6.9.1",

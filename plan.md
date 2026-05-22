@@ -27,18 +27,30 @@ Raw lifecycle stream — write-through from the bridge.
 
 | column         | type     | notes                                                  |
 |----------------|----------|--------------------------------------------------------|
-| `id`           | INTEGER  | PK autoincrement                                       |
-| `tool_id`      | TEXT     | matches `ToolId` in `src/common/types.ts`              |
-| `state`        | TEXT     | matches `AgentState`                                   |
-| `timestamp`    | INTEGER  | ms epoch                                               |
-| `session_id`   | TEXT     | from hook payload when available                       |
-| `task_summary` | TEXT     | nullable; redacted when "screenshare safe" mode is on  |
-| `active_agents`| INTEGER  | nullable                                               |
-| `project_id`   | TEXT     | nullable; SHA-1(8) of normalized project path          |
-| `project_path` | TEXT     | nullable; absolute path of the git root or cwd         |
-| `error_message`| TEXT     | nullable                                               |
+| `id`            | INTEGER  | PK autoincrement                                       |
+| `tool_id`       | TEXT     | matches `ToolId` in `src/common/types.ts`              |
+| `state`         | TEXT     | matches `AgentState`                                   |
+| `timestamp`     | INTEGER  | ms epoch                                               |
+| `session_id`    | TEXT     | from hook payload when available                       |
+| `agent_pid`     | INTEGER  | nullable; hook's parent PID (`$PPID` / `process.ppid`) |
+| `task_summary`  | TEXT     | nullable; redacted when "screenshare safe" mode is on  |
+| `active_agents` | INTEGER  | nullable                                               |
+| `project_id`    | TEXT     | nullable; SHA-1(8) of normalized project path          |
+| `project_path`  | TEXT     | nullable; absolute path of the git root or cwd         |
+| `model`         | TEXT     | nullable; populated by transcript reader (Claude Code) |
+| `tokens_in`     | INTEGER  | nullable; input tokens (Claude Code only in v1)        |
+| `tokens_out`    | INTEGER  | nullable; output tokens (Claude Code only in v1)       |
+| `cache_read`    | INTEGER  | nullable; cache-read tokens (Claude Code only in v1)   |
+| `cache_write`   | INTEGER  | nullable; cache-creation tokens (Claude Code only in v1)|
+| `error_message` | TEXT     | nullable                                               |
 
-Indexes: `(timestamp)`, `(tool_id, timestamp)`, `(project_id, timestamp)`.
+Indexes: `(timestamp)`, `(tool_id, timestamp)`, `(project_id, timestamp)`, `(session_id, timestamp)`.
+
+**Source coverage for `model` / token columns in v1:**
+- Claude Code — populated via transcript-reader (§7a).
+- Antigravity CLI — `model` populated if probing confirms hook payload exposes it; tokens not available.
+- Cursor / VS Code Copilot / Kiro — all nullable; their hooks don't expose this.
+- OpenAI Codex — deferred; columns stay null until Codex transcript reader is added.
 
 ### `sessions`
 Derived rollup — written when a session closes (or on app shutdown for the still-open one).
@@ -55,8 +67,17 @@ Derived rollup — written when a session closes (or on app shutdown for the sti
 | `peak_state`      | TEXT     | worst severity reached (error > waiting > working) |
 | `task_summary`    | TEXT     | nullable; first non-empty summary in window        |
 | `had_error`       | INTEGER  | 0/1                                                |
+| `session_id`      | TEXT     | nullable; first non-null hook session id           |
+| `agent_pid`       | INTEGER  | nullable; first non-null PID seen in window        |
+| `total_tokens_in` | INTEGER  | nullable; sum across events                        |
+| `total_tokens_out`| INTEGER  | nullable; sum across events                        |
+| `total_cache_read`| INTEGER  | nullable; sum across events                        |
+| `total_cache_write`|INTEGER  | nullable; sum across events                        |
+| `models_used`     | TEXT     | nullable; CSV of distinct models seen              |
 
 Indexes: `(started_at)`, `(tool_id, started_at)`, `(project_id, started_at)`.
+
+Token totals are populated only for tools whose events carry token data (Claude Code in v1).
 
 ### `quota_samples`
 Written by each usage poller on every successful poll (no extra API calls — just persists what's already in memory).
@@ -90,7 +111,8 @@ src/main/
     events-writer.ts   # subscribes to bridge state-manager → insert event row
     sessions-deriver.ts# tracks open sessions in memory, closes on idle-gap
     quota-writer.ts    # subscribes to the 3 usage pollers → insert sample row
-    queries.ts         # heatmap, digest, hour-rhythm, tool-mix, project breakdown
+    transcript-reader.ts# tails Claude Code JSONL transcripts → tokens + model
+    queries.ts         # heatmap, digest, hour-rhythm, tool-mix, model-mix, project breakdown
     ipc.ts             # exposes typed queries to renderer over Electron IPC
     project-resolver.ts# walk-up-to-.git, hashing, caching
     prune.ts           # daily retention sweep
@@ -104,9 +126,10 @@ src/renderer/components/Settings/
   AnalyticsTab.tsx           # new tab in SettingsPanel
   analytics/
     HeatmapCard.tsx          # GitHub-contrib grid
-    DigestCard.tsx           # today/yesterday summary
+    DigestCard.tsx           # today/yesterday summary (incl. token totals)
     HourRhythmCard.tsx       # 24-bucket histogram
     ToolMixCard.tsx          # last 7d / 30d split
+    ModelUsageCard.tsx       # token + session split per model (Claude-only badge)
     ProjectBreakdownCard.tsx # ranked list per project
     useAnalytics.ts          # hook → IPC queries with caching
 ```
@@ -121,18 +144,19 @@ src/renderer/components/Settings/
 
 All writes are synchronous (better-sqlite3 is sync) and wrapped in `setImmediate` so they never block the bridge response.
 
-## 5. Hook payload extension — `cwd` capture
+## 5. Hook payload extension — `cwd`, `session_id`, `agent_pid`
 
-For project tracking to work, each tool's installed hook must forward the working directory. Updates in `src/main/installer/`:
+For project tracking and identification to work, each tool's installed hook must forward the working directory, its hook-provided session id, and its parent process id. Updates in `src/main/installer/`:
 
-- **claude-code** (HTTP hook) — already has access to `$CLAUDE_PROJECT_DIR`. Add it to the POST body as `cwd`.
-- **cursor / openai-codex / antigravity-cli / kiro** (shell hooks) — wrap the bridge POST so it includes `"cwd": "$PWD"`.
-- **vscode-copilot** (PowerShell hooks on Windows) — include `$PWD.Path` in JSON body.
+- **claude-code** (HTTP hook) — already has `$CLAUDE_PROJECT_DIR` and `session_id` from Claude's hook payload. Add `cwd`, `session_id`, `transcript_path`, and `agent_pid` (`process.ppid` in the node hook, or `$PPID` in shell) to the POST body. `transcript_path` is consumed by `transcript-reader.ts`, not stored as a column.
+- **cursor / openai-codex / antigravity-cli / kiro** (shell hooks) — wrap the bridge POST so it includes `"cwd": "$PWD"`, `"agent_pid": "$PPID"`, and whatever session/invocation id the tool exposes (varies; audit per tool).
+- **vscode-copilot** (PowerShell hooks on Windows) — include `$PWD.Path`, `$PID` of parent, and any available session id.
 
 Bridge change in `src/main/bridge/server.ts`:
 
-- Accept optional `cwd` field on incoming POST.
-- Forward into `NormalizedEvent.payload.cwd` (extend the type in `src/common/types.ts`).
+- Accept optional `cwd`, `session_id`, `agent_pid`, `transcript_path` fields on incoming POST.
+- Forward `cwd`, `session_id`, `agent_pid` into `NormalizedEvent.payload` (extend the type in `src/common/types.ts`).
+- `transcript_path` is routed to `transcript-reader.ts` (in-memory; never persisted as a column).
 
 Project resolution in `project-resolver.ts`:
 
@@ -153,13 +177,25 @@ A session is keyed by `(tool_id, project_id)`. Maintained in memory by `sessions
 - **peak_state** is computed during the open window (`error` > `waiting` > `idle-active` > `working`).
 - **turns** = count of `idle-active → working` transitions within the window.
 
+## 6a. Transcript reader (Claude Code token + model capture)
+
+Lives at `src/main/timeline/transcript-reader.ts`. Runs in the main process; never blocks the bridge.
+
+- **Trigger**: hook events that carry a `transcript_path` (Claude Code emits this on every hook). The reader keeps an in-memory `Map<transcript_path, byteOffset>`.
+- **Read strategy**: on each trigger, open the file, `seek` to the stored offset, read to EOF, parse new JSONL lines, update offset.
+- **Extract**: from each parsed assistant message, pull `model` and `message.usage` (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`).
+- **Attribution**: token deltas attach to the *next event row* written for that `session_id`, and to the open in-memory session for the sessions rollup. Stop-event handling flushes any remaining unattributed tokens onto the session close.
+- **Failure modes**: missing file, malformed line, stale offset (file rotated) → log + reset offset to 0 and re-read once.
+- **Performance**: reads only the new tail; a typical assistant turn is a few KB.
+- **Other tools**: Codex transcript reader can be added later behind the same interface (`registerTranscriptSource(toolId, parser)`); v1 only registers the Claude Code parser.
+
 ## 7. UI — Analytics tab
 
 Added as a 4th tab in `SettingsPanel.tsx` (alongside Hooks / Usage / Guardrails).
 
 ### Cards (top-to-bottom in the tab)
 
-1. **DigestCard** — today + yesterday side-by-side. Per tool: active time, sessions, longest session, top task summary, quota burned (delta of `pct_remaining` over the day). Includes total cross-tool active time.
+1. **DigestCard** — today + yesterday side-by-side. Per tool: active time, sessions, longest session, top task summary, quota burned (delta of `pct_remaining` over the day). Includes total cross-tool active time. **Token totals row** (input / output / cache-read / cache-write) shown only when there's data, with a small info pill: *"Token data: Claude Code only. Other tools' hooks don't expose token counts."*
 
 2. **HeatmapCard** — GitHub-contrib grid, last 90 days. Toggle:
    - rows: all-tools-combined / per-tool / per-project (top 6 + "other")
@@ -170,7 +206,13 @@ Added as a 4th tab in `SettingsPanel.tsx` (alongside Hooks / Usage / Guardrails)
 
 4. **ToolMixCard** — last 7d / 30d toggle. Horizontal stacked bar: % active time per tool.
 
-5. **ProjectBreakdownCard** — ranked list of projects by total active time in the selected window. Per row: project name (with full path on hover), tools used (icons), total time, sessions.
+5. **ModelUsageCard** *(new)* — donut + ranked list of models seen in the selected window (7d / 30d). Two metric modes:
+   - **By tokens** (input + output combined) — default
+   - **By sessions** (count of sessions that touched the model)
+
+   Each row shows: model name, parent tool icon, token totals (or session count), share %. **Source-coverage badge** at the top of the card: *"Currently captures models for: Claude Code. Antigravity support pending hook payload verification. Cursor / VS Code Copilot / Kiro don't expose model info via hooks."* Empty state (when no model data yet) shows the same coverage info instead of a chart.
+
+6. **ProjectBreakdownCard** — ranked list of projects by total active time in the selected window. Per row: project name (with full path on hover), tools used (icons), total time, sessions.
 
 ### Privacy toggle (Settings → Analytics)
 
@@ -179,10 +221,11 @@ Added as a 4th tab in `SettingsPanel.tsx` (alongside Hooks / Usage / Guardrails)
 ### IPC contract
 
 Typed methods on `window.api.analytics`:
-- `getDigest(date: string) → DigestPayload`
+- `getDigest(date: string) → DigestPayload` *(includes token totals when present)*
 - `getHeatmap(range: '30d' | '90d', groupBy: 'tool' | 'project' | 'all') → HeatmapPayload`
 - `getHourRhythm(range: '7d' | '30d') → HourRhythmPayload`
 - `getToolMix(range: '7d' | '30d') → ToolMixPayload`
+- `getModelUsage(range: '7d' | '30d', mode: 'tokens' | 'sessions') → ModelUsagePayload`
 - `getProjectBreakdown(range: '7d' | '30d' | '90d') → ProjectBreakdownPayload`
 
 All payloads include their query timestamp; renderer caches via a `useAnalytics` hook with 30s TTL.
@@ -215,14 +258,21 @@ All payloads include their query timestamp; renderer caches via a `useAnalytics`
 - Write one row per window per poll (`5h`, `7d`, `primary`, `secondary`, and one per Antigravity model).
 - Skip writes when state is `unauthenticated` / `unavailable`.
 
+### Phase 4.5 — Token + model capture for Claude Code (~0.5 day)
+- Update the Claude Code hook installer to forward `transcript_path`, `session_id`, `agent_pid`.
+- Implement `transcript-reader.ts` (§6a): per-transcript offset map, incremental JSONL parse, `model` + `usage` extraction, attribution to next event + open session.
+- Best-effort: if Antigravity hook payload exposes a model field (probe pending), forward and populate `model` column. Tokens remain null for Antigravity.
+- Unit test: feed a synthetic JSONL with two assistant turns at different offsets, assert correct token deltas + model captured.
+
 ### Phase 5 — Query layer + IPC (~0.5 day)
-- Implement `queries.ts` — five queries listed above, returning typed payloads.
+- Implement `queries.ts` — six queries listed above (incl. `getModelUsage`), returning typed payloads.
 - Wire IPC handlers in `timeline/ipc.ts`, expose via `preload`.
 - Add `src/common/timeline-types.ts` for shared payload types.
 
-### Phase 6 — Analytics UI (~1.5 days)
+### Phase 6 — Analytics UI (~2 days)
 - New `AnalyticsTab.tsx` registered in `SettingsPanel.tsx`.
-- Five cards listed in §7. Heatmap is the most involved; rest are simple charts (no extra library — Tailwind + raw SVG matches existing aesthetic).
+- Six cards listed in §7 (Digest, Heatmap, HourRhythm, ToolMix, ModelUsage, ProjectBreakdown). Heatmap and ModelUsage are the most involved; rest are simple charts (no extra library — Tailwind + raw SVG matches existing aesthetic).
+- Source-coverage badges + empty states clearly communicate which tools contribute to which card (esp. ModelUsage and DigestCard's token row).
 - `useAnalytics.ts` hook with 30s TTL cache.
 - Privacy toggle wired to `user-config.ts`.
 
@@ -232,7 +282,7 @@ All payloads include their query timestamp; renderer caches via a `useAnalytics`
 - Glass-style consistent with existing Settings cards.
 - README section + improvement.md cleanup.
 
-**Total: ~5.5 dev days.**
+**Total: ~6.5 dev days.**
 
 ## 9. Open questions / decisions to revisit later
 
@@ -240,21 +290,23 @@ All payloads include their query timestamp; renderer caches via a `useAnalytics`
 - **Heatmap intensity scale**: linear vs logarithmic? Linear hides light days when one day is a 6h outlier. Lean log + tooltip showing absolute minutes.
 - **Project-id for non-git directories**: currently falls back to cwd. May produce noise (e.g. `~/`, `/tmp`). Consider an ignore-list or grouping under "Untracked".
 - **Re-deriving sessions on schema change**: keep an idempotent re-derive routine that rebuilds `sessions` from `events` so we can iterate on the rules without losing history.
+- **Antigravity model probe**: confirm whether the CLI hook payload exposes the active model per invocation. If yes, wire it through in Phase 4.5. If no, the ModelUsageCard's coverage badge stands as-is until a different capture path exists.
+- **PID stability across reconnects**: a Claude Code session that crashes and restarts gets a new `agent_pid` but may keep `session_id`. For session-rollup attribution we trust `session_id` over `agent_pid`.
 
 ## 10. Touch list (files modified or created)
 
 **New:**
-- `src/main/timeline/*` (8 files)
+- `src/main/timeline/*` (9 files, incl. `transcript-reader.ts`)
 - `src/renderer/components/Settings/AnalyticsTab.tsx`
-- `src/renderer/components/Settings/analytics/*` (6 files)
+- `src/renderer/components/Settings/analytics/*` (7 files, incl. `ModelUsageCard.tsx`)
 - `src/common/timeline-types.ts`
 
 **Modified:**
-- `src/common/types.ts` — add `cwd?: string` to `NormalizedEvent.payload`
-- `src/main/bridge/server.ts` — accept + forward `cwd`
+- `src/common/types.ts` — add `cwd?`, `agentPid?`, `transcriptPath?` to `NormalizedEvent.payload` (sessionId already exists)
+- `src/main/bridge/server.ts` — accept + forward `cwd`, `session_id`, `agent_pid`, `transcript_path`
 - `src/main/bridge/state-manager.ts` — expose subscribe-to-event-stream API if not already public
 - `src/main/index.ts` — boot timeline module
-- `src/main/installer/*` — each hook script template gets `cwd` forwarding
+- `src/main/installer/*` — each hook script template gets `cwd` + `agent_pid` forwarding; Claude Code installer additionally forwards `session_id` + `transcript_path`
 - `src/main/usage/*` + `src/main/codex-usage/*` + `src/main/antigravity-usage/*` — emit per-poll snapshot to `quota-writer`
 - `src/main/user-config.ts` — add `analytics.redactTaskText`, `analytics.idleGapMinutes`
 - `src/renderer/components/Settings/SettingsPanel.tsx` — register Analytics tab

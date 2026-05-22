@@ -10,6 +10,10 @@ export interface NormalizedEvent {
     taskSummary?: string;
     activeAgents?: number;
     errorMessage?: string;
+    cwd?: string;
+    agentPid?: number;
+    transcriptPath?: string;
+    model?: string;
   };
 }
 

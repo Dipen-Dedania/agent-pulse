@@ -38,10 +38,13 @@ const WINDOW_LABEL: Record<WindowKey, string> = {
   sevenDay: '7-day',
 };
 
+export type UsageStatusListener = (status: UsageStatus) => void;
+
 export class UsagePoller {
   private status: UsageStatus = { state: 'unknown' };
   private timer: NodeJS.Timeout | null = null;
   private config: UsageConfig;
+  private listeners: Set<UsageStatusListener> = new Set();
   /** Last reset timestamp we fired a cap-warning for, per window. */
   private lastCapNotified: Record<WindowKey, number> = { fiveHour: 0, sevenDay: 0 };
   /** Last reset timestamp we fired a nudge for, per window. */
@@ -116,6 +119,12 @@ export class UsagePoller {
 
   public getStatus(): UsageStatus {
     return this.status;
+  }
+
+  /** Subscribe to every status update (used by the timeline quota writer). */
+  public subscribe(listener: UsageStatusListener): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────
@@ -246,6 +255,10 @@ export class UsagePoller {
       if (!win.isDestroyed()) {
         win.webContents.send('usage:updated', this.status);
       }
+    }
+    for (const listener of this.listeners) {
+      try { listener(this.status); }
+      catch (e) { logger.warn('[UsagePoller] listener threw:', e); }
     }
   }
 

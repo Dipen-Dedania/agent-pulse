@@ -66,6 +66,17 @@ https://github.com/Dipen-Dedania/agent-pulse/releases/latest/download/Agent-Puls
 - Built-in core rule set plus user-defined custom rules with validated regex.
 - Live event log of triggered guardrails in the Settings panel.
 
+### Pulse Timeline (Analytics tab)
+- Local SQLite database (`<userData>/pulse-timeline.db`) persists every normalized event, derived session, and quota snapshot.
+- **Daily digest** — today + yesterday active time, sessions, top tasks, tokens, and quota burned per tool.
+- **Activity heatmap** — GitHub-contrib-style grid over 30 or 90 days, grouped by tool, project, or combined. Project tracking walks up to the nearest `.git` root from each hook's `cwd`.
+- **Hour-of-day rhythm** — 24-bucket histogram of when you actually pair with agents.
+- **Tool mix** — share of active time per tool over 7 or 30 days.
+- **Model usage** — token + session breakdown per model. v1 captures Claude Code via transcript tailing; other tools' coverage depends on whether their hooks expose a model field.
+- **Project breakdown** — ranked list of `.git` roots by total active time, with the agents that touched each.
+- Fully local; no telemetry. Privacy toggle redacts task summaries from storage. Idle-gap is configurable. 60-day retention on events and quota samples; sessions kept forever (~300 KB / 30 days).
+- Requires the native module `better-sqlite3`. Run `npm run rebuild:native` after install. If the rebuild fails, the rest of the app keeps working — the timeline simply records nothing until you rebuild.
+
 ### Desktop integration
 - **Single-instance** — launching the app a second time focuses the running instance instead of spawning a duplicate (which would also collide on the bridge port).
 - **Launch on startup** — toggle in Settings; works on Windows (login items), macOS (login items, launched hidden), and Linux (`~/.config/autostart/agent-pulse.desktop`).
@@ -129,6 +140,7 @@ The workflow builds Windows and macOS installers, attaches them (plus `latest.ym
 | `npm run dist` | `npm run build` + `electron-builder`. | Build installers for the current platform. |
 | `npm run dist:win` / `dist:mac` / `dist:linux` | Targeted installer builds with `--publish never`. | Cut a single-platform artifact. |
 | `npm run dist:all` | All three platforms (`-mwl`). | Multi-OS release. |
+| `npm run rebuild:native` | Rebuild `better-sqlite3` against the current Electron ABI. | After `npm install`, or whenever Pulse Timeline logs `better-sqlite3 not loadable`. |
 
 ---
 

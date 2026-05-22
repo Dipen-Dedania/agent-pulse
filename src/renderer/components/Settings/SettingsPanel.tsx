@@ -7,6 +7,7 @@ import { UsageSection, UsageConfigUI } from './UsageSection';
 import { CodexUsageSection, CodexUsageConfigUI } from './CodexUsageSection';
 import { AntigravityUsageSection, AntigravityUsageConfigUI } from './AntigravityUsageSection';
 import { GuardrailsTab } from './GuardrailsTab';
+import { AnalyticsTabContainer } from './AnalyticsTab';
 
 interface ToolConfig {
   enabled: boolean;
@@ -182,11 +183,12 @@ const HookInfoModal: React.FC<{
 
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
-type TabId = 'hooks' | 'usage' | 'guardrails';
+type TabId = 'hooks' | 'usage' | 'analytics' | 'guardrails';
 
 const TABS: { id: TabId; label: string; description: string }[] = [
   { id: 'hooks',      label: 'Hooks',      description: 'Manage which AI tools show a status bubble.' },
   { id: 'usage',      label: 'Usage',      description: 'Monitor Claude, Codex, and Antigravity plan usage.' },
+  { id: 'analytics',  label: 'Analytics',  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
   { id: 'guardrails', label: 'Guardrails', description: 'Block or warn on risky shell commands.' },
 ];
 
@@ -620,6 +622,8 @@ export const SettingsPanel: React.FC = () => {
           )}
         </>
       )}
+
+      {activeTab === 'analytics' && <AnalyticsTabContainer />}
 
       {activeTab === 'guardrails' && <GuardrailsTab />}
 

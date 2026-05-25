@@ -10,6 +10,8 @@ import {
   ModelUsageRange,
   ProjectBreakdownPayload,
   ProjectBreakdownRange,
+  TokensTimelinePayload,
+  TokensTimelineRange,
 } from '../../../../common/timeline-types';
 
 const TTL_MS = 30_000;
@@ -88,4 +90,8 @@ export function useModelUsage(range: ModelUsageRange, mode: 'tokens' | 'sessions
 
 export function useProjectBreakdown(range: ProjectBreakdownRange) {
   return useAnalyticsQuery<ProjectBreakdownPayload>('analytics:get-project-breakdown', { range }, range);
+}
+
+export function useTokensTimeline(range: TokensTimelineRange) {
+  return useAnalyticsQuery<TokensTimelinePayload>('analytics:get-tokens-timeline', { range }, range);
 }

@@ -84,19 +84,67 @@ export class ToolDetector {
   }
 
   private detectVSCodeCopilot(): ToolDetection {
+    // GitHub Copilot lives in three possible places depending on VS Code version:
+    //   1. Legacy: `~/.vscode/extensions/github.copilot*` (older marketplace installs)
+    //   2. Built-in: VS Code globalStorage holds `github.copilot-chat` data even when
+    //      no extension folder exists — Copilot Chat ships integrated in recent builds.
+    //   3. CLI-only: `~/.copilot/` from `copilot` CLI installs.
+    // Probe all of them so the card doesn't read "Not installed" when the user has it.
     const home = os.homedir();
-    const extensionsDir = path.join(home, '.vscode', 'extensions');
-    if (!existsSync(extensionsDir)) return { installed: false };
+    const { readdirSync } = require('fs');
 
-    try {
-      const { readdirSync } = require('fs');
-      const entries: string[] = readdirSync(extensionsDir);
-      const match = entries.find((e) => e.startsWith('github.copilot'));
-      if (match) return { installed: true, location: path.join(extensionsDir, match) };
-    } catch {
-      // fall through
+    // 1. Legacy marketplace install (VS Code + Insiders)
+    const extensionDirs = [
+      path.join(home, '.vscode', 'extensions'),
+      path.join(home, '.vscode-insiders', 'extensions'),
+    ];
+    for (const extensionsDir of extensionDirs) {
+      if (!existsSync(extensionsDir)) continue;
+      try {
+        const entries: string[] = readdirSync(extensionsDir);
+        const match = entries.find((e) => e.startsWith('github.copilot'));
+        if (match) return { installed: true, location: path.join(extensionsDir, match) };
+      } catch {
+        // fall through
+      }
     }
+
+    // 2. globalStorage (built-in / integrated Copilot Chat)
+    const globalStorageRoots = this.vsCodeGlobalStorageRoots(home);
+    for (const root of globalStorageRoots) {
+      const copilotData = path.join(root, 'github.copilot-chat');
+      if (existsSync(copilotData)) return { installed: true, location: copilotData };
+      const copilotLegacy = path.join(root, 'github.copilot');
+      if (existsSync(copilotLegacy)) return { installed: true, location: copilotLegacy };
+    }
+
+    // 3. Copilot CLI
+    const cliConfig = path.join(home, '.copilot');
+    if (existsSync(cliConfig)) return { installed: true, location: cliConfig };
+    const cliPath = this.whichCommand('copilot');
+    if (cliPath) return { installed: true, location: cliPath };
+
     return { installed: false };
+  }
+
+  private vsCodeGlobalStorageRoots(home: string): string[] {
+    if (process.platform === 'win32') {
+      const appData = process.env['APPDATA'] ?? path.join(home, 'AppData', 'Roaming');
+      return [
+        path.join(appData, 'Code', 'User', 'globalStorage'),
+        path.join(appData, 'Code - Insiders', 'User', 'globalStorage'),
+      ];
+    }
+    if (process.platform === 'darwin') {
+      return [
+        path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage'),
+        path.join(home, 'Library', 'Application Support', 'Code - Insiders', 'User', 'globalStorage'),
+      ];
+    }
+    return [
+      path.join(home, '.config', 'Code', 'User', 'globalStorage'),
+      path.join(home, '.config', 'Code - Insiders', 'User', 'globalStorage'),
+    ];
   }
 
   private detectOpenAICodex(): ToolDetection {

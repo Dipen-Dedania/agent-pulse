@@ -5,6 +5,7 @@ import {
   ToolMixRange,
   ModelUsageRange,
   ProjectBreakdownRange,
+  TokensTimelineRange,
 } from '../../common/timeline-types';
 import { logger } from '../../common/logger';
 
@@ -66,6 +67,12 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     try { return queries.getProjectBreakdown(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-project-breakdown:', e); return null; }
   });
+
+  ipcMain.handle('analytics:get-tokens-timeline', (_e, args: { range: TokensTimelineRange }) => {
+    if (!queries) return null;
+    try { return queries.getTokensTimeline(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-tokens-timeline:', e); return null; }
+  });
 }
 
 /** Called by bootTimeline when the timeline cannot start. */
@@ -83,6 +90,7 @@ export function unregisterTimelineIpc() {
     'analytics:get-tool-mix',
     'analytics:get-model-usage',
     'analytics:get-project-breakdown',
+    'analytics:get-tokens-timeline',
   ]) {
     ipcMain.removeHandler(channel);
   }

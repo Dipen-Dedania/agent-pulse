@@ -3,7 +3,7 @@ import { ProjectBreakdownRange } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { useProjectBreakdown } from './useAnalytics';
-import { Card, EmptyState, Segmented, SkeletonLine, formatDuration } from './shared';
+import { Card, EmptyState, Segmented, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
 
 export const ProjectBreakdownCard: React.FC = () => {
   const [range, setRange] = useState<ProjectBreakdownRange>('30d');
@@ -52,6 +52,20 @@ export const ProjectBreakdownCard: React.FC = () => {
                   );
                 })}
               </div>
+              {(() => {
+                const fresh = row.tokensIn + row.tokensOut;
+                return (
+                  <div
+                    className='text-right shrink-0 w-20'
+                    title={`fresh in+out: ${fresh.toLocaleString()} · cache reads: ${row.cacheRead.toLocaleString()}`}
+                  >
+                    <p className='text-xs font-mono text-slate-200 tabular-nums'>
+                      {fresh > 0 ? formatCompactNumber(fresh) : '—'}
+                    </p>
+                    <p className='text-[10px] text-slate-500'>tokens</p>
+                  </div>
+                );
+              })()}
               <div className='text-right shrink-0 w-20'>
                 <p className='text-xs font-mono text-slate-200 tabular-nums'>{formatDuration(row.activeMs)}</p>
                 <p className='text-[10px] text-slate-500'>{row.sessions} {row.sessions === 1 ? 'session' : 'sessions'}</p>

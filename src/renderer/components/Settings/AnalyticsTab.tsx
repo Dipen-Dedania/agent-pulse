@@ -7,6 +7,7 @@ import { HourRhythmCard } from './analytics/HourRhythmCard';
 import { ToolMixCard } from './analytics/ToolMixCard';
 import { ModelUsageCard } from './analytics/ModelUsageCard';
 import { ProjectBreakdownCard } from './analytics/ProjectBreakdownCard';
+import { TokensTimelineCard } from './analytics/TokensTimelineCard';
 import { Card } from './analytics/shared';
 import { bustCache } from './analytics/useAnalytics';
 
@@ -109,6 +110,7 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
       )}
       <DigestCard />
       <HeatmapCard />
+      <TokensTimelineCard />
       <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
         <HourRhythmCard />
         <ToolMixCard />

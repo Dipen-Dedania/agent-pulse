@@ -5,6 +5,7 @@ export type HeatmapRange = '30d' | '90d';
 export type ToolMixRange = '7d' | '30d';
 export type ModelUsageRange = '7d' | '30d';
 export type ProjectBreakdownRange = '7d' | '30d' | '90d';
+export type TokensTimelineRange = '7d' | '30d' | '90d';
 
 export interface ToolBreakdown {
   toolId: ToolId;
@@ -107,6 +108,26 @@ export interface ProjectBreakdownRow {
   activeMs: number;
   sessions: number;
   tools: ToolId[];
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+}
+
+export interface TokensTimelineBucket {
+  date: string;            // YYYY-MM-DD (local)
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+}
+
+export interface TokensTimelinePayload {
+  range: TokensTimelineRange;
+  buckets: TokensTimelineBucket[];
+  maxFresh: number;        // max(tokensIn + tokensOut) across buckets
+  maxCacheRead: number;
+  totalFresh: number;
+  totalCacheRead: number;
+  queriedAt: number;
 }
 
 export interface ProjectBreakdownPayload {

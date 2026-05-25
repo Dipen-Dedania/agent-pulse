@@ -19,6 +19,9 @@ import {
   ProjectBreakdownPayload,
   ProjectBreakdownRange,
   ProjectBreakdownRow,
+  TokensTimelinePayload,
+  TokensTimelineRange,
+  TokensTimelineBucket,
 } from '../../common/timeline-types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -275,7 +278,8 @@ export class TimelineQueries {
     const now = Date.now();
     const startMs = now - rangeMs(range);
     const rows = this.db.query<SessionAggregateRow>(
-      `SELECT tool_id, project_id, project_path, started_at, ended_at
+      `SELECT tool_id, project_id, project_path, started_at, ended_at,
+              total_tokens_in, total_tokens_out, total_cache_read
        FROM sessions WHERE ended_at >= ? AND project_id IS NOT NULL`,
       [startMs],
     );
@@ -290,9 +294,15 @@ export class TimelineQueries {
         activeMs: 0,
         sessions: 0,
         tools: [] as ToolId[],
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheRead: 0,
       };
       existing.activeMs += duration;
       existing.sessions += 1;
+      existing.tokensIn  += r.total_tokens_in  ?? 0;
+      existing.tokensOut += r.total_tokens_out ?? 0;
+      existing.cacheRead += r.total_cache_read ?? 0;
       if (!existing.tools.includes(r.tool_id as ToolId)) {
         existing.tools.push(r.tool_id as ToolId);
       }
@@ -300,6 +310,62 @@ export class TimelineQueries {
     }
     const ranked = Array.from(byProject.values()).sort((a, b) => b.activeMs - a.activeMs);
     return { range, rows: ranked, queriedAt: now };
+  }
+
+  getTokensTimeline(range: TokensTimelineRange): TokensTimelinePayload {
+    const now = Date.now();
+    const dayCount = range === '7d' ? 7 : range === '30d' ? 30 : 90;
+    const startMs = startOfLocalDay(now) - (dayCount - 1) * DAY_MS;
+
+    const rows = this.db.query<{
+      started_at: number;
+      total_tokens_in: number | null;
+      total_tokens_out: number | null;
+      total_cache_read: number | null;
+    }>(
+      `SELECT started_at,
+              COALESCE(total_tokens_in,  0) AS total_tokens_in,
+              COALESCE(total_tokens_out, 0) AS total_tokens_out,
+              COALESCE(total_cache_read, 0) AS total_cache_read
+       FROM sessions WHERE ended_at >= ?`,
+      [startMs],
+    );
+
+    // Pre-build dense day buckets (oldest → newest) so the chart x-axis is
+    // continuous even on inactive days. Attribute each session to its
+    // started_at day (matches getHeatmap convention).
+    const today = startOfLocalDay(now);
+    const bucketsByDate = new Map<string, TokensTimelineBucket>();
+    const orderedDates: string[] = [];
+    for (let i = dayCount - 1; i >= 0; i--) {
+      const date = formatLocalDate(today - i * DAY_MS);
+      orderedDates.push(date);
+      bucketsByDate.set(date, { date, tokensIn: 0, tokensOut: 0, cacheRead: 0 });
+    }
+
+    for (const r of rows) {
+      const date = formatLocalDate(r.started_at);
+      const bucket = bucketsByDate.get(date);
+      if (!bucket) continue; // older than window after day-rounding
+      bucket.tokensIn  += r.total_tokens_in  ?? 0;
+      bucket.tokensOut += r.total_tokens_out ?? 0;
+      bucket.cacheRead += r.total_cache_read ?? 0;
+    }
+
+    const buckets = orderedDates.map((d) => bucketsByDate.get(d)!);
+    let maxFresh = 0;
+    let maxCacheRead = 0;
+    let totalFresh = 0;
+    let totalCacheRead = 0;
+    for (const b of buckets) {
+      const fresh = b.tokensIn + b.tokensOut;
+      if (fresh > maxFresh) maxFresh = fresh;
+      if (b.cacheRead > maxCacheRead) maxCacheRead = b.cacheRead;
+      totalFresh += fresh;
+      totalCacheRead += b.cacheRead;
+    }
+
+    return { range, buckets, maxFresh, maxCacheRead, totalFresh, totalCacheRead, queriedAt: now };
   }
 
   // ─── Internals ──────────────────────────────────────────────────────────

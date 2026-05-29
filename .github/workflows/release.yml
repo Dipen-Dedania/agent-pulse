@@ -48,7 +48,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22 is required: @electron/rebuild needs >=22.12.0, and
+          # better-sqlite3 only ships prebuilt binaries for win32-x64 from
+          # Node 22 onward. On Node 20 the install falls back to node-gyp,
+          # which fails on the windows-latest image because it can't detect
+          # the bundled Visual Studio 18 toolchain.
+          node-version: 22
           cache: npm
 
       - name: Install dependencies

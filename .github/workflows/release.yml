@@ -43,7 +43,9 @@ jobs:
               release/*.exe
               release/*.exe.blockmap
               release/latest.yml
-            binary_glob: '*.exe,*.exe.blockmap'
+            # minimatch (used by upload-cloud-storage) wants brace
+            # expansion — comma-separated would silently match nothing.
+            binary_glob: '*.{exe,exe.blockmap}'
             manifest_glob: 'latest.yml'
           - os: macos-latest
             script: dist:mac
@@ -51,7 +53,7 @@ jobs:
               release/*.dmg
               release/*.dmg.blockmap
               release/latest-mac.yml
-            binary_glob: '*.dmg,*.dmg.blockmap'
+            binary_glob: '*.{dmg,dmg.blockmap}'
             manifest_glob: 'latest-mac.yml'
 
     runs-on: ${{ matrix.os }}

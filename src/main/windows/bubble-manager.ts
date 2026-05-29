@@ -132,7 +132,8 @@ public class APFocus {
     ShowWindow(hwnd, 9); // SW_RESTORE
     uint targetPid;
     uint targetThread = GetWindowThreadProcessId(hwnd, out targetPid);
-    uint foreThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+    uint forePid;
+    uint foreThread = GetWindowThreadProcessId(GetForegroundWindow(), out forePid);
     uint currentThread = GetCurrentThreadId();
     bool attachedToFore = false, attachedToTarget = false;
     try {
@@ -150,7 +151,9 @@ public class APFocus {
   $hwnd = [APFocus]::FindTopmost($names)
   if ($hwnd -eq [IntPtr]::Zero) { Write-Output "0:no_window"; exit }
   $ok = [APFocus]::ForceForeground($hwnd)
-  Write-Output "1:hwnd=$hwnd:ok=$ok"
+  # \${var}: PS braces required — bare $hwnd:ok would be parsed as a scoped
+  # variable reference and the value would render empty.
+  Write-Output "1:hwnd=\${hwnd}:ok=\${ok}"
 } catch {
   Write-Output "0:err:$($_.ToString().Split([char]10)[0])"
 }`.trim();
@@ -169,21 +172,51 @@ public class APFocus {
           return;
         }
         const focused = out.startsWith('1:');
-        logger.debug(`[BubbleManager] focus result → ${out}`);
+        logger.info(`[BubbleManager] focus result → ${out}`);
         resolve(focused);
       },
     );
   });
 }
 
-async function focusTool(toolId: ToolId): Promise<void> {
+async function focusTool(
+  toolId: ToolId,
+  agentPid?: number,
+  agentPidChain?: number[],
+): Promise<void> {
   const platform = process.platform;
-  logger.debug(`[BubbleManager] focus-tool: toolId=${toolId} platform=${platform}`);
+  logger.debug(`[BubbleManager] focus-tool: toolId=${toolId} pid=${agentPid} chain=${JSON.stringify(agentPidChain)} platform=${platform}`);
 
   try {
     if (platform === 'win32') {
-      const processNames = TOOL_WIN_PROCESS_NAMES[toolId];
-      const focused = await focusWindowsByProcessNames(processNames);
+      // Build a candidate PID list. The chain is captured at hook time so
+      // it includes both short-lived shims (which may be dead by now) and
+      // the long-lived agent / terminal further up. We try every entry and
+      // walk parents from each — as long as ONE PID is still alive, we'll
+      // reach a window-owning ancestor.
+      const candidates: number[] = [];
+      if (Array.isArray(agentPidChain)) {
+        for (const pid of agentPidChain) {
+          if (typeof pid === 'number' && pid > 0 && !candidates.includes(pid)) {
+            candidates.push(pid);
+          }
+        }
+      }
+      if (typeof agentPid === 'number' && agentPid > 0 && !candidates.includes(agentPid)) {
+        candidates.push(agentPid);
+      }
+
+      let focused = false;
+      if (candidates.length > 0) {
+        focused = await focusWindowByPid(candidates);
+      }
+
+      // Fall back to a process-name search — covers cases where no hook has
+      // fired yet (no PID known), or every PID in the chain is dead.
+      if (!focused) {
+        const processNames = TOOL_WIN_PROCESS_NAMES[toolId];
+        focused = await focusWindowsByProcessNames(processNames);
+      }
 
       if (!focused) {
         // Nothing matched — try launching only if we know the GUI exe path.
@@ -209,6 +242,124 @@ async function focusTool(toolId: ToolId): Promise<void> {
   } catch (err) {
     logger.warn(`[BubbleManager] focus-tool failed for ${toolId}:`, err);
   }
+}
+
+/**
+ * PID-based focus: try each PID in `startPids`, walking up the parent chain
+ * from each via Win32_Process.ParentProcessId. Returns true once any
+ * ancestor owns a visible top-level window and is brought to the foreground.
+ *
+ * Why a list: hook scripts capture an ancestor chain (parent, grandparent,
+ * …) because the immediate parent is often a short-lived shim (cmd.exe /C
+ * wrappers, transient launchers) that exits the moment the hook returns —
+ * dead by click time. Trying every chain entry survives shim death as long
+ * as ONE PID is still alive.
+ *
+ * Why also walk parents from each: deals with the case where the alive PID
+ * itself is a CLI process (no window) — its terminal-host ancestor is the
+ * one that actually owns the window.
+ */
+function focusWindowByPid(startPids: number[]): Promise<boolean> {
+  const pidList = startPids.map((p) => Math.floor(p)).join(',');
+  const script = `
+$startPids = @(${pidList})
+try {
+  Add-Type -ErrorAction Stop -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class APFocusPid {
+  public delegate bool WNDENUMPROC(IntPtr h, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(WNDENUMPROC cb, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+
+  public static IntPtr FindForPid(int pid) {
+    IntPtr found = IntPtr.Zero;
+    var cb = new WNDENUMPROC((h, lp) => {
+      if (!IsWindowVisible(h)) return true;
+      uint p; GetWindowThreadProcessId(h, out p);
+      if ((int)p == pid) { found = h; return false; }
+      return true;
+    });
+    EnumWindows(cb, IntPtr.Zero);
+    GC.KeepAlive(cb);
+    return found;
+  }
+
+  public static bool ForceForeground(IntPtr hwnd) {
+    ShowWindow(hwnd, 9); // SW_RESTORE
+    uint targetPid;
+    uint targetThread = GetWindowThreadProcessId(hwnd, out targetPid);
+    uint forePid;
+    uint foreThread = GetWindowThreadProcessId(GetForegroundWindow(), out forePid);
+    uint currentThread = GetCurrentThreadId();
+    bool attachedToFore = false, attachedToTarget = false;
+    try {
+      if (foreThread != currentThread) attachedToFore = AttachThreadInput(currentThread, foreThread, true);
+      if (targetThread != currentThread && targetThread != foreThread)
+        attachedToTarget = AttachThreadInput(currentThread, targetThread, true);
+      return SetForegroundWindow(hwnd);
+    } finally {
+      if (attachedToFore)   AttachThreadInput(currentThread, foreThread, false);
+      if (attachedToTarget) AttachThreadInput(currentThread, targetThread, false);
+    }
+  }
+}
+"@
+  $hwnd = [IntPtr]::Zero
+  $walked = New-Object System.Collections.ArrayList
+  $matchedPid = 0
+  foreach ($startPid in $startPids) {
+    $current = [int]$startPid
+    for ($i = 0; $i -lt 10; $i++) {
+      if ($current -le 0) { break }
+      [void]$walked.Add($current)
+      $hwnd = [APFocusPid]::FindForPid($current)
+      if ($hwnd -ne [IntPtr]::Zero) { $matchedPid = $current; break }
+      try {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$current" -ErrorAction Stop
+        if (-not $proc) { break }
+        $current = [int]$proc.ParentProcessId
+      } catch { break }
+    }
+    if ($hwnd -ne [IntPtr]::Zero) { break }
+  }
+  if ($hwnd -eq [IntPtr]::Zero) {
+    Write-Output ("0:no_window:walked=" + ($walked -join ','))
+    exit
+  }
+  $ok = [APFocusPid]::ForceForeground($hwnd)
+  # \${var}: PS braces required — bare $hwnd:pid would be parsed as a scoped
+  # variable reference and render empty.
+  Write-Output ("1:hwnd=\${hwnd}:pid=\${matchedPid}:ok=\${ok}:walked=" + ($walked -join ','))
+} catch {
+  Write-Output "0:err:$($_.ToString().Split([char]10)[0])"
+}`.trim();
+
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+
+  return new Promise<boolean>((resolve) => {
+    execFile(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
+      (err, stdout, stderr) => {
+        const out = stdout.trim();
+        if (err) {
+          logger.warn('[BubbleManager] focus-by-pid PS error:', stderr?.trim() || err.message);
+          resolve(false);
+          return;
+        }
+        const focused = out.startsWith('1:');
+        logger.info(`[BubbleManager] focus-by-pid result → ${out}`);
+        resolve(focused);
+      },
+    );
+  });
 }
 
 function getAppIconPath(): string {
@@ -352,11 +503,21 @@ export class BubbleManager {
       },
     );
 
-    ipcMain.on('focus-tool', (_event, { toolId }: { toolId: ToolId }) => {
-      focusTool(toolId).catch((err) =>
-        logger.warn('[BubbleManager] focus-tool error:', err),
-      );
-    });
+    ipcMain.on(
+      'focus-tool',
+      (
+        _event,
+        {
+          toolId,
+          agentPid,
+          agentPidChain,
+        }: { toolId: ToolId; agentPid?: number; agentPidChain?: number[] },
+      ) => {
+        focusTool(toolId, agentPid, agentPidChain).catch((err) =>
+          logger.warn('[BubbleManager] focus-tool error:', err),
+        );
+      },
+    );
 
     ipcMain.on('bubble-hover', (event, { hovered }: { hovered: boolean }) => {
       const win = BrowserWindow.fromWebContents(event.sender);

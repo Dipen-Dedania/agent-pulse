@@ -12,6 +12,8 @@ import {
   ProjectBreakdownRange,
   TokensTimelinePayload,
   TokensTimelineRange,
+  GuardrailsAnalyticsPayload,
+  GuardrailsAnalyticsRange,
 } from '../../../../common/timeline-types';
 
 const TTL_MS = 30_000;
@@ -94,4 +96,8 @@ export function useProjectBreakdown(range: ProjectBreakdownRange) {
 
 export function useTokensTimeline(range: TokensTimelineRange) {
   return useAnalyticsQuery<TokensTimelinePayload>('analytics:get-tokens-timeline', { range }, range);
+}
+
+export function useGuardrailsAnalytics(range: GuardrailsAnalyticsRange) {
+  return useAnalyticsQuery<GuardrailsAnalyticsPayload>('analytics:get-guardrails', { range }, range);
 }

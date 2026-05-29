@@ -501,10 +501,20 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
 
-      // No meaningful movement → treat as a click, bring the tool to front
+      // No meaningful movement → treat as a click, bring the tool to front.
+      // Pass the latest known agent PID + ancestor chain so the main process
+      // can walk up the process tree to the specific terminal/window hosting
+      // this session, even when the immediate parent has already died.
       if (!hasDragged) {
-        logger.debug(`[Bubble:${toolId}] click detected, sending focus-tool`);
-        window.electron.send('focus-tool', { toolId });
+        const status = useStatusStore.getState().statuses[toolId];
+        const agentPid = status?.agentPid;
+        const agentPidChain = status?.agentPidChain;
+        logger.debug(
+          `[Bubble:${toolId}] click detected, sending focus-tool pid=${agentPid ?? 'none'} chain=${
+            agentPidChain ? agentPidChain.join(',') : 'none'
+          }`,
+        );
+        window.electron.send('focus-tool', { toolId, agentPid, agentPidChain });
       }
     };
 

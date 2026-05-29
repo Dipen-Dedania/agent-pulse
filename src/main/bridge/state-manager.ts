@@ -19,6 +19,13 @@ export class StatusStateManager {
       lastUpdated: timestamp,
       activeAgents: details.activeAgents || (current?.activeAgents || 0),
       currentTask: details.taskSummary,
+      // Latch the most recent agentPid + chain; preserve the previous ones
+      // if this event didn't carry them (e.g. Notification events lack
+      // process info, but we still want to focus on click).
+      agentPid: typeof details.agentPid === 'number' ? details.agentPid : current?.agentPid,
+      agentPidChain: Array.isArray(details.agentPidChain) && details.agentPidChain.length > 0
+        ? details.agentPidChain
+        : current?.agentPidChain,
     };
 
     this.statuses.set(toolId, updatedStatus);

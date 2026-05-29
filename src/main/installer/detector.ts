@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { ToolId } from '../../common/types';
 
 export interface ToolDetection {
@@ -29,9 +29,11 @@ export class ToolDetector {
   }
 
   private whichCommand(cmd: string): string | undefined {
+    // execFile (not exec) so `cmd` is never spliced into a shell command line —
+    // keeps us safe if a future caller ever passes user input here.
     const lookup = process.platform === 'win32' ? 'where' : 'which';
     try {
-      const out = execSync(`${lookup} ${cmd}`, { stdio: ['ignore', 'pipe', 'ignore'] })
+      const out = execFileSync(lookup, [cmd], { stdio: ['ignore', 'pipe', 'ignore'] })
         .toString()
         .trim()
         .split(/\r?\n/)[0];

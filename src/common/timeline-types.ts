@@ -140,3 +140,28 @@ export interface AnalyticsConfig {
   redactTaskText: boolean;
   idleGapMinutes: number;
 }
+
+export type GuardrailsAnalyticsRange = '7d' | '30d';
+
+export interface GuardrailToolCount {
+  toolId: ToolId;
+  total: number;
+  warn: number;
+  block: number;
+}
+
+export interface GuardrailRuleCount {
+  ruleId: string;
+  message: string;
+  count: number;
+}
+
+export interface GuardrailsAnalyticsPayload {
+  range: GuardrailsAnalyticsRange;
+  total: number;
+  warn: number;
+  block: number;
+  byTool: GuardrailToolCount[];
+  byRule: GuardrailRuleCount[];
+  queriedAt: number;
+}

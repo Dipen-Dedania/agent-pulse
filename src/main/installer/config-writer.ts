@@ -314,8 +314,20 @@ export class ConfigWriter {
 # and forwards to the bridge.
 BODY=$(cat)
 CWD_ESCAPED=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
-INJECT='"cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"','
-BODY=$(printf '%s' "$BODY" | sed "s/^{/{$INJECT/")
+# Walk up the parent chain (up to 7 levels). Hook PIDs can be short-lived,
+# so we ship the whole ancestor list and let the focus path try each.
+CHAIN_PIDS="$PPID"
+_CUR=$PPID
+for _i in 1 2 3 4 5 6 7; do
+  _PARENT=$(ps -o ppid= -p "$_CUR" 2>/dev/null | tr -d ' ')
+  if [ -z "$_PARENT" ] || [ "$_PARENT" -le 1 ] 2>/dev/null; then break; fi
+  CHAIN_PIDS="$CHAIN_PIDS,$_PARENT"
+  _CUR=$_PARENT
+done
+INJECT='"cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"',"agent_pid_chain":['"$CHAIN_PIDS"'],'
+# Use '|' as the sed delimiter: cwd values almost always contain '/' on Unix,
+# which would terminate the default s/.../.../ form early and drop the injection.
+BODY=$(printf '%s' "$BODY" | sed "s|^{|{$INJECT|")
 curl -s -o /dev/null -X POST \\
   -H "Content-Type: application/json" \\
   -d "$BODY" \\
@@ -337,7 +349,27 @@ $reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.
 $body = $reader.ReadToEnd()
 $reader.Close()
 $cwdJson = ($PWD.Path | ConvertTo-Json -Compress)
-$inject = '"cwd":' + $cwdJson + ',"agent_pid":' + $PID + ','
+# Capture the full ancestor PID chain (up to 8 levels). The immediate parent
+# is often a short-lived shim (cmd.exe /C, transient launcher) that exits
+# the moment the hook returns; the rest of the chain holds the long-lived
+# agent / terminal we can focus on later. We ship the whole list so the
+# focus path can try each entry until one is still alive.
+$chainPids = New-Object System.Collections.ArrayList
+[void]$chainPids.Add($PID)
+try {
+  $cur = $PID
+  for ($i = 0; $i -lt 7; $i++) {
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$cur" -ErrorAction Stop
+    if (-not $p) { break }
+    $next = [int]$p.ParentProcessId
+    if ($next -le 0) { break }
+    [void]$chainPids.Add($next)
+    $cur = $next
+  }
+} catch { }
+$chainJson = '[' + ($chainPids -join ',') + ']'
+$agentPid = if ($chainPids.Count -ge 2) { $chainPids[1] } else { $PID }
+$inject = '"cwd":' + $cwdJson + ',"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
 $body = $body -replace '^\\{', ('{' + $inject)
 try {
   Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
@@ -473,8 +505,17 @@ exit 0
 # Reads event JSON from stdin, injects identifier + cwd + agent_pid, and forwards to bridge.
 BODY=$(cat)
 CWD_ESCAPED=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
-INJECT='"_ap_tool":"openai-codex","cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"','
-BODY=$(printf '%s' "$BODY" | sed "s/^{/{$INJECT/")
+CHAIN_PIDS="$PPID"
+_CUR=$PPID
+for _i in 1 2 3 4 5 6 7; do
+  _PARENT=$(ps -o ppid= -p "$_CUR" 2>/dev/null | tr -d ' ')
+  if [ -z "$_PARENT" ] || [ "$_PARENT" -le 1 ] 2>/dev/null; then break; fi
+  CHAIN_PIDS="$CHAIN_PIDS,$_PARENT"
+  _CUR=$_PARENT
+done
+INJECT='"_ap_tool":"openai-codex","cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"',"agent_pid_chain":['"$CHAIN_PIDS"'],'
+# '|' delimiter: see buildShellScript for the / vs | rationale.
+BODY=$(printf '%s' "$BODY" | sed "s|^{|{$INJECT|")
 curl -s -o /dev/null -X POST \\
   -H "Content-Type: application/json" \\
   -d "$BODY" \\
@@ -494,7 +535,23 @@ $reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.
 $body = $reader.ReadToEnd()
 $reader.Close()
 $cwdJson = ($PWD.Path | ConvertTo-Json -Compress)
-$inject = '"_ap_tool":"openai-codex","cwd":' + $cwdJson + ',"agent_pid":' + $PID + ','
+# Capture the ancestor PID chain — see buildPowerShellScript for rationale.
+$chainPids = New-Object System.Collections.ArrayList
+[void]$chainPids.Add($PID)
+try {
+  $cur = $PID
+  for ($i = 0; $i -lt 7; $i++) {
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$cur" -ErrorAction Stop
+    if (-not $p) { break }
+    $next = [int]$p.ParentProcessId
+    if ($next -le 0) { break }
+    [void]$chainPids.Add($next)
+    $cur = $next
+  }
+} catch { }
+$chainJson = '[' + ($chainPids -join ',') + ']'
+$agentPid = if ($chainPids.Count -ge 2) { $chainPids[1] } else { $PID }
+$inject = '"_ap_tool":"openai-codex","cwd":' + $cwdJson + ',"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
 $body = $body -replace '^\\{', ('{' + $inject)
 try {
   Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
@@ -644,8 +701,17 @@ exit 0
 EVENT="\${1:-}"
 BODY=$(cat)
 CWD_ESCAPED=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
-INJECT='"_ap_tool":"antigravity-cli","hook_event_name":"'"$EVENT"'","cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"','
-BODY=$(printf '%s' "$BODY" | sed "s/^{/{$INJECT/")
+CHAIN_PIDS="$PPID"
+_CUR=$PPID
+for _i in 1 2 3 4 5 6 7; do
+  _PARENT=$(ps -o ppid= -p "$_CUR" 2>/dev/null | tr -d ' ')
+  if [ -z "$_PARENT" ] || [ "$_PARENT" -le 1 ] 2>/dev/null; then break; fi
+  CHAIN_PIDS="$CHAIN_PIDS,$_PARENT"
+  _CUR=$_PARENT
+done
+INJECT='"_ap_tool":"antigravity-cli","hook_event_name":"'"$EVENT"'","cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"',"agent_pid_chain":['"$CHAIN_PIDS"'],'
+# '|' delimiter: see buildShellScript for the / vs | rationale.
+BODY=$(printf '%s' "$BODY" | sed "s|^{|{$INJECT|")
 curl -s --max-time 3 -o /dev/null -X POST \\
   -H "Content-Type: application/json" \\
   -d "$BODY" \\
@@ -678,7 +744,26 @@ $reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.
 $body = $reader.ReadToEnd()
 $reader.Close()
 $cwdJson = ($PWD.Path | ConvertTo-Json -Compress)
-$inject = '"_ap_tool":"antigravity-cli","hook_event_name":"' + $Event + '","cwd":' + $cwdJson + ',"agent_pid":' + $PID + ','
+# Capture the ancestor PID chain. Critical for Antigravity: it wraps the
+# hook in cmd.exe /C, which exits immediately after the hook returns. We
+# need higher ancestors in the chain to still focus the agent terminal at
+# click time.
+$chainPids = New-Object System.Collections.ArrayList
+[void]$chainPids.Add($PID)
+try {
+  $cur = $PID
+  for ($i = 0; $i -lt 7; $i++) {
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$cur" -ErrorAction Stop
+    if (-not $p) { break }
+    $next = [int]$p.ParentProcessId
+    if ($next -le 0) { break }
+    [void]$chainPids.Add($next)
+    $cur = $next
+  }
+} catch { }
+$chainJson = '[' + ($chainPids -join ',') + ']'
+$agentPid = if ($chainPids.Count -ge 2) { $chainPids[1] } else { $PID }
+$inject = '"_ap_tool":"antigravity-cli","hook_event_name":"' + $Event + '","cwd":' + $cwdJson + ',"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
 $body = $body -replace '^\\{', ('{' + $inject)
 try {
   Invoke-WebRequest -Uri "${this.bridgeUrl}" \`

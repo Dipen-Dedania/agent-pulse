@@ -6,6 +6,12 @@ import { GuardrailConfig, GuardrailEvent, GuardrailEvaluation } from '../../comm
 import { evaluateCommand, detectOs } from '../guardrails/engine';
 import { extractCommand } from '../guardrails/extractCommand';
 import { logger } from '../../common/logger';
+import {
+  clampPidChain,
+  isHostAllowed,
+  readBody,
+  redactTranscriptPath,
+} from './security';
 
 export interface BridgeOptions {
   getGuardrailConfig?: () => GuardrailConfig;
@@ -76,61 +82,86 @@ export class StatusBridgeServer {
   constructor(stateManager: StatusStateManager, options: BridgeOptions = {}) {
     this.stateManager = stateManager;
     this.options = options;
-    this.server = http.createServer((req, res) => this.handleRequest(req, res));
-  }
-
-  public start() {
-    this.server.listen(this.port, () => {
-      logger.info(`Status Bridge running on port ${this.port}`);
+    // Wrap with .catch so an async-handler rejection doesn't escape as an
+    // unhandled promise — we still want a clean 500 on the wire.
+    this.server = http.createServer((req, res) => {
+      this.handleRequest(req, res).catch((e) => {
+        logger.error('[Bridge] handler threw:', e);
+        if (!res.headersSent) {
+          res.writeHead(500);
+          res.end();
+        }
+      });
     });
   }
 
-  private handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
+  public start() {
+    // Bind to loopback only — the bridge is a local IPC channel, never meant
+    // to accept LAN traffic. Anyone needing remote access must explicitly
+    // re-bind by editing this file.
+    this.server.listen(this.port, '127.0.0.1', () => {
+      logger.info(`Status Bridge running on 127.0.0.1:${this.port}`);
+    });
+  }
+
+  private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
+    // Host allowlist check runs before anything else — rejects DNS-rebound
+    // browser traffic with no JSON parsing, no body read, no allocation.
+    if (!isHostAllowed(req.headers.host, this.port)) {
+      logger.warn(`[Bridge] rejected request with non-local Host header: ${req.headers.host}`);
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+
     if (req.method === 'POST' && req.url === '/event') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          // Strip UTF-8 BOM that PowerShell may prepend via [Console]::In.ReadToEnd()
-          if (body.charCodeAt(0) === 0xFEFF) body = body.slice(1);
-          logger.debug(`[Bridge] Raw body received: ${body}`);
-          const data = JSON.parse(body);
-          const normalized = this.normalizePayload(data);
+      const result = await readBody(req);
+      if (!result.ok) {
+        res.writeHead(result.reason === 'too-large' ? 413 : 400);
+        res.end();
+        return;
+      }
+      let body = result.body;
+      try {
+        // Strip UTF-8 BOM that PowerShell may prepend via [Console]::In.ReadToEnd()
+        if (body.charCodeAt(0) === 0xFEFF) body = body.slice(1);
+        logger.debug(`[Bridge] Raw body received: ${redactTranscriptPath(body)}`);
+        const data = JSON.parse(body);
+        const normalized = this.normalizePayload(data);
 
-          if (!normalized) {
-            logger.warn(`[Bridge] Unrecognized event payload: ${JSON.stringify(data)}`);
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Unrecognized event format' }));
-            return;
-          }
-
-          const { toolId, state, payload } = normalized;
-          logger.debug(`[Bridge] Normalized event: toolId=${toolId} state=${state} payload=${JSON.stringify(payload)}`);
-
-          // Guardrail evaluation runs only on tool-call entry. For non-shell
-          // tools or non-PreToolUse events, extractCommand returns null and
-          // we fall through to the normal status broadcast path.
-          const evaluation = this.evaluateGuardrails(toolId, data);
-
-          if (evaluation && evaluation.eval.decision === 'block') {
-            // Hard stop — don't propagate working state for a command we're
-            // refusing. The state stays whatever it was.
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(buildBlockResponse(toolId, evaluation.eval)));
-            return;
-          }
-
-          this.stateManager.updateStatus(toolId, state, payload);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ status: 'ok' }));
-        } catch (e) {
-          logger.error(`JSON parse error: ${e}`);
+        if (!normalized) {
+          logger.warn(`[Bridge] Unrecognized event payload: ${redactTranscriptPath(JSON.stringify(data))}`);
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid JSON' }));
+          res.end(JSON.stringify({ error: 'Unrecognized event format' }));
+          return;
         }
-      });
+
+        const { toolId, state, payload } = normalized;
+        logger.debug(`[Bridge] Normalized event: toolId=${toolId} state=${state} payload=${redactTranscriptPath(JSON.stringify(payload))}`);
+
+        // Guardrail evaluation runs only on tool-call entry. For non-shell
+        // tools or non-PreToolUse events, extractCommand returns null and
+        // we fall through to the normal status broadcast path.
+        const evaluation = this.evaluateGuardrails(toolId, data);
+
+        if (evaluation && evaluation.eval.decision === 'block') {
+          // Hard stop — don't propagate working state for a command we're
+          // refusing. The state stays whatever it was.
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(buildBlockResponse(toolId, evaluation.eval)));
+          return;
+        }
+
+        this.stateManager.updateStatus(toolId, state, payload);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+      } catch (e) {
+        logger.error(`JSON parse error: ${e}`);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
     } else if (req.url === '/mcp') {
-      this.handleMcp(req, res);
+      await this.handleMcp(req, res);
     } else {
       res.writeHead(404);
       res.end();
@@ -145,7 +176,7 @@ export class StatusBridgeServer {
    * that the agent is active. Cursor calls it at the start and end of agent
    * turns, so we map the call direction to working/idle state.
    */
-  private handleMcp(req: http.IncomingMessage, res: http.ServerResponse) {
+  private async handleMcp(req: http.IncomingMessage, res: http.ServerResponse) {
     if (req.method === 'GET') {
       // MCP discovery — return a minimal server manifest
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -169,28 +200,30 @@ export class StatusBridgeServer {
     }
 
     if (req.method === 'POST') {
-      let body = '';
-      req.on('data', (chunk) => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const rpc = JSON.parse(body);
-          logger.debug(`[Bridge/MCP] JSON-RPC call: ${JSON.stringify(rpc)}`);
-          const toolName: string = rpc?.params?.name ?? rpc?.method ?? '';
+      const result = await readBody(req);
+      if (!result.ok) {
+        res.writeHead(result.reason === 'too-large' ? 413 : 400);
+        res.end();
+        return;
+      }
+      try {
+        const rpc = JSON.parse(result.body);
+        logger.debug(`[Bridge/MCP] JSON-RPC call: ${JSON.stringify(rpc)}`);
+        const toolName: string = rpc?.params?.name ?? rpc?.method ?? '';
 
-          if (toolName === 'agent_working') {
-            this.stateManager.updateStatus('cursor', 'working', {});
-          } else if (toolName === 'agent_idle') {
-            this.stateManager.updateStatus('cursor', 'idle-active', {});
-          }
-
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id ?? null, result: { content: [{ type: 'text', text: 'ok' }] } }));
-        } catch (e) {
-          logger.error(`[Bridge/MCP] parse error: ${e}`);
-          res.writeHead(400);
-          res.end();
+        if (toolName === 'agent_working') {
+          this.stateManager.updateStatus('cursor', 'working', {});
+        } else if (toolName === 'agent_idle') {
+          this.stateManager.updateStatus('cursor', 'idle-active', {});
         }
-      });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id ?? null, result: { content: [{ type: 'text', text: 'ok' }] } }));
+      } catch (e) {
+        logger.error(`[Bridge/MCP] parse error: ${e}`);
+        res.writeHead(400);
+        res.end();
+      }
       return;
     }
 
@@ -275,10 +308,11 @@ export class StatusBridgeServer {
 // - Tools that don't honour these fields ignore them; the response still
 //   returns 200 OK so the hook script doesn't error out.
 export function buildBlockResponse(toolId: ToolId, evaluation: GuardrailEvaluation): any {
-  const reason = evaluation.matched
+  const detail = evaluation.matched
     .map(m => m.message + (m.suggestedFix ? ` ${m.suggestedFix}` : ''))
-    .join(' | ') || 'Blocked by Agent Pulse guardrail.';
+    .join(' | ') || 'guardrail tripped';
   const ruleIds = evaluation.matched.map(m => m.ruleId).join(',');
+  const reason = `[Agent Pulse] Blocked by ${ruleIds || 'guardrail'}: ${detail}`;
 
   // Lowest common denominator: top-level `decision`/`reason` covers Antigravity
   // and any other tool that reads the obvious field. `hookSpecificOutput` is
@@ -303,6 +337,7 @@ export function buildBlockResponse(toolId: ToolId, evaluation: GuardrailEvaluati
 function extractCommonFields(data: any): {
   cwd?: string;
   agentPid?: number;
+  agentPidChain?: number[];
   transcriptPath?: string;
 } {
   const cwd = typeof data.cwd === 'string' ? data.cwd : undefined;
@@ -313,13 +348,32 @@ function extractCommonFields(data: any): {
       : typeof pidRaw === 'string' && /^\d+$/.test(pidRaw)
         ? parseInt(pidRaw, 10)
         : undefined;
+  // Hook scripts also report an ancestor PID chain (immediate parent through
+  // ~8 levels up). Lets the focus path try every entry — survives short-lived
+  // shim processes (cmd.exe /C, transient launchers) that die between the
+  // hook firing and the user clicking the bubble. clampPidChain bounds the
+  // array before .map/.filter so a hostile payload can't burn CPU here.
+  const chainRaw = clampPidChain(data.agent_pid_chain ?? data.agentPidChain ?? data.ap_pid_chain);
+  let agentPidChain: number[] | undefined;
+  if (chainRaw) {
+    const parsed = chainRaw
+      .map((v: unknown) =>
+        typeof v === 'number'
+          ? v
+          : typeof v === 'string' && /^\d+$/.test(v)
+            ? parseInt(v, 10)
+            : undefined,
+      )
+      .filter((v): v is number => typeof v === 'number' && v > 0);
+    if (parsed.length > 0) agentPidChain = parsed;
+  }
   const transcriptPath =
     typeof data.transcript_path === 'string'
       ? data.transcript_path
       : typeof data.transcriptPath === 'string'
         ? data.transcriptPath
         : undefined;
-  return { cwd, agentPid, transcriptPath };
+  return { cwd, agentPid, agentPidChain, transcriptPath };
 }
 
 // Exported for unit testing
@@ -434,9 +488,14 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
         };
       }
 
-      // Format 5a — Claude Code CLI (has permission_mode, a CLI-specific field).
-      // MUST be checked before Copilot because both send transcript_path.
-      if (data.permission_mode !== undefined) {
+      // Format 5a — Claude Code CLI (has permission_mode, a CLI-specific field,
+      // or a transcript_path under `.claude/projects/`). MUST be checked before
+      // Copilot because both send transcript_path; some CC events (e.g.
+      // Notification) omit permission_mode, so the path pattern is the fallback.
+      const isClaudeCodeTranscript =
+        typeof data.transcript_path === 'string' &&
+        /[\\/]\.claude[\\/]projects[\\/]/.test(data.transcript_path);
+      if (data.permission_mode !== undefined || isClaudeCodeTranscript) {
         const state = mapClaudeCodeEvent(eventName, data);
         if (state === null) {
           logger.debug(`Ignoring unmapped Claude Code event: ${eventName}${eventName === 'Notification' ? ` (notification_type=${data.notification_type})` : ''}`);

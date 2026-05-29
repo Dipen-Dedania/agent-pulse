@@ -8,6 +8,7 @@ import { ToolMixCard } from './analytics/ToolMixCard';
 import { ModelUsageCard } from './analytics/ModelUsageCard';
 import { ProjectBreakdownCard } from './analytics/ProjectBreakdownCard';
 import { TokensTimelineCard } from './analytics/TokensTimelineCard';
+import { GuardrailsCard } from './analytics/GuardrailsCard';
 import { Card } from './analytics/shared';
 import { bustCache } from './analytics/useAnalytics';
 
@@ -117,6 +118,7 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
       </div>
       <ModelUsageCard />
       <ProjectBreakdownCard />
+      <GuardrailsCard />
       <PrivacyAndSettings config={config} onConfigChange={handleConfigChange} />
     </div>
   );

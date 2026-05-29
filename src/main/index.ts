@@ -1,7 +1,8 @@
-import { app, ipcMain, shell, BrowserWindow } from 'electron';
+import { app, ipcMain, shell, BrowserWindow, Menu } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
 import { SettingsWindow } from './windows/settings-window';
 import { TrayManager } from './windows/tray';
+import { ENABLE_APP_MENU } from './feature-flags';
 import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
@@ -80,6 +81,9 @@ class AgentPulseApp {
 
     app.on('ready', () => {
       logger.info('[AgentPulseApp] app ready');
+      if (!ENABLE_APP_MENU) {
+        Menu.setApplicationMenu(null);
+      }
       this.setupIpc();
       this.bubbleManager.init();
       this.usagePoller.init();
@@ -309,11 +313,24 @@ class AgentPulseApp {
 
   // Push a guardrail event to every renderer window and append to the
   // in-memory ring so the Settings log shows history when opened post-event.
+  // Also persisted to the timeline DB so the Analytics tab can aggregate
+  // long-running counts; in-memory ring serves the live log only.
   private handleGuardrailEvent(event: import('../common/guardrails').GuardrailEvent) {
     this.guardrailLog = [event, ...this.guardrailLog].slice(0, AgentPulseApp.GUARDRAIL_LOG_SIZE);
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('guardrail:event', event);
     }
+    this.timeline?.db.insertGuardrailEvent({
+      ts: event.ts,
+      toolId: event.toolId,
+      decision: event.decision,
+      blockable: event.blockable ? 1 : 0,
+      command: event.command,
+      ruleIds: event.matched.map(m => m.ruleId).join(','),
+      ruleMessages: JSON.stringify(
+        event.matched.map(m => ({ ruleId: m.ruleId, message: m.message })),
+      ),
+    });
   }
 }
 

@@ -22,6 +22,10 @@ import {
   TokensTimelinePayload,
   TokensTimelineRange,
   TokensTimelineBucket,
+  GuardrailsAnalyticsPayload,
+  GuardrailsAnalyticsRange,
+  GuardrailToolCount,
+  GuardrailRuleCount,
 } from '../../common/timeline-types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -366,6 +370,71 @@ export class TimelineQueries {
     }
 
     return { range, buckets, maxFresh, maxCacheRead, totalFresh, totalCacheRead, queriedAt: now };
+  }
+
+  getGuardrails(range: GuardrailsAnalyticsRange): GuardrailsAnalyticsPayload {
+    const now = Date.now();
+    const startMs = now - rangeMs(range);
+
+    const rows = this.db.query<{
+      tool_id: string;
+      decision: string;
+      rule_ids: string;
+      rule_messages: string;
+    }>(
+      `SELECT tool_id, decision, rule_ids, rule_messages
+         FROM guardrail_events
+        WHERE ts >= ?`,
+      [startMs],
+    );
+
+    let total = 0;
+    let warn  = 0;
+    let block = 0;
+    const byToolMap = new Map<string, GuardrailToolCount>();
+    const byRuleMap = new Map<string, GuardrailRuleCount>();
+
+    for (const r of rows) {
+      total += 1;
+      if (r.decision === 'warn')  warn  += 1;
+      if (r.decision === 'block') block += 1;
+
+      const toolEntry = byToolMap.get(r.tool_id) ?? {
+        toolId: r.tool_id as ToolId,
+        total: 0,
+        warn: 0,
+        block: 0,
+      };
+      toolEntry.total += 1;
+      if (r.decision === 'warn')  toolEntry.warn  += 1;
+      if (r.decision === 'block') toolEntry.block += 1;
+      byToolMap.set(r.tool_id, toolEntry);
+
+      // rule_messages: JSON.stringify([{ ruleId, message }, ...]). Fall back to
+      // rule_ids if the JSON is malformed (older rows or a write error) so the
+      // count is still correct even when the human-readable text is missing.
+      let matched: Array<{ ruleId: string; message: string }> = [];
+      try {
+        const parsed = JSON.parse(r.rule_messages);
+        if (Array.isArray(parsed)) matched = parsed;
+      } catch {
+        matched = r.rule_ids.split(',').filter(Boolean).map((id) => ({ ruleId: id, message: id }));
+      }
+      for (const m of matched) {
+        const ruleEntry = byRuleMap.get(m.ruleId) ?? {
+          ruleId: m.ruleId,
+          message: m.message ?? m.ruleId,
+          count: 0,
+        };
+        ruleEntry.count += 1;
+        byRuleMap.set(m.ruleId, ruleEntry);
+      }
+    }
+
+    const byTool = Array.from(byToolMap.values()).sort((a, b) => b.total - a.total);
+    const byRule = Array.from(byRuleMap.values()).sort((a, b) => b.count - a.count);
+
+    return { range, total, warn, block, byTool, byRule, queriedAt: now };
   }
 
   // ─── Internals ──────────────────────────────────────────────────────────

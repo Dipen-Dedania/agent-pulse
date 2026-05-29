@@ -23,7 +23,7 @@ interface Database {
 }
 type DatabaseConstructor = new (path: string) => Database;
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -88,6 +88,20 @@ CREATE TABLE IF NOT EXISTS quota_samples (
 );
 
 CREATE INDEX IF NOT EXISTS idx_quota_lookup ON quota_samples (tool_id, window_key, sampled_at);
+
+CREATE TABLE IF NOT EXISTS guardrail_events (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts            INTEGER NOT NULL,
+  tool_id       TEXT    NOT NULL,
+  decision      TEXT    NOT NULL,
+  blockable     INTEGER NOT NULL,
+  command       TEXT    NOT NULL,
+  rule_ids      TEXT    NOT NULL,
+  rule_messages TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_guardrail_ts      ON guardrail_events (ts);
+CREATE INDEX IF NOT EXISTS idx_guardrail_tool_ts ON guardrail_events (tool_id, ts);
 `;
 
 export interface EventRow {
@@ -135,11 +149,26 @@ export interface QuotaSampleRow {
   sampledAt: number;
 }
 
+export interface GuardrailEventRow {
+  ts: number;
+  toolId: string;
+  decision: string;
+  blockable: 0 | 1;
+  command: string;
+  ruleIds: string;       // comma-separated
+  ruleMessages: string;  // JSON-encoded string[]
+}
+
 export interface TimelineDb {
   insertEvent: (row: EventRow) => void;
   insertSession: (row: SessionRow) => number;
   insertQuotaSample: (row: QuotaSampleRow) => void;
-  prune: (eventsOlderThanMs: number, quotaOlderThanMs: number) => { eventsDeleted: number; quotaDeleted: number };
+  insertGuardrailEvent: (row: GuardrailEventRow) => void;
+  prune: (
+    eventsOlderThanMs: number,
+    quotaOlderThanMs: number,
+    guardrailOlderThanMs: number,
+  ) => { eventsDeleted: number; quotaDeleted: number; guardrailDeleted: number };
   query: <T = unknown>(sql: string, params?: unknown[]) => T[];
   close: () => void;
   raw: Database;
@@ -179,7 +208,11 @@ export function initTimelineDb(): TimelineDb | null {
     if (current === undefined) {
       db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
     } else if (current !== SCHEMA_VERSION) {
-      logger.warn(`[Timeline] schema version ${current} differs from expected ${SCHEMA_VERSION}; no migration registered yet`);
+      // v1 → v2 only adds new tables (CREATE TABLE IF NOT EXISTS in SCHEMA_SQL
+      // already created them above), so just bump the recorded version. Future
+      // breaking migrations should branch on `current` here.
+      logger.info(`[Timeline] migrating schema_version ${current} → ${SCHEMA_VERSION}`);
+      db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }
   } catch (e: any) {
     initFailed = true;
@@ -218,8 +251,17 @@ export function initTimelineDb(): TimelineDb | null {
     VALUES (@toolId, @windowKey, @pctRemaining, @resetsAt, @sampledAt)
   `);
 
-  const pruneEventsStmt: Statement = db.prepare('DELETE FROM events WHERE timestamp < ?');
-  const pruneQuotaStmt: Statement  = db.prepare('DELETE FROM quota_samples WHERE sampled_at < ?');
+  const insertGuardrailStmt: Statement = db.prepare(`
+    INSERT INTO guardrail_events (
+      ts, tool_id, decision, blockable, command, rule_ids, rule_messages
+    ) VALUES (
+      @ts, @toolId, @decision, @blockable, @command, @ruleIds, @ruleMessages
+    )
+  `);
+
+  const pruneEventsStmt: Statement    = db.prepare('DELETE FROM events WHERE timestamp < ?');
+  const pruneQuotaStmt: Statement     = db.prepare('DELETE FROM quota_samples WHERE sampled_at < ?');
+  const pruneGuardrailStmt: Statement = db.prepare('DELETE FROM guardrail_events WHERE ts < ?');
 
   const normalize = (row: object): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
@@ -247,14 +289,23 @@ export function initTimelineDb(): TimelineDb | null {
       try { insertQuotaStmt.run(normalize(row)); }
       catch (e: any) { logger.warn('[Timeline] insertQuotaSample failed:', e?.message ?? e); }
     },
-    prune: (eventsOlderThanMs, quotaOlderThanMs) => {
+    insertGuardrailEvent: (row) => {
+      try { insertGuardrailStmt.run(normalize(row)); }
+      catch (e: any) { logger.warn('[Timeline] insertGuardrailEvent failed:', e?.message ?? e); }
+    },
+    prune: (eventsOlderThanMs, quotaOlderThanMs, guardrailOlderThanMs) => {
       try {
         const evInfo = pruneEventsStmt.run(eventsOlderThanMs);
         const quInfo = pruneQuotaStmt.run(quotaOlderThanMs);
-        return { eventsDeleted: Number(evInfo.changes), quotaDeleted: Number(quInfo.changes) };
+        const grInfo = pruneGuardrailStmt.run(guardrailOlderThanMs);
+        return {
+          eventsDeleted:    Number(evInfo.changes),
+          quotaDeleted:     Number(quInfo.changes),
+          guardrailDeleted: Number(grInfo.changes),
+        };
       } catch (e: any) {
         logger.warn('[Timeline] prune failed:', e?.message ?? e);
-        return { eventsDeleted: 0, quotaDeleted: 0 };
+        return { eventsDeleted: 0, quotaDeleted: 0, guardrailDeleted: 0 };
       }
     },
     query: <T = unknown>(sql: string, params: unknown[] = []) => {

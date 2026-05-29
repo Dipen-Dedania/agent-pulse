@@ -1,5 +1,6 @@
 import { BrowserWindow, app } from 'electron';
 import path from 'path';
+import { ENABLE_APP_MENU } from '../feature-flags';
 
 function getAppIconPath(): string {
   // 512x512 PNG works on every platform and scales down to taskbar/title-bar sizes
@@ -30,10 +31,12 @@ export class SettingsWindow {
       height: 680,
       title: 'Agent Pulse Settings',
       icon: getAppIconPath(),
+      autoHideMenuBar: !ENABLE_APP_MENU,
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'), // Will create preload later
         nodeIntegration: false,
         contextIsolation: true,
+        devTools: ENABLE_APP_MENU,
       },
     });
 

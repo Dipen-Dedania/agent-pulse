@@ -12,6 +12,11 @@ export interface NormalizedEvent {
     errorMessage?: string;
     cwd?: string;
     agentPid?: number;
+    // Ancestor PID chain captured at hook time. The agent's immediate parent
+    // is often a short-lived shim (cmd.exe /C wrapper, transient launcher)
+    // that dies before the user clicks the bubble; the rest of the chain
+    // contains longer-lived ancestors we can still focus.
+    agentPidChain?: number[];
     transcriptPath?: string;
     model?: string;
   };
@@ -23,6 +28,13 @@ export interface ToolStatus {
   lastUpdated: number;
   activeAgents: number;
   currentTask?: string;
+  // Latest agent PID reported by a hook for this tool. Sticky across state
+  // changes (we keep the last-known until a new hook overwrites it) so the
+  // bubble can request a window focus even after the agent goes idle.
+  agentPid?: number;
+  // Latest ancestor PID chain reported by a hook. Same stickiness rule as
+  // agentPid; lets the focus path survive shim death (see NormalizedEvent).
+  agentPidChain?: number[];
 }
 
 // ─── Claude Code subscription usage ──────────────────────────────────────────

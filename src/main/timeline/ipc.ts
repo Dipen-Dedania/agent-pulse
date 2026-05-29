@@ -6,6 +6,7 @@ import {
   ModelUsageRange,
   ProjectBreakdownRange,
   TokensTimelineRange,
+  GuardrailsAnalyticsRange,
 } from '../../common/timeline-types';
 import { logger } from '../../common/logger';
 
@@ -73,6 +74,12 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     try { return queries.getTokensTimeline(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-tokens-timeline:', e); return null; }
   });
+
+  ipcMain.handle('analytics:get-guardrails', (_e, args: { range: GuardrailsAnalyticsRange }) => {
+    if (!queries) return null;
+    try { return queries.getGuardrails(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-guardrails:', e); return null; }
+  });
 }
 
 /** Called by bootTimeline when the timeline cannot start. */
@@ -91,6 +98,7 @@ export function unregisterTimelineIpc() {
     'analytics:get-model-usage',
     'analytics:get-project-breakdown',
     'analytics:get-tokens-timeline',
+    'analytics:get-guardrails',
   ]) {
     ipcMain.removeHandler(channel);
   }

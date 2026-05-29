@@ -1,6 +1,6 @@
 {
   "name": "agent-pulse",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "",
   "main": "dist/main/index.js",
   "scripts": {
@@ -17,12 +17,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win --publish never",
-    "dist:mac": "npm run build && electron-builder --mac --publish never",
-    "dist:linux": "npm run build && electron-builder --linux --publish never",
-    "dist:all": "npm run build && electron-builder -mwl --publish never",
+    "pack": "npm run build && electron-builder --dir --config electron-builder.config.cjs",
+    "dist": "npm run build && electron-builder --config electron-builder.config.cjs",
+    "dist:win": "npm run build && electron-builder --win --publish never --config electron-builder.config.cjs",
+    "dist:mac": "npm run build && electron-builder --mac --publish never --config electron-builder.config.cjs",
+    "dist:linux": "npm run build && electron-builder --linux --publish never --config electron-builder.config.cjs",
+    "dist:all": "npm run build && electron-builder -mwl --publish never --config electron-builder.config.cjs",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3"
   },
   "repository": {
@@ -36,68 +36,6 @@
     "url": "https://github.com/Dipen-Dedania/agent-pulse/issues"
   },
   "homepage": "https://github.com/Dipen-Dedania/agent-pulse#readme",
-  "build": {
-    "appId": "com.agentpulse.app",
-    "productName": "Agent Pulse",
-    "directories": {
-      "output": "release"
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "Dipen-Dedania",
-        "repo": "agent-pulse"
-      }
-    ],
-    "files": [
-      "dist/**/*",
-      "public/**/*",
-      "package.json",
-      "!**/*.map",
-      "!**/__tests__/**",
-      "!**/*.test.*"
-    ],
-    "asarUnpack": [
-      "public/**/*"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "public/assets/favicon/android-chrome-512x512.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false,
-      "shortcutName": "Agent Pulse"
-    },
-    "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
-      ],
-      "icon": "public/assets/favicon/android-chrome-512x512.png",
-      "category": "public.app-category.developer-tools"
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "icon": "public/assets/favicon/android-chrome-512x512.png",
-      "category": "Development"
-    }
-  },
   "dependencies": {
     "better-sqlite3": "^12.0.0",
     "electron-updater": "^6.8.3",

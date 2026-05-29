@@ -21,4 +21,5 @@ function resolvePort(): number {
 }
 
 export const BRIDGE_PORT = resolvePort();
-export const BRIDGE_URL  = `http://localhost:${BRIDGE_PORT}/event`;
+export const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}/event`;
+export const UPDATE_PROVIDER = 'firebase'; // github or firebase

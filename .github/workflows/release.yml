@@ -18,10 +18,21 @@ on:
         type: boolean
         default: false
 
+# UPDATE_PROVIDER drives which feed gets baked into the packaged app's
+# app-update.yml. Default is firebase; set to "github" only if you ever
+# want to ship a build whose auto-updater reads from the GitHub repo.
+# The GitHub Release publish below runs regardless — it's for changelog
+# visibility, not for serving updates.
+env:
+  UPDATE_PROVIDER: firebase
+  FIREBASE_BUCKET: bitsy-cc3f6.firebasestorage.app
+  FIREBASE_PREFIX: agent-pulse/releases
+
 jobs:
   build:
     permissions:
       contents: write
+      id-token: write   # reserved for future workload-identity-federation
     strategy:
       fail-fast: false
       matrix:
@@ -32,12 +43,16 @@ jobs:
               release/*.exe
               release/*.exe.blockmap
               release/latest.yml
+            binary_glob: '*.exe,*.exe.blockmap'
+            manifest_glob: 'latest.yml'
           - os: macos-latest
             script: dist:mac
             artifact_path: |
               release/*.dmg
               release/*.dmg.blockmap
               release/latest-mac.yml
+            binary_glob: '*.dmg,*.dmg.blockmap'
+            manifest_glob: 'latest-mac.yml'
 
     runs-on: ${{ matrix.os }}
 
@@ -82,11 +97,43 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run ${{ matrix.script }}
 
-      # Publishes to a real GitHub Release on either a v* tag push (legacy)
-      # or a workflow_dispatch run. tag_name picks the right value for each:
-      # the input on manual runs, the pushed ref otherwise. The action
-      # creates the tag if it doesn't yet exist (points it at HEAD of the
-      # chosen branch).
+      # ── Firebase Storage upload (the real update feed) ──────────────────
+      # Only runs on actual release events; main-branch verification builds
+      # don't upload to avoid clobbering the latest.yml for current users.
+      - name: Authenticate to Google Cloud
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      # Installer + blockmap MUST land before latest.yml. If clients see
+      # latest.yml first they'll request a binary that isn't there yet.
+      - name: Upload installers to Firebase Storage
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: release
+          glob: ${{ matrix.binary_glob }}
+          destination: ${{ env.FIREBASE_BUCKET }}/${{ env.FIREBASE_PREFIX }}
+          parent: false
+
+      # latest.yml uploaded last with no-cache so clients see a new release
+      # immediately. Without this header, GCS's default 1h cache delays
+      # visibility for everyone behind a CDN edge.
+      - name: Upload update manifest to Firebase Storage
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: release
+          glob: ${{ matrix.manifest_glob }}
+          destination: ${{ env.FIREBASE_BUCKET }}/${{ env.FIREBASE_PREFIX }}
+          parent: false
+          headers: |-
+            cache-control: no-cache, max-age=0
+
+      # ── GitHub Release publish (changelog visibility, not for updates) ──
+      # Kept around so users have a human-readable releases page. Auto-
+      # update bypasses this and reads from Firebase.
       - name: Publish to GitHub Release
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

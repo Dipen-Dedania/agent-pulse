@@ -46,6 +46,13 @@ export interface AnalyticsConfig {
   idleGapMinutes: number;   // minimum gap to close a session; floor enforced at 1 min
 }
 
+// Auto-update preferences. lastCheckedAt persists so the Updates tab can show
+// "checked X minutes ago" even after a restart.
+export interface UpdaterConfig {
+  autoCheck: boolean;             // periodic background checks
+  lastCheckedAt: number | null;   // unix ms of last completed check (success or no-update)
+}
+
 export interface UserConfig {
   enabledBubbles: Partial<Record<ToolId, boolean>>;
   usage: UsageConfig;
@@ -54,6 +61,7 @@ export interface UserConfig {
   guardrails: GuardrailConfig;
   autoLaunch: boolean;
   analytics: AnalyticsConfig;
+  updates: UpdaterConfig;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse-config.json');
@@ -92,6 +100,10 @@ const DEFAULTS: UserConfig = {
     redactTaskText: false,
     idleGapMinutes: 5,
   },
+  updates: {
+    autoCheck: true,
+    lastCheckedAt: null,
+  },
 };
 
 // Map legacy ToolId keys in persisted configs to their current names so a
@@ -125,6 +137,7 @@ export function loadConfig(): UserConfig {
       const antigravityUsage = parsed.antigravityUsage ?? {};
       const guardrails = parsed.guardrails ?? {};
       const analytics = parsed.analytics ?? {};
+      const updates = parsed.updates ?? {};
       return {
         ...DEFAULTS,
         ...parsed,
@@ -156,6 +169,10 @@ export function loadConfig(): UserConfig {
           redactTaskText: typeof analytics.redactTaskText === 'boolean' ? analytics.redactTaskText : DEFAULTS.analytics.redactTaskText,
           idleGapMinutes: typeof analytics.idleGapMinutes === 'number' && analytics.idleGapMinutes >= 1 ? analytics.idleGapMinutes : DEFAULTS.analytics.idleGapMinutes,
         },
+        updates: {
+          autoCheck: typeof updates.autoCheck === 'boolean' ? updates.autoCheck : DEFAULTS.updates.autoCheck,
+          lastCheckedAt: typeof updates.lastCheckedAt === 'number' ? updates.lastCheckedAt : null,
+        },
       };
     }
   } catch {
@@ -184,6 +201,7 @@ export function loadConfig(): UserConfig {
       customRules:     [...DEFAULTS.guardrails.customRules],
     },
     analytics: { ...DEFAULTS.analytics },
+    updates: { ...DEFAULTS.updates },
   };
 }
 

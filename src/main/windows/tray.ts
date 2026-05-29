@@ -21,6 +21,7 @@ function getTrayIconPath(): string {
 
 export interface TrayCallbacks {
   onShowSettings: () => void;
+  onCheckForUpdates: () => void;
   onQuit: () => void;
 }
 
@@ -41,6 +42,11 @@ export class TrayManager {
     this.tray.setToolTip('Agent Pulse');
 
     const menu = Menu.buildFromTemplate([
+      {
+        label: 'Check for Updates…',
+        click: () => callbacks.onCheckForUpdates(),
+      },
+      { type: 'separator' },
       {
         label: 'Open Settings',
         click: () => callbacks.onShowSettings(),

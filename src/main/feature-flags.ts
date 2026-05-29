@@ -15,3 +15,9 @@ function envBool(name: string): boolean | undefined {
 // turn it off once we ship. Override either way with AGENT_PULSE_APP_MENU=0|1.
 export const ENABLE_APP_MENU: boolean =
   envBool('AGENT_PULSE_APP_MENU') ?? !app.isPackaged;
+
+// Auto-update service (electron-updater against GitHub Releases). Off in dev
+// because electron-updater refuses to operate on unpackaged apps anyway and
+// the IPC noise just clutters the log. Override with AGENT_PULSE_UPDATER=0|1.
+export const ENABLE_UPDATER: boolean =
+  envBool('AGENT_PULSE_UPDATER') ?? app.isPackaged;

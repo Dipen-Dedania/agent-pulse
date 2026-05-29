@@ -1,6 +1,6 @@
 {
   "name": "agent-pulse",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "",
   "main": "dist/main/index.js",
   "scripts": {
@@ -42,6 +42,13 @@
     "directories": {
       "output": "release"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Dipen-Dedania",
+        "repo": "agent-pulse"
+      }
+    ],
     "files": [
       "dist/**/*",
       "public/**/*",
@@ -93,6 +100,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.0.0",
+    "electron-updater": "^6.8.3",
     "framer-motion": "^12.38.0",
     "open": "^8.4.2",
     "react": "^19.2.5",
@@ -101,11 +109,11 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.0",
-    "@types/better-sqlite3": "^7.6.13",
     "@tailwindcss/postcss": "^4.2.2",
     "@tailwindcss/vite": "^4.2.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

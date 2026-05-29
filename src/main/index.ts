@@ -19,6 +19,7 @@ import { CodexUsagePoller } from './codex-usage/poller';
 import { AntigravityUsagePoller } from './antigravity-usage/poller';
 import { isAutoLaunchEnabled, setAutoLaunch } from './auto-launch';
 import { bootTimeline, TimelineHandle } from './timeline';
+import { bootUpdater, UpdaterHandle } from './updater';
 
 // Windows uses this to group windows under our identity and show our taskbar icon.
 if (process.platform === 'win32') {
@@ -45,6 +46,7 @@ class AgentPulseApp {
   private codexUsagePoller: CodexUsagePoller;
   private antigravityUsagePoller: AntigravityUsagePoller;
   private timeline: TimelineHandle | null = null;
+  private updater!: UpdaterHandle;
 
   // Most-recent guardrail events kept in memory so a Settings window opened
   // after the fact still sees what happened. Capped at GUARDRAIL_LOG_SIZE.
@@ -110,8 +112,22 @@ class AgentPulseApp {
       // self-healing if the user toggled it externally.
       setAutoLaunch(this.userConfig.autoLaunch);
 
+      // Boot updater before tray so the tray menu's "Check for updates"
+      // entry can invoke updater.checkNow directly.
+      this.updater = bootUpdater({
+        getUserConfig: () => this.userConfig,
+        applyUpdaterConfig: (next) => {
+          this.userConfig.updates = next;
+          saveConfig(this.userConfig);
+        },
+      });
+
       this.trayManager.init({
         onShowSettings: () => this.settingsWindow.show(),
+        onCheckForUpdates: () => {
+          this.settingsWindow.show();
+          this.updater.checkNow();
+        },
         onQuit: () => {
           (app as unknown as { isQuitting: boolean }).isQuitting = true;
           app.quit();
@@ -139,6 +155,7 @@ class AgentPulseApp {
       this.codexUsagePoller.stop();
       this.antigravityUsagePoller.stop();
       this.timeline?.shutdown();
+      this.updater.shutdown();
       this.trayManager.destroy();
     });
 

@@ -22,13 +22,15 @@ export interface BridgeOptions {
 // `waiting` = agent is *blocked* on the user (permission grant / elicitation response).
 // `idle-active` = turn finished, session alive, ball is in the user's court but nothing is blocked.
 // PermissionRequest / Elicitation = blocked → waiting
-// Notification with notification_type `permission_prompt`/`idle_prompt` = blocked → waiting
+// Notification with notification_type `permission_prompt` = blocked → waiting
+// `idle_prompt` is CC's 60s-idle nudge that fires after Stop; not blocking, so we ignore it
+// and let the prior Stop's idle-active state stand.
 // Stop / PostToolUse / SessionEnd / TeammateIdle = turn boundary → idle-active
 const CC_WAITING_EVENTS = new Set(['PermissionRequest', 'Elicitation']);
 const CC_WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SubagentStart']);
 const CC_IDLE_EVENTS    = new Set(['Stop', 'PostToolUse', 'SessionEnd', 'TeammateIdle']);
 const CC_ERROR_EVENTS   = new Set(['StopFailure', 'PostToolUseFailure']);
-const CC_NOTIFICATION_WAITING_TYPES = new Set(['permission_prompt', 'idle_prompt']);
+const CC_NOTIFICATION_WAITING_TYPES = new Set(['permission_prompt']);
 
 function mapClaudeCodeEvent(eventName: string, data: any): AgentState | null {
   if (eventName === 'Notification') {

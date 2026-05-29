@@ -7,6 +7,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
     exclude: ['dist/**', 'node_modules/**'],
+    // 5s (vitest default) is tight for the installer tests that do real
+    // filesystem work in a per-test temp directory. Windows CI runners
+    // occasionally hit the limit even though dev boxes finish in ~1s.
+    testTimeout: 15000,
   },
   resolve: {
     alias: {

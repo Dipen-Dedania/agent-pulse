@@ -4,6 +4,96 @@ import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { ToolId } from '../common/types';
 import { motion } from 'framer-motion';
 
+type Feature = {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+};
+
+const iconClass = 'w-5 h-5';
+
+const FEATURES: Feature[] = [
+  {
+    title: 'Status Bubbles',
+    description: 'Always-on-top, draggable indicators for every agent on your desktop.',
+    icon: (
+      <svg className={iconClass} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+        <circle cx='8' cy='9' r='4' />
+        <circle cx='16' cy='15' r='3' />
+      </svg>
+    ),
+  },
+  {
+    title: 'Unified Bridge',
+    description: 'Normalizes lifecycle events from Claude, Cursor, Copilot, Codex, Kiro & Antigravity.',
+    icon: (
+      <svg className={iconClass} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+        <path d='M4 12c4-6 12-6 16 0' />
+        <circle cx='4' cy='12' r='1.5' />
+        <circle cx='20' cy='12' r='1.5' />
+        <circle cx='12' cy='6' r='1.5' />
+      </svg>
+    ),
+  },
+  {
+    title: 'Usage Meters',
+    description: 'Live Claude, Codex & Antigravity quota tracking with cap & nudge alerts.',
+    icon: (
+      <svg className={iconClass} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+        <path d='M3 17a9 9 0 0 1 18 0' />
+        <path d='M12 17l4-5' />
+        <circle cx='12' cy='17' r='1' />
+      </svg>
+    ),
+  },
+  {
+    title: 'Command Guardrails',
+    description: 'Block risky shell commands before they reach an agent — core + custom rules.',
+    icon: (
+      <svg className={iconClass} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+        <path d='M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z' />
+        <path d='M9 12l2 2 4-4' />
+      </svg>
+    ),
+  },
+  {
+    title: 'Pulse Timeline',
+    description: 'Local heatmap, hour-of-day rhythm, tool mix & project breakdown — fully private.',
+    icon: (
+      <svg className={iconClass} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+        <path d='M3 12h4l2-6 4 12 2-6h6' />
+      </svg>
+    ),
+  },
+  {
+    title: 'Auto-Updates',
+    description: 'Background delivery via Firebase Storage — always on the latest signed build.',
+    icon: (
+      <svg className={iconClass} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+        <path d='M21 12a9 9 0 1 1-3-6.7' />
+        <path d='M21 4v5h-5' />
+      </svg>
+    ),
+  },
+];
+
+const FeatureCard: React.FC<{ feature: Feature; index: number }> = ({ feature, index }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 12 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.5, delay: 0.3 + index * 0.06, ease: 'easeOut' }}
+    className='text-left bg-white/[0.03] border border-white/10 rounded-xl p-3 backdrop-blur-md hover:bg-white/[0.06] hover:border-white/20 transition-colors'
+  >
+    <div className='flex items-center gap-2 mb-1'>
+      <div className='w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-white/10 flex items-center justify-center text-blue-200 shrink-0'>
+        {feature.icon}
+      </div>
+      <h3 className='text-[13px] font-semibold text-white leading-tight'>{feature.title}</h3>
+    </div>
+    <p className='text-[11px] text-slate-400 leading-snug'>{feature.description}</p>
+  </motion.div>
+);
+
 const App: React.FC = () => {
   const params = new URLSearchParams(window.location.search);
   const toolId = (params.get('toolId') as ToolId) || null;
@@ -18,32 +108,38 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className='h-screen w-screen bg-slate-900 text-white flex items-center justify-center font-sans overflow-hidden relative'>
+    <div className='h-screen w-screen bg-slate-900 text-white flex items-center justify-center font-sans overflow-hidden relative py-5'>
       {/* Background glow effects for "Enterprise" feel */}
-      <div className='absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 blur-[120px] rounded-full' />
-      <div className='absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 blur-[120px] rounded-full' />
+      <div className='absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 blur-[120px] rounded-full pointer-events-none' />
+      <div className='absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 blur-[120px] rounded-full pointer-events-none' />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, ease: 'easeOut' }}
-        className='z-10 text-center max-w-2xl px-6'
+        className='z-10 text-center max-w-2xl w-full px-6'
       >
         <img
           src='./assets/logo-transparent.png'
           alt='Agent Pulse'
           className='w-24 h-24 sm:w-20 sm:h-20 mx-auto mb-4 object-contain drop-shadow-[0_8px_32px_rgba(59,130,246,0.35)]'
         />
-        <h1 className='text-6xl font-extrabold tracking-tight mb-6 pb-5 bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-400'>
+        <h1 className='text-6xl font-extrabold tracking-tight pb-5 bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-400'>
           Agent Pulse
         </h1>
-        <p className='text-xl text-slate-400 mb-10 leading-relaxed'>
+        <p className='text-lg text-slate-400 mb-8 leading-relaxed'>
           Ambient, glanceable awareness for your AI coding team.
           <br />
           <span className='text-sm opacity-60'>
             Stop tab-switching. Start observing.
           </span>
         </p>
+
+        <div className='grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-10'>
+          {FEATURES.map((feature, index) => (
+            <FeatureCard key={feature.title} feature={feature} index={index} />
+          ))}
+        </div>
 
         <div className='flex flex-col sm:flex-row gap-4 justify-center items-center'>
           <a
@@ -57,12 +153,8 @@ const App: React.FC = () => {
             Status Bridge Active
           </div>
         </div>
-      </motion.div>
 
-      {/* Subtle footer */}
-      <div className='absolute bottom-8 left-0 right-0 text-center text-slate-600 text-xs uppercase tracking-widest'>
-        Enterprise Grade Ambient Awareness
-      </div>
+      </motion.div>
     </div>
   );
 };

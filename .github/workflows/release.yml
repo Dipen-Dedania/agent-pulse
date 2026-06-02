@@ -55,6 +55,14 @@ jobs:
               release/latest-mac.yml
             binary_glob: '*.{dmg,dmg.blockmap}'
             manifest_glob: 'latest-mac.yml'
+          - os: ubuntu-latest
+            script: dist:linux
+            artifact_path: |
+              release/*.AppImage
+              release/*.AppImage.blockmap
+              release/latest-linux.yml
+            binary_glob: '*.{AppImage,AppImage.blockmap}'
+            manifest_glob: 'latest-linux.yml'
 
     runs-on: ${{ matrix.os }}
 
@@ -98,6 +106,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run ${{ matrix.script }}
+
+      # Attach the built installer to the workflow run so any build — including
+      # plain main-branch pushes that never publish — can be downloaded and
+      # smoke-tested on a real machine. This does NOT touch the update feed.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-pulse-${{ matrix.os }}
+          path: ${{ matrix.artifact_path }}
+          if-no-files-found: error
+          retention-days: 14
 
       # ── Firebase Storage upload (the real update feed) ──────────────────
       # Only runs on actual release events; main-branch verification builds

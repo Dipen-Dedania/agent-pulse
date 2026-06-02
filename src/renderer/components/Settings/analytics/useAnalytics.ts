@@ -8,12 +8,14 @@ import {
   ToolMixRange,
   ModelUsagePayload,
   ModelUsageRange,
+  ModelUsageMode,
   ProjectBreakdownPayload,
   ProjectBreakdownRange,
   TokensTimelinePayload,
   TokensTimelineRange,
   GuardrailsAnalyticsPayload,
   GuardrailsAnalyticsRange,
+  WindowValuePayload,
 } from '../../../../common/timeline-types';
 
 const TTL_MS = 30_000;
@@ -86,8 +88,12 @@ export function useToolMix(range: ToolMixRange) {
   return useAnalyticsQuery<ToolMixPayload>('analytics:get-tool-mix', { range }, range);
 }
 
-export function useModelUsage(range: ModelUsageRange, mode: 'tokens' | 'sessions') {
+export function useModelUsage(range: ModelUsageRange, mode: ModelUsageMode) {
   return useAnalyticsQuery<ModelUsagePayload>('analytics:get-model-usage', { range, mode }, `${range}/${mode}`);
+}
+
+export function useWindowValue() {
+  return useAnalyticsQuery<WindowValuePayload>('analytics:get-window-value', undefined, '');
 }
 
 export function useProjectBreakdown(range: ProjectBreakdownRange) {

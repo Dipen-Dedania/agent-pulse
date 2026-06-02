@@ -4,6 +4,7 @@ export type TimelineRange = '7d' | '30d' | '90d';
 export type HeatmapRange = '30d' | '90d';
 export type ToolMixRange = '7d' | '30d';
 export type ModelUsageRange = '7d' | '30d';
+export type ModelUsageMode = 'tokens' | 'sessions' | 'cost';
 export type ProjectBreakdownRange = '7d' | '30d' | '90d';
 export type TokensTimelineRange = '7d' | '30d' | '90d';
 
@@ -20,6 +21,9 @@ export interface TokenTotals {
   tokensOut: number;
   cacheRead: number;
   cacheWrite: number;
+  // Estimated USD at API list prices (see common/pricing.ts). 0 when none of
+  // the contributing models could be priced.
+  costUsd: number;
 }
 
 export interface QuotaDelta {
@@ -72,13 +76,24 @@ export interface HourRhythmPayload {
 export interface ToolMixSlice {
   toolId: ToolId;
   activeMs: number;
-  pct: number;
+  pct: number;              // share of total active time
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costUsd: number;          // estimated API-equivalent spend
+  costPct: number;          // share of total estimated spend
+  // True when this tool reported any token data in the window. Lets the UI
+  // distinguish "genuinely $0" from "this tool doesn't expose tokens" (Cursor,
+  // Copilot, Kiro), which should read as "no token data", not "free".
+  hasTokenData: boolean;
 }
 
 export interface ToolMixPayload {
   range: ToolMixRange;
   slices: ToolMixSlice[];
   totalActiveMs: number;
+  totalCostUsd: number;
   queriedAt: number;
 }
 
@@ -90,14 +105,17 @@ export interface ModelUsageRow {
   cacheRead: number;
   cacheWrite: number;
   sessions: number;
+  costUsd: number;          // estimated API-equivalent spend
+  priced: boolean;          // false when the model isn't in the price table
 }
 
 export interface ModelUsagePayload {
   range: ModelUsageRange;
-  mode: 'tokens' | 'sessions';
+  mode: ModelUsageMode;
   rows: ModelUsageRow[];
   totalTokens: number;
   totalSessions: number;
+  totalCostUsd: number;
   queriedAt: number;
 }
 
@@ -111,6 +129,8 @@ export interface ProjectBreakdownRow {
   tokensIn: number;
   tokensOut: number;
   cacheRead: number;
+  costUsd: number;          // estimated API-equivalent spend
+  priced: boolean;
 }
 
 export interface TokensTimelineBucket {
@@ -118,6 +138,7 @@ export interface TokensTimelineBucket {
   tokensIn: number;
   tokensOut: number;
   cacheRead: number;
+  costUsd: number;         // estimated spend for the day
 }
 
 export interface TokensTimelinePayload {
@@ -125,8 +146,10 @@ export interface TokensTimelinePayload {
   buckets: TokensTimelineBucket[];
   maxFresh: number;        // max(tokensIn + tokensOut) across buckets
   maxCacheRead: number;
+  maxCost: number;         // max(costUsd) across buckets
   totalFresh: number;
   totalCacheRead: number;
+  totalCostUsd: number;
   queriedAt: number;
 }
 
@@ -163,5 +186,31 @@ export interface GuardrailsAnalyticsPayload {
   block: number;
   byTool: GuardrailToolCount[];
   byRule: GuardrailRuleCount[];
+  queriedAt: number;
+}
+
+// ─── Claude usage-window value ────────────────────────────────────────────────
+// Estimated API-equivalent spend for Claude Code over the trailing usage
+// windows, so users can see how much of their flat-rate plan they're actually
+// extracting. Labelled "last 5h / last 7d" (trailing) rather than claiming to
+// mirror Anthropic's exact rolling reset, which we can't reconstruct from the
+// quota poller alone.
+
+export interface WindowValueSlice {
+  windowKey: '5h' | '7d';
+  costUsd: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+  sessions: number;
+}
+
+export interface WindowValuePayload {
+  toolId: ToolId;                 // always 'claude-code' today
+  last5h: WindowValueSlice;
+  last7d: WindowValueSlice;
+  burnRateUsdPerHour: number;     // spend over the last 60 minutes
+  projected5hUsd: number;         // burnRate × 5, "if the current pace holds"
   queriedAt: number;
 }

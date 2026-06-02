@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AnalyticsConfig } from '../../../common/timeline-types';
 import { logger } from '../../../common/logger';
 import { DigestCard } from './analytics/DigestCard';
+import { WindowValueCard } from './analytics/WindowValueCard';
 import { HeatmapCard } from './analytics/HeatmapCard';
 import { HourRhythmCard } from './analytics/HourRhythmCard';
 import { ToolMixCard } from './analytics/ToolMixCard';
@@ -11,6 +12,7 @@ import { TokensTimelineCard } from './analytics/TokensTimelineCard';
 import { GuardrailsCard } from './analytics/GuardrailsCard';
 import { Card } from './analytics/shared';
 import { bustCache } from './analytics/useAnalytics';
+import { PRICING_LAST_UPDATED } from '../../../common/pricing';
 
 interface TimelineStatus {
   available: boolean;
@@ -110,6 +112,7 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
         <UnavailableBanner reason={status.reason ?? 'Pulse Timeline is currently unavailable.'} />
       )}
       <DigestCard />
+      <WindowValueCard />
       <HeatmapCard />
       <TokensTimelineCard />
       <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
@@ -120,6 +123,10 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
       <ProjectBreakdownCard />
       <GuardrailsCard />
       <PrivacyAndSettings config={config} onConfigChange={handleConfigChange} />
+      <p className='text-[11px] text-slate-500 text-center mt-1 mb-3'>
+        Costs are estimates at public API list prices (updated {PRICING_LAST_UPDATED}), not your actual plan billing.
+        Only agents that expose token usage can be priced.
+      </p>
     </div>
   );
 };

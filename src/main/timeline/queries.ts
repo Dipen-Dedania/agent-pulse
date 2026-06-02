@@ -26,9 +26,14 @@ import {
   GuardrailsAnalyticsRange,
   GuardrailToolCount,
   GuardrailRuleCount,
+  ModelUsageMode,
+  WindowValuePayload,
+  WindowValueSlice,
 } from '../../common/timeline-types';
+import { estimateCost, rateForModel, TokenCounts } from '../../common/pricing';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
 function startOfLocalDay(ts: number): number {
   const d = new Date(ts);
@@ -66,6 +71,29 @@ interface SessionAggregateRow {
 
 export class TimelineQueries {
   constructor(private db: TimelineDb) {}
+
+  // Estimate a session's cost. Token totals are session-level, so when a
+  // session used more than one model we split the tokens evenly across them
+  // (same best-effort attribution getModelUsage uses). `priced` is true when
+  // at least one of the session's models was in the price table.
+  private costForSession(modelsUsed: string | null | undefined, tokens: TokenCounts): { costUsd: number; priced: boolean } {
+    const models = (modelsUsed ?? '').split(',').map((m) => m.trim()).filter(Boolean);
+    if (models.length === 0) return { costUsd: 0, priced: false };
+    const share = 1 / models.length;
+    let costUsd = 0;
+    let priced = false;
+    for (const model of models) {
+      const est = estimateCost(model, {
+        tokensIn:   (tokens.tokensIn   ?? 0) * share,
+        tokensOut:  (tokens.tokensOut  ?? 0) * share,
+        cacheRead:  (tokens.cacheRead  ?? 0) * share,
+        cacheWrite: (tokens.cacheWrite ?? 0) * share,
+      });
+      costUsd += est.costUsd;
+      if (est.priced) priced = true;
+    }
+    return { costUsd, priced };
+  }
 
   getDigest(): DigestPayload {
     const now = Date.now();
@@ -207,21 +235,59 @@ export class TimelineQueries {
   getToolMix(range: ToolMixRange): ToolMixPayload {
     const now = Date.now();
     const startMs = now - rangeMs(range);
-    const rows = this.db.query<{ tool_id: string; total: number }>(
-      `SELECT tool_id, SUM(ended_at - started_at) as total
-       FROM sessions WHERE ended_at >= ? GROUP BY tool_id`,
+    const rows = this.db.query<SessionAggregateRow>(
+      `SELECT tool_id, started_at, ended_at, models_used,
+              total_tokens_in, total_tokens_out, total_cache_read, total_cache_write
+       FROM sessions WHERE ended_at >= ?`,
       [startMs],
     );
-    const totalActiveMs = rows.reduce((sum, r) => sum + (r.total ?? 0), 0);
-    const slices = rows.map((r) => ({
-      toolId: r.tool_id as ToolId,
-      activeMs: r.total ?? 0,
-      pct: totalActiveMs > 0 ? ((r.total ?? 0) / totalActiveMs) * 100 : 0,
+
+    interface Acc {
+      toolId: ToolId;
+      activeMs: number;
+      tokensIn: number; tokensOut: number; cacheRead: number; cacheWrite: number;
+      costUsd: number;
+      hasTokenData: boolean;
+    }
+    const byTool = new Map<string, Acc>();
+    for (const r of rows) {
+      const acc = byTool.get(r.tool_id) ?? {
+        toolId: r.tool_id as ToolId,
+        activeMs: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
+        costUsd: 0, hasTokenData: false,
+      };
+      acc.activeMs += Math.max(0, r.ended_at - r.started_at);
+      const tokens: TokenCounts = {
+        tokensIn: r.total_tokens_in, tokensOut: r.total_tokens_out,
+        cacheRead: r.total_cache_read, cacheWrite: r.total_cache_write,
+      };
+      acc.tokensIn   += r.total_tokens_in   ?? 0;
+      acc.tokensOut  += r.total_tokens_out  ?? 0;
+      acc.cacheRead  += r.total_cache_read  ?? 0;
+      acc.cacheWrite += r.total_cache_write ?? 0;
+      const tokenSum = (r.total_tokens_in ?? 0) + (r.total_tokens_out ?? 0)
+                     + (r.total_cache_read ?? 0) + (r.total_cache_write ?? 0);
+      if (tokenSum > 0) acc.hasTokenData = true;
+      acc.costUsd += this.costForSession(r.models_used, tokens).costUsd;
+      byTool.set(r.tool_id, acc);
+    }
+
+    const totalActiveMs = Array.from(byTool.values()).reduce((s, a) => s + a.activeMs, 0);
+    const totalCostUsd  = Array.from(byTool.values()).reduce((s, a) => s + a.costUsd, 0);
+    const slices = Array.from(byTool.values()).map((a) => ({
+      toolId: a.toolId,
+      activeMs: a.activeMs,
+      pct: totalActiveMs > 0 ? (a.activeMs / totalActiveMs) * 100 : 0,
+      tokensIn: a.tokensIn, tokensOut: a.tokensOut, cacheRead: a.cacheRead, cacheWrite: a.cacheWrite,
+      costUsd: a.costUsd,
+      costPct: totalCostUsd > 0 ? (a.costUsd / totalCostUsd) * 100 : 0,
+      hasTokenData: a.hasTokenData,
     })).sort((a, b) => b.activeMs - a.activeMs);
-    return { range, slices, totalActiveMs, queriedAt: now };
+
+    return { range, slices, totalActiveMs, totalCostUsd, queriedAt: now };
   }
 
-  getModelUsage(range: ModelUsageRange, mode: 'tokens' | 'sessions'): ModelUsagePayload {
+  getModelUsage(range: ModelUsageRange, mode: ModelUsageMode): ModelUsagePayload {
     const now = Date.now();
     const startMs = now - rangeMs(range);
 
@@ -248,6 +314,7 @@ export class TimelineQueries {
           model,
           toolId: row.tool_id as ToolId,
           tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, sessions: 0,
+          costUsd: 0, priced: false,
         };
         existing.tokensIn   += (row.total_tokens_in   ?? 0) * share;
         existing.tokensOut  += (row.total_tokens_out  ?? 0) * share;
@@ -258,32 +325,42 @@ export class TimelineQueries {
       }
     }
 
-    const rows = Array.from(perModel.values()).map((r) => ({
-      ...r,
-      tokensIn:   Math.round(r.tokensIn),
-      tokensOut:  Math.round(r.tokensOut),
-      cacheRead:  Math.round(r.cacheRead),
-      cacheWrite: Math.round(r.cacheWrite),
-    }));
+    const rows = Array.from(perModel.values()).map((r) => {
+      const est = estimateCost(r.model, {
+        tokensIn: r.tokensIn, tokensOut: r.tokensOut, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite,
+      });
+      return {
+        ...r,
+        tokensIn:   Math.round(r.tokensIn),
+        tokensOut:  Math.round(r.tokensOut),
+        cacheRead:  Math.round(r.cacheRead),
+        cacheWrite: Math.round(r.cacheWrite),
+        costUsd:    est.costUsd,
+        priced:     rateForModel(r.model) != null,
+      };
+    });
 
     const totalTokens = rows.reduce((s, r) => s + r.tokensIn + r.tokensOut, 0);
     const totalSessions = rows.reduce((s, r) => s + r.sessions, 0);
+    const totalCostUsd = rows.reduce((s, r) => s + r.costUsd, 0);
 
     rows.sort((a, b) =>
       mode === 'tokens'
         ? (b.tokensIn + b.tokensOut) - (a.tokensIn + a.tokensOut)
-        : b.sessions - a.sessions,
+        : mode === 'cost'
+          ? b.costUsd - a.costUsd
+          : b.sessions - a.sessions,
     );
 
-    return { range, mode, rows, totalTokens, totalSessions, queriedAt: now };
+    return { range, mode, rows, totalTokens, totalSessions, totalCostUsd, queriedAt: now };
   }
 
   getProjectBreakdown(range: ProjectBreakdownRange): ProjectBreakdownPayload {
     const now = Date.now();
     const startMs = now - rangeMs(range);
     const rows = this.db.query<SessionAggregateRow>(
-      `SELECT tool_id, project_id, project_path, started_at, ended_at,
-              total_tokens_in, total_tokens_out, total_cache_read
+      `SELECT tool_id, project_id, project_path, started_at, ended_at, models_used,
+              total_tokens_in, total_tokens_out, total_cache_read, total_cache_write
        FROM sessions WHERE ended_at >= ? AND project_id IS NOT NULL`,
       [startMs],
     );
@@ -301,12 +378,20 @@ export class TimelineQueries {
         tokensIn: 0,
         tokensOut: 0,
         cacheRead: 0,
+        costUsd: 0,
+        priced: false,
       };
       existing.activeMs += duration;
       existing.sessions += 1;
       existing.tokensIn  += r.total_tokens_in  ?? 0;
       existing.tokensOut += r.total_tokens_out ?? 0;
       existing.cacheRead += r.total_cache_read ?? 0;
+      const cost = this.costForSession(r.models_used, {
+        tokensIn: r.total_tokens_in, tokensOut: r.total_tokens_out,
+        cacheRead: r.total_cache_read, cacheWrite: r.total_cache_write,
+      });
+      existing.costUsd += cost.costUsd;
+      if (cost.priced) existing.priced = true;
       if (!existing.tools.includes(r.tool_id as ToolId)) {
         existing.tools.push(r.tool_id as ToolId);
       }
@@ -326,11 +411,14 @@ export class TimelineQueries {
       total_tokens_in: number | null;
       total_tokens_out: number | null;
       total_cache_read: number | null;
+      total_cache_write: number | null;
+      models_used: string | null;
     }>(
-      `SELECT started_at,
-              COALESCE(total_tokens_in,  0) AS total_tokens_in,
-              COALESCE(total_tokens_out, 0) AS total_tokens_out,
-              COALESCE(total_cache_read, 0) AS total_cache_read
+      `SELECT started_at, models_used,
+              COALESCE(total_tokens_in,   0) AS total_tokens_in,
+              COALESCE(total_tokens_out,  0) AS total_tokens_out,
+              COALESCE(total_cache_read,  0) AS total_cache_read,
+              COALESCE(total_cache_write, 0) AS total_cache_write
        FROM sessions WHERE ended_at >= ?`,
       [startMs],
     );
@@ -344,7 +432,7 @@ export class TimelineQueries {
     for (let i = dayCount - 1; i >= 0; i--) {
       const date = formatLocalDate(today - i * DAY_MS);
       orderedDates.push(date);
-      bucketsByDate.set(date, { date, tokensIn: 0, tokensOut: 0, cacheRead: 0 });
+      bucketsByDate.set(date, { date, tokensIn: 0, tokensOut: 0, cacheRead: 0, costUsd: 0 });
     }
 
     for (const r of rows) {
@@ -354,22 +442,30 @@ export class TimelineQueries {
       bucket.tokensIn  += r.total_tokens_in  ?? 0;
       bucket.tokensOut += r.total_tokens_out ?? 0;
       bucket.cacheRead += r.total_cache_read ?? 0;
+      bucket.costUsd   += this.costForSession(r.models_used, {
+        tokensIn: r.total_tokens_in, tokensOut: r.total_tokens_out,
+        cacheRead: r.total_cache_read, cacheWrite: r.total_cache_write,
+      }).costUsd;
     }
 
     const buckets = orderedDates.map((d) => bucketsByDate.get(d)!);
     let maxFresh = 0;
     let maxCacheRead = 0;
+    let maxCost = 0;
     let totalFresh = 0;
     let totalCacheRead = 0;
+    let totalCostUsd = 0;
     for (const b of buckets) {
       const fresh = b.tokensIn + b.tokensOut;
       if (fresh > maxFresh) maxFresh = fresh;
       if (b.cacheRead > maxCacheRead) maxCacheRead = b.cacheRead;
+      if (b.costUsd > maxCost) maxCost = b.costUsd;
       totalFresh += fresh;
       totalCacheRead += b.cacheRead;
+      totalCostUsd += b.costUsd;
     }
 
-    return { range, buckets, maxFresh, maxCacheRead, totalFresh, totalCacheRead, queriedAt: now };
+    return { range, buckets, maxFresh, maxCacheRead, maxCost, totalFresh, totalCacheRead, totalCostUsd, queriedAt: now };
   }
 
   getGuardrails(range: GuardrailsAnalyticsRange): GuardrailsAnalyticsPayload {
@@ -437,19 +533,70 @@ export class TimelineQueries {
     return { range, total, warn, block, byTool, byRule, queriedAt: now };
   }
 
+  getWindowValue(toolId: ToolId = 'claude-code'): WindowValuePayload {
+    const now = Date.now();
+    const start7d = now - 7 * DAY_MS;
+    const start5h = now - 5 * HOUR_MS;
+    const start1h = now - HOUR_MS;
+
+    const rows = this.db.query<SessionAggregateRow>(
+      `SELECT started_at, models_used,
+              total_tokens_in, total_tokens_out, total_cache_read, total_cache_write
+       FROM sessions WHERE tool_id = ? AND started_at >= ?`,
+      [toolId, start7d],
+    );
+
+    const blank = (windowKey: '5h' | '7d'): WindowValueSlice => ({
+      windowKey, costUsd: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, sessions: 0,
+    });
+    const last5h = blank('5h');
+    const last7d = blank('7d');
+    let cost1h = 0;
+
+    for (const r of rows) {
+      const tokens: TokenCounts = {
+        tokensIn: r.total_tokens_in, tokensOut: r.total_tokens_out,
+        cacheRead: r.total_cache_read, cacheWrite: r.total_cache_write,
+      };
+      const cost = this.costForSession(r.models_used, tokens).costUsd;
+
+      const addTo = (slice: WindowValueSlice) => {
+        slice.costUsd    += cost;
+        slice.tokensIn   += r.total_tokens_in   ?? 0;
+        slice.tokensOut  += r.total_tokens_out  ?? 0;
+        slice.cacheRead  += r.total_cache_read  ?? 0;
+        slice.cacheWrite += r.total_cache_write ?? 0;
+        slice.sessions   += 1;
+      };
+      addTo(last7d);
+      if (r.started_at >= start5h) addTo(last5h);
+      if (r.started_at >= start1h) cost1h += cost;
+    }
+
+    const burnRateUsdPerHour = cost1h; // cost1h spans exactly one hour
+    return {
+      toolId,
+      last5h,
+      last7d,
+      burnRateUsdPerHour,
+      projected5hUsd: burnRateUsdPerHour * 5,
+      queriedAt: now,
+    };
+  }
+
   // ─── Internals ──────────────────────────────────────────────────────────
 
   private digestForDay(startMs: number, endMs: number): DailyDigest {
     const sessions = this.db.query<SessionAggregateRow>(
       `SELECT tool_id, started_at, ended_at, total_tokens_in, total_tokens_out,
-              total_cache_read, total_cache_write, task_summary
+              total_cache_read, total_cache_write, task_summary, models_used
        FROM sessions WHERE ended_at >= ? AND started_at < ?`,
       [startMs, endMs],
     );
 
     let totalActiveMs = 0;
     const perToolMap = new Map<ToolId, ToolBreakdown>();
-    const tokens: TokenTotals = { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0 };
+    const tokens: TokenTotals = { tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 };
     let anyTokens = false;
 
     for (const s of sessions) {
@@ -474,6 +621,10 @@ export class TimelineQueries {
       if (s.total_tokens_out  != null) { tokens.tokensOut  += s.total_tokens_out;  anyTokens = true; }
       if (s.total_cache_read  != null) { tokens.cacheRead  += s.total_cache_read;  anyTokens = true; }
       if (s.total_cache_write != null) { tokens.cacheWrite += s.total_cache_write; anyTokens = true; }
+      tokens.costUsd += this.costForSession(s.models_used, {
+        tokensIn: s.total_tokens_in, tokensOut: s.total_tokens_out,
+        cacheRead: s.total_cache_read, cacheWrite: s.total_cache_write,
+      }).costUsd;
     }
 
     // Quota deltas: take first + last sample per (tool, window) in the day.

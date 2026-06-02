@@ -2,6 +2,7 @@ import React from 'react';
 import { DailyDigest } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
+import { formatUsd } from '../../../../common/pricing';
 import { useDigest } from './useAnalytics';
 import { Card, EmptyState, InfoPill, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
 
@@ -65,6 +66,14 @@ const DayColumn: React.FC<{ label: string; digest: DailyDigest | undefined }> = 
                 <span className='text-slate-400'>cache wr</span>
                 <span className='text-slate-200 text-right'>{formatCompactNumber(digest.tokens.cacheWrite)}</span>
               </div>
+              {digest.tokens.costUsd > 0 && (
+                <div className='flex items-center justify-between mt-2 pt-2 border-t border-slate-700/40'>
+                  <span className='text-[10px] uppercase tracking-widest text-slate-500'>Est. spend</span>
+                  <span className='text-sm font-semibold text-emerald-300 font-mono tabular-nums'>
+                    {formatUsd(digest.tokens.costUsd)}
+                  </span>
+                </div>
+              )}
             </div>
           )}
           {digest.quota.length > 0 && (

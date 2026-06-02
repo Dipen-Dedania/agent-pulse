@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { ModelUsageRange } from '../../../../common/timeline-types';
+import { ModelUsageRange, ModelUsageMode } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
+import { formatUsd } from '../../../../common/pricing';
 import { useModelUsage } from './useAnalytics';
 import { Card, EmptyState, InfoPill, Segmented, SkeletonLine, formatCompactNumber } from './shared';
 
@@ -11,13 +12,15 @@ const COVERAGE_NOTE =
 
 export const ModelUsageCard: React.FC = () => {
   const [range, setRange] = useState<ModelUsageRange>('30d');
-  const [mode, setMode] = useState<'tokens' | 'sessions'>('tokens');
+  const [mode, setMode] = useState<ModelUsageMode>('tokens');
   const { data, loading } = useModelUsage(range, mode);
 
   const total = data
     ? mode === 'tokens'
       ? data.totalTokens
-      : data.totalSessions
+      : mode === 'cost'
+        ? data.totalCostUsd
+        : data.totalSessions
     : 0;
 
   return (
@@ -28,9 +31,10 @@ export const ModelUsageCard: React.FC = () => {
         <div className='flex gap-2 flex-wrap'>
           <Segmented
             value={mode}
-            onChange={(v) => setMode(v as 'tokens' | 'sessions')}
+            onChange={(v) => setMode(v as ModelUsageMode)}
             options={[
               { value: 'tokens',   label: 'By tokens' },
+              { value: 'cost',     label: 'By cost' },
               { value: 'sessions', label: 'By sessions' },
             ]}
           />
@@ -57,7 +61,11 @@ export const ModelUsageCard: React.FC = () => {
       ) : (
         <div className='flex flex-col gap-2'>
           {data.rows.map((row) => {
-            const value = mode === 'tokens' ? row.tokensIn + row.tokensOut : row.sessions;
+            const value = mode === 'tokens'
+              ? row.tokensIn + row.tokensOut
+              : mode === 'cost'
+                ? row.costUsd
+                : row.sessions;
             const pct = total > 0 ? (value / total) * 100 : 0;
             const meta = row.toolId ? TOOL_META[row.toolId as ToolId] : null;
             return (
@@ -69,8 +77,9 @@ export const ModelUsageCard: React.FC = () => {
                     </div>
                   )}
                   <p className='text-sm font-medium text-slate-100 flex-1 truncate font-mono'>{row.model}</p>
-                  <p className='text-xs text-slate-400 font-mono tabular-nums shrink-0'>
-                    {pct.toFixed(1)}%
+                  {!row.priced && <InfoPill tone='warn'>unpriced</InfoPill>}
+                  <p className='text-xs text-slate-300 font-mono tabular-nums shrink-0'>
+                    {mode === 'cost' ? formatUsd(row.costUsd) : `${pct.toFixed(1)}%`}
                   </p>
                 </div>
                 <div className='h-1.5 bg-slate-900/60 rounded-full overflow-hidden mb-2'>
@@ -79,7 +88,8 @@ export const ModelUsageCard: React.FC = () => {
                 <div className='flex items-center justify-between text-[11px] text-slate-400 font-mono tabular-nums'>
                   <span>
                     in <span className='text-slate-200'>{formatCompactNumber(row.tokensIn)}</span> ·
-                    out <span className='text-slate-200'>{formatCompactNumber(row.tokensOut)}</span>
+                    out <span className='text-slate-200'>{formatCompactNumber(row.tokensOut)}</span> ·
+                    <span className='text-slate-200'> {formatUsd(row.costUsd)}</span>
                   </span>
                   <span>
                     {row.sessions} {row.sessions === 1 ? 'session' : 'sessions'}

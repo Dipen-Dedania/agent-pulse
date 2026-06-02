@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TokensTimelineRange } from '../../../../common/timeline-types';
+import { formatUsd } from '../../../../common/pricing';
 import { useTokensTimeline } from './useAnalytics';
 import { Card, EmptyState, Segmented, SkeletonLine, formatCompactNumber } from './shared';
 
@@ -12,6 +13,10 @@ const FRESH_FILL   = 'rgba(96, 165, 250, 0.22)';   // blue-400
 const FRESH_STROKE = 'rgba(96, 165, 250, 0.95)';
 const CACHE_FILL   = 'rgba(148, 163, 184, 0.10)';  // slate-400, faint
 const CACHE_STROKE = 'rgba(148, 163, 184, 0.55)';
+const COST_FILL    = 'rgba(52, 211, 153, 0.20)';   // emerald-400
+const COST_STROKE  = 'rgba(52, 211, 153, 0.95)';
+
+type Metric = 'tokens' | 'cost';
 
 interface Point { x: number; y: number; }
 
@@ -29,9 +34,11 @@ function buildLine(points: Point[]): string {
 
 export const TokensTimelineCard: React.FC = () => {
   const [range, setRange] = useState<TokensTimelineRange>('30d');
+  const [metric, setMetric] = useState<Metric>('tokens');
   const [showCache, setShowCache] = useState<'on' | 'off'>('off');
   const { data, loading } = useTokensTimeline(range);
 
+  const isCost = metric === 'cost';
   const n = data?.buckets.length ?? 0;
   const innerW = W - PAD_X * 2;
   const step = n > 1 ? innerW / (n - 1) : 0;
@@ -39,8 +46,15 @@ export const TokensTimelineCard: React.FC = () => {
   const yScale = (v: number, max: number) =>
     max > 0 ? H - PAD_TOP - (v / max) * (H - PAD_TOP) : H;
 
-  const freshPoints: Point[] = data
-    ? data.buckets.map((b, i) => ({ x: xs(i), y: yScale(b.tokensIn + b.tokensOut, data.maxFresh) }))
+  // Primary series: fresh tokens, or estimated cost.
+  const primaryMax = data ? (isCost ? data.maxCost : data.maxFresh) : 0;
+  const primaryFill   = isCost ? COST_FILL   : FRESH_FILL;
+  const primaryStroke = isCost ? COST_STROKE : FRESH_STROKE;
+  const primaryPoints: Point[] = data
+    ? data.buckets.map((b, i) => ({
+        x: xs(i),
+        y: yScale(isCost ? b.costUsd : b.tokensIn + b.tokensOut, primaryMax),
+      }))
     : [];
   const cachePoints: Point[] = data
     ? data.buckets.map((b, i) => ({ x: xs(i), y: yScale(b.cacheRead, data.maxCacheRead) }))
@@ -61,18 +75,30 @@ export const TokensTimelineCard: React.FC = () => {
 
   return (
     <Card
-      title='Tokens per day'
-      subtitle='Fresh in+out tokens by day — spot heavy-spend days at a glance.'
+      title={isCost ? 'Spend per day' : 'Tokens per day'}
+      subtitle={isCost
+        ? 'Estimated API-equivalent cost by day — spot expensive days at a glance.'
+        : 'Fresh in+out tokens by day — spot heavy-spend days at a glance.'}
       right={
         <div className='flex gap-2 flex-wrap'>
           <Segmented
-            value={showCache}
-            onChange={(v) => setShowCache(v as 'on' | 'off')}
+            value={metric}
+            onChange={(v) => setMetric(v as Metric)}
             options={[
-              { value: 'off', label: 'Fresh' },
-              { value: 'on',  label: '+ Cache' },
+              { value: 'tokens', label: 'Tokens' },
+              { value: 'cost',   label: 'Cost' },
             ]}
           />
+          {!isCost && (
+            <Segmented
+              value={showCache}
+              onChange={(v) => setShowCache(v as 'on' | 'off')}
+              options={[
+                { value: 'off', label: 'Fresh' },
+                { value: 'on',  label: '+ Cache' },
+              ]}
+            />
+          )}
           <Segmented
             value={range}
             onChange={(v) => setRange(v as TokensTimelineRange)}
@@ -92,16 +118,22 @@ export const TokensTimelineCard: React.FC = () => {
       ) : (
         <div>
           <div className='mb-2 flex items-center gap-4 text-[11px] text-slate-400 font-mono tabular-nums'>
-            <span>
-              fresh <span className='text-slate-200'>{formatCompactNumber(data.totalFresh)}</span>
-            </span>
-            <span>
-              cache <span className='text-slate-200'>{formatCompactNumber(data.totalCacheRead)}</span>
-            </span>
-            {showCache === 'on' && (
-              <span className='text-[10px] text-slate-500'>
-                cache scaled independently
+            {isCost ? (
+              <span>
+                est. spend <span className='text-emerald-300'>{formatUsd(data.totalCostUsd)}</span>
               </span>
+            ) : (
+              <>
+                <span>
+                  fresh <span className='text-slate-200'>{formatCompactNumber(data.totalFresh)}</span>
+                </span>
+                <span>
+                  cache <span className='text-slate-200'>{formatCompactNumber(data.totalCacheRead)}</span>
+                </span>
+                {showCache === 'on' && (
+                  <span className='text-[10px] text-slate-500'>cache scaled independently</span>
+                )}
+              </>
             )}
           </div>
           <svg
@@ -109,16 +141,16 @@ export const TokensTimelineCard: React.FC = () => {
             preserveAspectRatio='none'
             className='w-full h-36'
           >
-            {showCache === 'on' && data.maxCacheRead > 0 && (
+            {!isCost && showCache === 'on' && data.maxCacheRead > 0 && (
               <>
                 <path d={buildArea(cachePoints)}  fill={CACHE_FILL} />
                 <path d={buildLine(cachePoints)}  fill='none' stroke={CACHE_STROKE} strokeWidth={1} vectorEffect='non-scaling-stroke' />
               </>
             )}
-            {data.maxFresh > 0 && (
+            {primaryMax > 0 && (
               <>
-                <path d={buildArea(freshPoints)} fill={FRESH_FILL} />
-                <path d={buildLine(freshPoints)} fill='none' stroke={FRESH_STROKE} strokeWidth={1.5} vectorEffect='non-scaling-stroke' />
+                <path d={buildArea(primaryPoints)} fill={primaryFill} />
+                <path d={buildLine(primaryPoints)} fill='none' stroke={primaryStroke} strokeWidth={1.5} vectorEffect='non-scaling-stroke' />
               </>
             )}
             {/* Hover hit-targets, one per bucket */}
@@ -136,7 +168,9 @@ export const TokensTimelineCard: React.FC = () => {
                   fill='transparent'
                 >
                   <title>
-                    {`${b.date} · fresh ${fresh.toLocaleString()} (in ${b.tokensIn.toLocaleString()} / out ${b.tokensOut.toLocaleString()}) · cache ${b.cacheRead.toLocaleString()}`}
+                    {isCost
+                      ? `${b.date} · ${formatUsd(b.costUsd)} est. · fresh ${fresh.toLocaleString()} tokens`
+                      : `${b.date} · fresh ${fresh.toLocaleString()} (in ${b.tokensIn.toLocaleString()} / out ${b.tokensOut.toLocaleString()}) · cache ${b.cacheRead.toLocaleString()} · ${formatUsd(b.costUsd)} est.`}
                   </title>
                 </rect>
               );

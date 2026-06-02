@@ -4,6 +4,7 @@ import {
   HeatmapRange,
   ToolMixRange,
   ModelUsageRange,
+  ModelUsageMode,
   ProjectBreakdownRange,
   TokensTimelineRange,
   GuardrailsAnalyticsRange,
@@ -57,10 +58,16 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     catch (e) { logger.warn('[Timeline/ipc] get-tool-mix:', e); return null; }
   });
 
-  ipcMain.handle('analytics:get-model-usage', (_e, args: { range: ModelUsageRange; mode: 'tokens' | 'sessions' }) => {
+  ipcMain.handle('analytics:get-model-usage', (_e, args: { range: ModelUsageRange; mode: ModelUsageMode }) => {
     if (!queries) return null;
     try { return queries.getModelUsage(args.range, args.mode); }
     catch (e) { logger.warn('[Timeline/ipc] get-model-usage:', e); return null; }
+  });
+
+  ipcMain.handle('analytics:get-window-value', () => {
+    if (!queries) return null;
+    try { return queries.getWindowValue(); }
+    catch (e) { logger.warn('[Timeline/ipc] get-window-value:', e); return null; }
   });
 
   ipcMain.handle('analytics:get-project-breakdown', (_e, args: { range: ProjectBreakdownRange }) => {
@@ -96,6 +103,7 @@ export function unregisterTimelineIpc() {
     'analytics:get-hour-rhythm',
     'analytics:get-tool-mix',
     'analytics:get-model-usage',
+    'analytics:get-window-value',
     'analytics:get-project-breakdown',
     'analytics:get-tokens-timeline',
     'analytics:get-guardrails',

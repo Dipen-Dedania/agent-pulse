@@ -1,6 +1,40 @@
 export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'antigravity-cli';
 export type AgentState = 'working' | 'waiting' | 'idle' | 'idle-active' | 'error';
 
+// ─── Bubble appearance & behavior ────────────────────────────────────────────
+// User-tunable look/feel of the status bubbles. Persisted in user-config and
+// shared between the main process (window sizing/placement) and the renderer
+// (orb scaling + inactivity chime). Kept in src/common so both sides agree on
+// the exact string unions.
+
+// Three discrete bubble sizes. The pixel dimensions live wherever they're
+// consumed (BubbleManager for the window, Bubble.tsx for the orb).
+export type BubbleSize = 'small' | 'medium' | 'large';
+
+// Which screen corner the bubble stack anchors to. Bubbles grow toward the
+// vertical center from whichever corner is chosen.
+export type BubbleStackPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
+
+// Sound played when a bubble flips into the "waiting for input" state. 'pop'
+// is the bundled wav; the rest are synthesized in the renderer; 'none' is silent.
+export type BubbleSoundId = 'pop' | 'chime' | 'ding' | 'marimba' | 'none';
+
+export interface BubbleConfig {
+  size: BubbleSize;
+  stackPosition: BubbleStackPosition;
+  sound: BubbleSoundId;
+}
+
+// Content for the rich hover tooltip rendered in a dedicated overlay window
+// (the bubble window is too small to host it). Sent from the bubble renderer
+// to the main process, which positions the overlay and forwards the payload.
+export interface BubbleTooltipPayload {
+  title: string;        // tool label, e.g. "Claude Code"
+  subtitle?: string;    // state · agents · last-seen
+  lines: string[];      // usage / scheduler / task detail rows
+  accent?: string;      // rgba glow for the title status dot
+}
+
 export interface NormalizedEvent {
   toolId: ToolId;
   state: AgentState;
@@ -130,4 +164,33 @@ export interface AntigravityUsageStatus {
   lastUpdated?: number;
   message?: string;
   nudgeActive?: AntigravityUsageNudgeFlags;
+}
+
+// ─── Cowork Scheduler ────────────────────────────────────────────────────────
+// Active sibling of the usage "nudge": fires a minimal `claude -p` ping to open
+// a fresh 5-hour window (and refresh the OAuth token) on the user's schedule.
+// The scheduler reads window state from UsagePoller — it never re-detects it.
+
+// What the scheduler's next timer is waiting on.
+//   opener — a window-opening ping (fixed slot or adaptive resetsAt).
+//   nudge  — a token-refresh ping near expiresAt (off mode / long gaps only).
+export type SchedulerEventKind = 'opener' | 'nudge';
+
+// Result of the most recent ping. `rode` is true when the ping landed inside a
+// still-live window (so it refreshed the token but did NOT open a new block).
+export interface SchedulerLastRun {
+  at: number;            // ms epoch when the ping fired
+  kind: SchedulerEventKind;
+  ok: boolean;           // process exited cleanly
+  rode?: boolean;        // rode a live window instead of opening a fresh one
+  reason?: string;       // failure detail when !ok
+}
+
+export interface SchedulerStatus {
+  mode: 'off' | 'fixed' | 'adaptive';
+  nextFireAt: number | null;      // ms epoch of the next scheduled ping (any kind)
+  nextEventKind: SchedulerEventKind | null;
+  lastRun: SchedulerLastRun | null;
+  openersToday: number;           // count of openers fired since local midnight
+  windowResetsAt?: number | null; // mirror of the live 5-hour resetsAt, for the glance
 }

@@ -305,6 +305,34 @@ describe('Antigravity CLI events', () => {
     expect(normalizePayload(antigravity('Stop'))?.state).toBe('idle-active');
   });
 
+  it('Stop with terminationReason ERROR → error (failed turn)', () => {
+    // A turn that dies (e.g. 503 no-capacity) still fires a normal Stop; the
+    // failure is signalled via terminationReason + a top-level error string.
+    const r = normalizePayload(antigravity('Stop', {
+      terminationReason: 'ERROR',
+      error: 'UNAVAILABLE (code 503): No capacity available for model claude-sonnet-4-6 on the server',
+      fullyIdle: true,
+    }));
+    expect(r?.state).toBe('error');
+    expect(r?.payload.errorMessage).toContain('No capacity available');
+  });
+
+  it('Stop with a top-level error string (no terminationReason) → error', () => {
+    const r = normalizePayload(antigravity('Stop', { error: 'something went wrong' }));
+    expect(r?.state).toBe('error');
+    expect(r?.payload.errorMessage).toBe('something went wrong');
+  });
+
+  it('Stop with terminationReason other than ERROR → idle-active', () => {
+    const r = normalizePayload(antigravity('Stop', { terminationReason: 'COMPLETED' }));
+    expect(r?.state).toBe('idle-active');
+    expect(r?.payload.errorMessage).toBeUndefined();
+  });
+
+  it('empty/whitespace error string does not trigger error state', () => {
+    expect(normalizePayload(antigravity('Stop', { error: '   ' }))?.state).toBe('idle-active');
+  });
+
   it('unknown Antigravity event → null', () => {
     expect(normalizePayload(antigravity('UnknownEvent'))).toBeNull();
   });

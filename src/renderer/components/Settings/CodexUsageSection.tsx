@@ -44,8 +44,11 @@ function formatRelativeReset(targetMs: number | undefined): string {
   if (diff <= 0) return 'now';
   const mins = Math.round(diff / 60_000);
   if (mins < 60) return `in ${mins}m`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `in ${hours}h`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) {
+    const remMins = mins % 60;
+    return remMins > 0 ? `in ${hours}h ${remMins}m` : `in ${hours}h`;
+  }
   const days = Math.round(hours / 24);
   return `in ${days}d`;
 }

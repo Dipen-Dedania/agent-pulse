@@ -30,7 +30,7 @@ import {
   WindowValuePayload,
   WindowValueSlice,
 } from '../../common/timeline-types';
-import { estimateCost, rateForModel, TokenCounts } from '../../common/pricing';
+import { estimateCost, estimateCostBreakdown, rateForModel, CostBreakdown, TokenCounts } from '../../common/pricing';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -93,6 +93,28 @@ export class TimelineQueries {
       if (est.priced) priced = true;
     }
     return { costUsd, priced };
+  }
+
+  // Same even-split-across-models attribution as costForSession, but returns
+  // the cost broken out per token class so the UI can explain the total.
+  private breakdownForSession(modelsUsed: string | null | undefined, tokens: TokenCounts): CostBreakdown {
+    const acc: CostBreakdown = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+    const models = (modelsUsed ?? '').split(',').map((m) => m.trim()).filter(Boolean);
+    if (models.length === 0) return acc;
+    const share = 1 / models.length;
+    for (const model of models) {
+      const { breakdown } = estimateCostBreakdown(model, {
+        tokensIn:   (tokens.tokensIn   ?? 0) * share,
+        tokensOut:  (tokens.tokensOut  ?? 0) * share,
+        cacheRead:  (tokens.cacheRead  ?? 0) * share,
+        cacheWrite: (tokens.cacheWrite ?? 0) * share,
+      });
+      acc.input      += breakdown.input;
+      acc.output     += breakdown.output;
+      acc.cacheWrite += breakdown.cacheWrite;
+      acc.cacheRead  += breakdown.cacheRead;
+    }
+    return acc;
   }
 
   getDigest(): DigestPayload {
@@ -548,6 +570,7 @@ export class TimelineQueries {
 
     const blank = (windowKey: '5h' | '7d'): WindowValueSlice => ({
       windowKey, costUsd: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, sessions: 0,
+      costBreakdown: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 },
     });
     const last5h = blank('5h');
     const last7d = blank('7d');
@@ -558,7 +581,8 @@ export class TimelineQueries {
         tokensIn: r.total_tokens_in, tokensOut: r.total_tokens_out,
         cacheRead: r.total_cache_read, cacheWrite: r.total_cache_write,
       };
-      const cost = this.costForSession(r.models_used, tokens).costUsd;
+      const breakdown = this.breakdownForSession(r.models_used, tokens);
+      const cost = breakdown.input + breakdown.output + breakdown.cacheWrite + breakdown.cacheRead;
 
       const addTo = (slice: WindowValueSlice) => {
         slice.costUsd    += cost;
@@ -567,6 +591,10 @@ export class TimelineQueries {
         slice.cacheRead  += r.total_cache_read  ?? 0;
         slice.cacheWrite += r.total_cache_write ?? 0;
         slice.sessions   += 1;
+        slice.costBreakdown.input      += breakdown.input;
+        slice.costBreakdown.output     += breakdown.output;
+        slice.costBreakdown.cacheWrite += breakdown.cacheWrite;
+        slice.costBreakdown.cacheRead  += breakdown.cacheRead;
       };
       addTo(last7d);
       if (r.started_at >= start5h) addTo(last5h);

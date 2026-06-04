@@ -1,6 +1,7 @@
 import React from 'react';
 import { Bubble } from './components/Bubble/Bubble';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
+import { TooltipOverlay } from './components/Tooltip/TooltipOverlay';
 import { ToolId } from '../common/types';
 import { motion } from 'framer-motion';
 
@@ -101,6 +102,10 @@ const App: React.FC = () => {
 
   if (view === 'settings') {
     return <SettingsPanel />;
+  }
+
+  if (view === 'tooltip') {
+    return <TooltipOverlay />;
   }
 
   if (toolId) {

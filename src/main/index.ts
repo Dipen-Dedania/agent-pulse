@@ -1,5 +1,6 @@
-import { app, ipcMain, shell, BrowserWindow, Menu } from 'electron';
+import { app, ipcMain, shell, BrowserWindow, Menu, dialog } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
+import { TooltipManager } from './windows/tooltip-window';
 import { SettingsWindow } from './windows/settings-window';
 import { TrayManager } from './windows/tray';
 import { ENABLE_APP_MENU } from './feature-flags';
@@ -7,8 +8,8 @@ import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
-import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig, AntigravityUsageConfig, AnalyticsConfig } from './user-config';
-import { ToolId } from '../common/types';
+import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
+import { ToolId, BubbleConfig } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
 import { isPatternSafe } from './guardrails/engine';
@@ -17,6 +18,7 @@ import { installFileLogSink } from './file-log-sink';
 import { UsagePoller } from './usage/poller';
 import { CodexUsagePoller } from './codex-usage/poller';
 import { AntigravityUsagePoller } from './antigravity-usage/poller';
+import { Scheduler } from './scheduler/scheduler';
 import { isAutoLaunchEnabled, setAutoLaunch } from './auto-launch';
 import { bootTimeline, TimelineHandle } from './timeline';
 import { bootUpdater, UpdaterHandle } from './updater';
@@ -35,6 +37,7 @@ if (!gotSingleInstanceLock) {
 
 class AgentPulseApp {
   private bubbleManager: BubbleManager;
+  private tooltipManager: TooltipManager;
   private settingsWindow: SettingsWindow;
   private trayManager: TrayManager;
   private stateManager: StatusStateManager;
@@ -45,6 +48,7 @@ class AgentPulseApp {
   private usagePoller: UsagePoller;
   private codexUsagePoller: CodexUsagePoller;
   private antigravityUsagePoller: AntigravityUsagePoller;
+  private scheduler: Scheduler;
   private timeline: TimelineHandle | null = null;
   private updater!: UpdaterHandle;
 
@@ -59,8 +63,10 @@ class AgentPulseApp {
     this.bridgeServer = new StatusBridgeServer(this.stateManager, {
       getGuardrailConfig: () => this.userConfig.guardrails,
       onGuardrailEvent: (event) => this.handleGuardrailEvent(event),
+      onListenError: (err, port) => this.handleBridgeListenError(err, port),
     });
-    this.bubbleManager = new BubbleManager();
+    this.bubbleManager = new BubbleManager(this.userConfig.bubble);
+    this.tooltipManager = new TooltipManager();
     this.settingsWindow = new SettingsWindow();
     this.trayManager = new TrayManager();
     this.detector = new ToolDetector();
@@ -68,6 +74,9 @@ class AgentPulseApp {
     this.usagePoller = new UsagePoller(this.userConfig.usage);
     this.codexUsagePoller = new CodexUsagePoller(this.userConfig.codexUsage);
     this.antigravityUsagePoller = new AntigravityUsagePoller(this.userConfig.antigravityUsage);
+    // Scheduler consumes the usage poller (live 5-hour resetsAt), so construct
+    // it after the poller exists.
+    this.scheduler = new Scheduler(this.userConfig.scheduler, { usagePoller: this.usagePoller });
   }
 
   public init() {
@@ -88,12 +97,18 @@ class AgentPulseApp {
       }
       this.setupIpc();
       this.bubbleManager.init();
+      this.tooltipManager.init();
       this.usagePoller.init();
       this.usagePoller.start();
       this.codexUsagePoller.init();
       this.codexUsagePoller.start();
       this.antigravityUsagePoller.init();
       this.antigravityUsagePoller.start();
+
+      // Scheduler starts after the pollers so it can subscribe to live window
+      // state on its first reschedule.
+      this.scheduler.init();
+      this.scheduler.start();
 
       // Boot Pulse Timeline persistence. Subscribers wire up *after* the
       // pollers are init'd so we don't miss their first emit. If better-
@@ -154,6 +169,8 @@ class AgentPulseApp {
       this.usagePoller.stop();
       this.codexUsagePoller.stop();
       this.antigravityUsagePoller.stop();
+      this.scheduler.stop();
+      this.tooltipManager.destroy();
       this.timeline?.shutdown();
       this.updater.shutdown();
       this.trayManager.destroy();
@@ -189,6 +206,20 @@ class AgentPulseApp {
 
     ipcMain.handle('get-bubble-states', () => {
       return this.bubbleManager.syncEnabledBubbles(this.userConfig.enabledBubbles);
+    });
+
+    // Bubble appearance/behavior (size, stack corner, inactivity chime).
+    // Resizes/restacks live windows immediately, then broadcasts so every
+    // bubble renderer can re-scale its orb and switch its chime without a poll.
+    ipcMain.handle('bubble:update-config', (_event, partial: Partial<BubbleConfig>) => {
+      this.userConfig.bubble = { ...this.userConfig.bubble, ...partial };
+      saveConfig(this.userConfig);
+      this.bubbleManager.applyConfig(this.userConfig.bubble);
+      const updated = this.userConfig.bubble;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('bubble:config-updated', updated);
+      }
+      return updated;
     });
 
     ipcMain.handle('detect-tools', async () => {
@@ -245,6 +276,17 @@ class AgentPulseApp {
       const updated = this.userConfig.antigravityUsage;
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send('antigravity-usage:config-updated', updated);
+      }
+      return updated;
+    });
+
+    ipcMain.handle('scheduler:update-config', (_event, partial: Partial<SchedulerConfig>) => {
+      this.userConfig.scheduler = { ...this.userConfig.scheduler, ...partial };
+      saveConfig(this.userConfig);
+      this.scheduler.applyConfig(this.userConfig.scheduler);
+      const updated = this.userConfig.scheduler;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('scheduler:config-updated', updated);
       }
       return updated;
     });
@@ -328,6 +370,32 @@ class AgentPulseApp {
     });
   }
 
+  // The bridge couldn't bind its port after retries. The self-collision case
+  // (a second instance of our own app) is already prevented by the single-
+  // instance lock, so reaching here means some *other* process holds the port.
+  // Show one clean dialog explaining how to recover instead of the raw fatal
+  // "A JavaScript error occurred in the main process" stack trace. The app
+  // stays alive (tray + usage pollers still work); only live hook status is
+  // unavailable until the port frees up.
+  private handleBridgeListenError(err: NodeJS.ErrnoException, port: number) {
+    const inUse = err.code === 'EADDRINUSE';
+    const message = inUse
+      ? `Agent Pulse couldn't start its status bridge because port ${port} is already in use by another program.`
+      : `Agent Pulse couldn't start its status bridge on port ${port} (${err.code ?? 'error'}).`;
+    const detail = inUse
+      ? `Live agent status from your tools won't update until the port is free.\n\n` +
+        `To fix this, close whatever is using port ${port}, or set a different port by ` +
+        `launching with the AGENT_PULSE_PORT environment variable (then reinstall hooks from Settings).`
+      : err.message;
+    dialog.showMessageBox({
+      type: 'warning',
+      title: 'Agent Pulse',
+      message,
+      detail,
+      buttons: ['OK'],
+    }).catch((e) => logger.error('[AgentPulseApp] failed to show listen-error dialog', e));
+  }
+
   // Push a guardrail event to every renderer window and append to the
   // in-memory ring so the Settings log shows history when opened post-event.
   // Also persisted to the timeline DB so the Analytics tab can aggregate
@@ -351,5 +419,11 @@ class AgentPulseApp {
   }
 }
 
-const pulseApp = new AgentPulseApp();
-pulseApp.init();
+// Only boot the app when we actually hold the single-instance lock. `app.quit()`
+// above is async and does NOT halt this synchronous module code, so without this
+// guard a second instance would still reach `init()` → `bridgeServer.start()` and
+// collide on port 4242 (EADDRINUSE) before quitting.
+if (gotSingleInstanceLock) {
+  const pulseApp = new AgentPulseApp();
+  pulseApp.init();
+}

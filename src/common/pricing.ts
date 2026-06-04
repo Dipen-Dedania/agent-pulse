@@ -18,7 +18,7 @@
 // Cursor, VS Code Copilot, and Kiro report no tokens, so they have no cost —
 // callers must treat a null/zero result as "not priced", not "$0 of work".
 
-export const PRICING_LAST_UPDATED = '2026-06-01';
+export const PRICING_LAST_UPDATED = '2026-06-02';
 
 /** USD per 1M tokens for each billable token class. */
 export interface ModelRate {
@@ -45,8 +45,15 @@ interface RateEntry {
 // them, so a vendor change to the multiplier is a one-line edit.
 const TABLE: RateEntry[] = [
   // ── Anthropic — Claude ────────────────────────────────────────────────────
-  // Opus family (3, 4, 4.1, 4.5, 4.6, 4.7, 4.8 …): $15 / $75.
-  { match: ['opus'], rate: { label: 'Claude Opus', provider: 'anthropic', input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 } },
+  // Opus 4.5 and later (4.5, 4.6, 4.7, 4.8 …): $5 / $25. Anthropic cut the Opus
+  // price ~3× starting with 4.5 — modern ids ("claude-opus-4-8") MUST hit this
+  // row, not the legacy one below, or every estimate runs 3× high.
+  { match: ['opus', '4-5'], rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
+  { match: ['opus', '4-6'], rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
+  { match: ['opus', '4-7'], rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
+  { match: ['opus', '4-8'], rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
+  // Legacy Opus (3, 4, 4.1): $15 / $75.
+  { match: ['opus'], rate: { label: 'Claude Opus (legacy)', provider: 'anthropic', input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 } },
   // Sonnet family (3.5, 3.7, 4, 4.5, 4.6 …): $3 / $15 (≤200K context tier).
   { match: ['sonnet'], rate: { label: 'Claude Sonnet', provider: 'anthropic', input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 } },
   // Haiku 4.x: $1 / $5.
@@ -104,6 +111,41 @@ export function rateForModel(model: string | null | undefined): ModelRate | null
 export interface CostEstimate {
   costUsd: number;
   priced: boolean;
+}
+
+/** Per-token-class dollar contributions, so the UI can show how a total was built. */
+export interface CostBreakdown {
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+}
+
+/** Zero breakdown — exported so callers can seed an accumulator. */
+export function emptyCostBreakdown(): CostBreakdown {
+  return { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+}
+
+/**
+ * Like estimateCost, but returns the cost split per token class. Unknown model
+ * → all-zero breakdown (and priced:false). Sum of the four fields equals
+ * estimateCost(...).costUsd for the same inputs.
+ */
+export function estimateCostBreakdown(
+  model: string | null | undefined,
+  tokens: TokenCounts,
+): { breakdown: CostBreakdown; priced: boolean } {
+  const rate = rateForModel(model);
+  if (!rate) return { breakdown: emptyCostBreakdown(), priced: false };
+  return {
+    breakdown: {
+      input:      ((tokens.tokensIn   ?? 0) * rate.input)      / PER_MILLION,
+      output:     ((tokens.tokensOut  ?? 0) * rate.output)     / PER_MILLION,
+      cacheWrite: ((tokens.cacheWrite ?? 0) * rate.cacheWrite) / PER_MILLION,
+      cacheRead:  ((tokens.cacheRead  ?? 0) * rate.cacheRead)  / PER_MILLION,
+    },
+    priced: true,
+  };
 }
 
 /**

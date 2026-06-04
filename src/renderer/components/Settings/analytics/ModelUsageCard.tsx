@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { ModelUsageRange, ModelUsageMode } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
-import { formatUsd } from '../../../../common/pricing';
+import { estimateCostBreakdown, formatUsd } from '../../../../common/pricing';
 import { useModelUsage } from './useAnalytics';
-import { Card, EmptyState, InfoPill, Segmented, SkeletonLine, formatCompactNumber } from './shared';
+import { Card, CostBreakdownContent, EmptyState, InfoPill, InfoTooltip, Segmented, SkeletonLine, formatCompactNumber } from './shared';
 
 const COVERAGE_NOTE =
   'Captures models from Claude Code (via transcripts). Antigravity coverage depends on hook payload. ' +
@@ -86,10 +86,27 @@ export const ModelUsageCard: React.FC = () => {
                   <div className='h-full bg-blue-500' style={{ width: `${pct}%` }} />
                 </div>
                 <div className='flex items-center justify-between text-[11px] text-slate-400 font-mono tabular-nums'>
-                  <span>
+                  <span className='inline-flex items-center gap-1.5'>
                     in <span className='text-slate-200'>{formatCompactNumber(row.tokensIn)}</span> ·
                     out <span className='text-slate-200'>{formatCompactNumber(row.tokensOut)}</span> ·
-                    <span className='text-slate-200'> {formatUsd(row.costUsd)}</span>
+                    <span className='text-slate-200'>{formatUsd(row.costUsd)}</span>
+                    {row.priced && (
+                      <InfoTooltip label={`${row.model} cost breakdown`}>
+                        <CostBreakdownContent
+                          tokensIn={row.tokensIn}
+                          tokensOut={row.tokensOut}
+                          cacheWrite={row.cacheWrite}
+                          cacheRead={row.cacheRead}
+                          breakdown={estimateCostBreakdown(row.model, {
+                            tokensIn: row.tokensIn,
+                            tokensOut: row.tokensOut,
+                            cacheWrite: row.cacheWrite,
+                            cacheRead: row.cacheRead,
+                          }).breakdown}
+                          totalUsd={row.costUsd}
+                        />
+                      </InfoTooltip>
+                    )}
                   </span>
                   <span>
                     {row.sessions} {row.sessions === 1 ? 'session' : 'sessions'}

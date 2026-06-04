@@ -22,6 +22,8 @@ const CREDS_FILE_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 export interface CredentialsResult {
   ok: true;
   token: string;
+  /** ms epoch when the access token expires, if the source exposed it. */
+  expiresAt?: number;
 }
 
 export interface CredentialsError {
@@ -32,13 +34,22 @@ export interface CredentialsError {
 
 export type CredentialsRead = CredentialsResult | CredentialsError;
 
-export async function readAccessToken(): Promise<CredentialsRead> {
+/**
+ * Read the full credentials (token + expiry). The scheduler uses `expiresAt`
+ * to time its token-refresh nudge; the usage poller only needs the token.
+ */
+export async function readCredentials(): Promise<CredentialsRead> {
   if (process.platform === 'darwin') {
     const kc = await readFromKeychain();
     if (kc.ok) return kc;
     logger.debug(`[usage/credentials] keychain miss (${kc.reason}: ${kc.detail}); falling back to file`);
   }
   return readFromFile();
+}
+
+/** Back-compat alias — existing callers only consume `.token`. */
+export async function readAccessToken(): Promise<CredentialsRead> {
+  return readCredentials();
 }
 
 function readFromKeychain(): Promise<CredentialsRead> {
@@ -84,9 +95,13 @@ function extractToken(raw: string): CredentialsRead {
   } catch (e: any) {
     return { ok: false, reason: 'malformed', detail: `JSON parse: ${e?.message ?? e}` };
   }
-  const token = parsed?.claudeAiOauth?.accessToken;
+  const oauth = parsed?.claudeAiOauth;
+  const token = oauth?.accessToken;
   if (typeof token !== 'string' || token.length === 0) {
     return { ok: false, reason: 'malformed', detail: 'claudeAiOauth.accessToken missing' };
   }
-  return { ok: true, token };
+  // Claude Code stores expiry as `expiresAt` (ms epoch). Optional — absent on
+  // some installs / older formats, so callers must treat it as best-effort.
+  const expiresAt = typeof oauth?.expiresAt === 'number' ? oauth.expiresAt : undefined;
+  return { ok: true, token, expiresAt };
 }

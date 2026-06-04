@@ -57,11 +57,14 @@ jobs:
             manifest_glob: 'latest-mac.yml'
           - os: ubuntu-latest
             script: dist:linux
+            # AppImage embeds its differential-update blockmap inside the
+            # image itself — electron-builder emits no standalone
+            # *.AppImage.blockmap, so don't list one (it would fail the
+            # publish step's fail_on_unmatched_files guard).
             artifact_path: |
               release/*.AppImage
-              release/*.AppImage.blockmap
               release/latest-linux.yml
-            binary_glob: '*.{AppImage,AppImage.blockmap}'
+            binary_glob: '*.AppImage'
             manifest_glob: 'latest-linux.yml'
 
     runs-on: ${{ matrix.os }}

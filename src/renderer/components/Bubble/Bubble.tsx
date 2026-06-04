@@ -1,14 +1,29 @@
-import React, { useRef, useCallback, useEffect, useState } from 'react';
-import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, AntigravityUsageStatus, AntigravityModelWindow } from '../../../common/types';
+import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
+import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleTooltipPayload } from '../../../common/types';
 import { GuardrailEvent } from '../../../common/guardrails';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
 import { logger } from '../../../common/logger';
 import { motion } from 'framer-motion';
 import { useStatusStore } from '../../store/useStatusStore';
+import { playBubbleSound } from '../../sound';
 
-// TODO: re-enable once tooltip flicker & width-growth are fixed
-const TOOLTIP_ENABLED = false;
+// Orb/icon/ring pixel sizes per bubble size, plus the usage-bar geometry
+// (width / thickness / inter-bar gap) so the bars scale in step with the orb.
+// The window footprint is set in the main process
+// (BubbleManager.BUBBLE_DIMENSIONS); these scale the visuals to fit.
+interface BubbleDims {
+  orb: number;
+  icon: number;
+  ring: number;
+  bar: { width: number; height: number; gap: number };
+}
+const ORB_DIMENSIONS: Record<BubbleSize, BubbleDims> = {
+  small: { orb: 38, icon: 19, ring: 46, bar: { width: 40, height: 2, gap: 2 } },
+  medium: { orb: 48, icon: 24, ring: 56, bar: { width: 50, height: 3, gap: 2 } },
+  large: { orb: 60, icon: 30, ring: 70, bar: { width: 64, height: 4, gap: 3 } },
+};
+
 
 interface BubbleProps {
   toolId: ToolId;
@@ -43,10 +58,29 @@ function formatRelativeReset(targetMs: number | undefined): string {
   if (diff <= 0) return 'now';
   const mins = Math.round(diff / 60_000);
   if (mins < 60) return `in ${mins}m`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `in ${hours}h`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) {
+    const remMins = mins % 60;
+    return remMins > 0 ? `in ${hours}h ${remMins}m` : `in ${hours}h`;
+  }
   const days = Math.round(hours / 24);
   return `in ${days}d`;
+}
+
+// Compact scheduler glance for the usage tooltip. Prefers the live window's
+// remaining time; falls back to the next scheduled opener/nudge. Returns
+// undefined when the scheduler is idle with nothing to show.
+function schedulerGlance(status: SchedulerStatus | null): string | undefined {
+  if (!status) return undefined;
+  if (status.windowResetsAt && status.windowResetsAt > Date.now()) {
+    return `Window resets ${formatRelativeReset(status.windowResetsAt)}`;
+  }
+  if (status.nextFireAt) {
+    const clock = new Date(status.nextFireAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const label = status.nextEventKind === 'nudge' ? 'Token refresh' : 'Next window';
+    return `${label} ${clock}`;
+  }
+  return undefined;
 }
 
 function fillColorForRemaining(remaining: number, isDark: boolean): string {
@@ -61,13 +95,65 @@ function fillColorForRemaining(remaining: number, isDark: boolean): string {
   return isDark ? 'rgba(239,68,68,0.8)' : 'rgba(220,38,38,0.7)';
 }
 
+// ── Tooltip line builders ─────────────────────────────────────────────────
+// Produce the human-readable lines shown in the rich hover tooltip. Kept as
+// module functions (rather than inline in the bar components) so the Bubble
+// can assemble one consolidated tooltip card per tool.
+
+function claudeTooltipLines(status: UsageStatus, showSevenDay: boolean, schedulerLine?: string): string[] {
+  const lines: string[] = [];
+  if (status.state === 'ok' && status.snapshot) {
+    const { fiveHour, sevenDay } = status.snapshot;
+    lines.push(`5h · ${100 - fiveHour.utilization}% left · resets ${formatRelativeReset(fiveHour.resetsAt)}`);
+    if (showSevenDay) {
+      lines.push(`7d · ${100 - sevenDay.utilization}% left · resets ${formatRelativeReset(sevenDay.resetsAt)}`);
+    }
+  } else {
+    lines.push(status.message ?? `Claude usage: ${status.state}`);
+  }
+  if (schedulerLine) lines.push(schedulerLine);
+  return lines;
+}
+
+function codexTooltipLines(status: CodexUsageStatus): string[] {
+  if (status.state === 'ok' && status.snapshot) {
+    const { primary, secondary } = status.snapshot;
+    const lines = [`Weekly · ${100 - primary.utilization}% left · resets ${formatRelativeReset(primary.resetsAt)}`];
+    if (secondary) {
+      lines.push(`Secondary · ${100 - secondary.utilization}% left · resets ${formatRelativeReset(secondary.resetsAt)}`);
+    }
+    return lines;
+  }
+  return [status.message ?? `Codex usage: ${status.state}`];
+}
+
+function antigravityTooltipLines(status: AntigravityUsageStatus, visible: AntigravityModelWindow[]): string[] {
+  if (status.state === 'ok' && visible.length > 0) {
+    return visible.map((m) => `${m.displayName} · ${Math.round(100 - m.utilization)}% · resets ${formatRelativeReset(m.resetsAt)}`);
+  }
+  if (status.state === 'ok') return ['No gated quotas reported.'];
+  return [status.message ?? `Antigravity usage: ${status.state}`];
+}
+
+// Pick the two Antigravity models surfaced on the bubble. Shared by the bars
+// and the tooltip so both stay in sync.
+function visibleAntigravityModels(status: AntigravityUsageStatus): AntigravityModelWindow[] {
+  if (status.state !== 'ok' || !status.snapshot) return [];
+  return BUBBLE_MODEL_MATCHERS
+    .map((re) => status.snapshot!.models.find((m) => re.test(m.displayName) || re.test(m.modelKey)))
+    .filter((m): m is AntigravityModelWindow => !!m);
+}
+
+interface BarDims { width: number; height: number; gap: number }
+
 interface UsageBarsProps {
   status: UsageStatus;
   isDark: boolean;
   showSevenDay: boolean;
+  bar: BarDims;
 }
 
-const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark, showSevenDay }) => {
+const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark, showSevenDay, bar }) => {
   const isOk = status.state === 'ok' && !!status.snapshot;
   const fiveHour: UsageWindow | undefined = status.snapshot?.fiveHour;
   const sevenDay: UsageWindow | undefined = status.snapshot?.sevenDay;
@@ -84,7 +170,7 @@ const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark, showSevenDay }) =
     return (
       <div
         className='relative rounded-full overflow-hidden'
-        style={{ width: 50, height: 3, background: trackColor }}
+        style={{ width: bar.width, height: bar.height, background: trackColor }}
       >
         {widthPct > 0 && (
           <div
@@ -96,16 +182,10 @@ const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark, showSevenDay }) =
     );
   };
 
-  const tooltip = isOk && fiveHour && sevenDay
-    ? showSevenDay
-      ? `5h: ${100 - fiveHour.utilization}% available · resets ${formatRelativeReset(fiveHour.resetsAt)}\n7d: ${100 - sevenDay.utilization}% available · resets ${formatRelativeReset(sevenDay.resetsAt)}`
-      : `5h: ${100 - fiveHour.utilization}% available · resets ${formatRelativeReset(fiveHour.resetsAt)}`
-    : status.message ?? `Claude usage: ${status.state}`;
-
   return (
     <div
-      className='flex flex-col items-center gap-[2px] mt-1 pointer-events-auto'
-      title={tooltip}
+      className='flex flex-col items-center mt-1 pointer-events-auto'
+      style={{ gap: bar.gap }}
     >
       {renderBar(fiveHour)}
       {showSevenDay && renderBar(sevenDay)}
@@ -116,9 +196,10 @@ const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark, showSevenDay }) =
 interface CodexUsageBarsProps {
   status: CodexUsageStatus;
   isDark: boolean;
+  bar: BarDims;
 }
 
-const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark }) => {
+const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark, bar }) => {
   const isOk = status.state === 'ok' && !!status.snapshot;
   const primary = status.snapshot?.primary;
   const secondary = status.snapshot?.secondary;
@@ -133,7 +214,7 @@ const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark }) => {
     return (
       <div
         className='relative rounded-full overflow-hidden'
-        style={{ width: 50, height: 3, background: trackColor }}
+        style={{ width: bar.width, height: bar.height, background: trackColor }}
       >
         {widthPct > 0 && (
           <div
@@ -145,16 +226,10 @@ const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark }) => {
     );
   };
 
-  const tooltip = isOk && primary
-    ? secondary
-      ? `Primary: ${100 - primary.utilization}% available · resets ${formatRelativeReset(primary.resetsAt)}\nSecondary: ${100 - secondary.utilization}% available · resets ${formatRelativeReset(secondary.resetsAt)}`
-      : `Weekly: ${100 - primary.utilization}% available · resets ${formatRelativeReset(primary.resetsAt)}`
-    : status.message ?? `Codex usage: ${status.state}`;
-
   return (
     <div
-      className='flex flex-col items-center gap-[2px] mt-1 pointer-events-auto'
-      title={tooltip}
+      className='flex flex-col items-center mt-1 pointer-events-auto'
+      style={{ gap: bar.gap }}
     >
       {renderBar(primary)}
       {secondary && renderBar(secondary)}
@@ -174,14 +249,12 @@ const BUBBLE_MODEL_MATCHERS: Array<RegExp> = [
 interface AntigravityUsageBarsProps {
   status: AntigravityUsageStatus;
   isDark: boolean;
+  bar: BarDims;
 }
 
-const AntigravityUsageBars: React.FC<AntigravityUsageBarsProps> = ({ status, isDark }) => {
+const AntigravityUsageBars: React.FC<AntigravityUsageBarsProps> = ({ status, isDark, bar }) => {
   const isOk = status.state === 'ok' && !!status.snapshot;
-  const allModels: AntigravityModelWindow[] = isOk ? status.snapshot!.models : [];
-  const visible = BUBBLE_MODEL_MATCHERS
-    .map((re) => allModels.find((m) => re.test(m.displayName) || re.test(m.modelKey)))
-    .filter((m): m is AntigravityModelWindow => !!m);
+  const visible = visibleAntigravityModels(status);
 
   const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
   const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
@@ -194,7 +267,7 @@ const AntigravityUsageBars: React.FC<AntigravityUsageBarsProps> = ({ status, isD
       <div
         key={model?.modelKey ?? '_'}
         className='relative rounded-full overflow-hidden'
-        style={{ width: 50, height: 3, background: trackColor }}
+        style={{ width: bar.width, height: bar.height, background: trackColor }}
       >
         {widthPct > 0 && (
           <div
@@ -206,22 +279,14 @@ const AntigravityUsageBars: React.FC<AntigravityUsageBarsProps> = ({ status, isD
     );
   };
 
-  const tooltip = isOk && visible.length > 0
-    ? visible
-        .map((m) => `${m.displayName}: ${Math.round(100 - m.utilization)}% · resets ${formatRelativeReset(m.resetsAt)}`)
-        .join('\n')
-    : isOk
-      ? 'Antigravity: no gated quotas reported.'
-      : status.message ?? `Antigravity usage: ${status.state}`;
-
   // When OK but empty, render one placeholder bar so the bubble height
   // stays consistent with other tools' usage display.
   const bars = isOk && visible.length === 0 ? [undefined] : visible;
 
   return (
     <div
-      className='flex flex-col items-center gap-[2px] mt-1 pointer-events-auto'
-      title={tooltip}
+      className='flex flex-col items-center mt-1 pointer-events-auto'
+      style={{ gap: bar.gap }}
     >
       {bars.map((m) => renderBar(m))}
     </div>
@@ -235,11 +300,33 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const isDark = useDarkMode();
   const meta = TOOL_META[toolId];
   const [hovered, setHovered] = useState(false);
-  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
   const [showSevenDay, setShowSevenDay] = useState(true);
   const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
+  const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
+  const [bubbleSize, setBubbleSize] = useState<BubbleSize>('medium');
+  const [bubbleSound, setBubbleSound] = useState<BubbleSoundId>('pop');
+
+  // Pull bubble appearance/behavior prefs on mount and stay in sync with live
+  // edits from Settings. Every bubble listens so size/sound changes apply
+  // without recreating the window.
+  useEffect(() => {
+    window.electron
+      .invoke('get-config')
+      .then((cfg: { bubble?: { size?: BubbleSize; sound?: BubbleSoundId } } | null) => {
+        if (cfg?.bubble?.size) setBubbleSize(cfg.bubble.size);
+        if (cfg?.bubble?.sound) setBubbleSound(cfg.bubble.sound);
+      })
+      .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] get-config (bubble) failed`, e));
+
+    const handler = (_event: unknown, cfg: { size?: BubbleSize; sound?: BubbleSoundId }) => {
+      if (cfg?.size) setBubbleSize(cfg.size);
+      if (cfg?.sound) setBubbleSound(cfg.sound);
+    };
+    window.electron.on('bubble:config-updated', handler);
+    return () => window.electron.off('bubble:config-updated', handler);
+  }, [toolId]);
 
   // Subscribe to usage updates. Only meaningful for the Claude bubble, but
   // we listen in every renderer so the IPC channel doesn't depend on bubble
@@ -309,6 +396,21 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     };
   }, [toolId]);
 
+  // Scheduler window-state glance — only meaningful for the Claude bubble.
+  useEffect(() => {
+    if (toolId !== 'claude-code') return;
+    window.electron
+      .invoke('scheduler:get-current')
+      .then((s: SchedulerStatus) => setSchedulerStatus(s))
+      .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] scheduler:get-current failed`, e));
+
+    const handler = (_event: unknown, incoming: SchedulerStatus) => setSchedulerStatus(incoming);
+    window.electron.on('scheduler:updated', handler);
+    return () => {
+      window.electron.off('scheduler:updated', handler);
+    };
+  }, [toolId]);
+
   useEffect(() => {
     logger.debug(`[Bubble:${toolId}] mounted href=${window.location.href}`);
 
@@ -348,57 +450,23 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
 
   // Subtle chime when the bubble flips into "waiting for input" so the user
   // can context-switch away without missing it. Tracks prior state to fire
-  // only on the transition, never on the initial mount or re-renders.
+  // only on the transition, never on the initial mount or re-renders. The
+  // chime sound is user-selectable (see bubbleSound); 'none' is silent.
   const prevState = useRef<AgentState | null>(null);
-  const chimeRef = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => {
-    if (typeof Audio === 'undefined') return;
-    const audio = new Audio('./media/pop.wav');
-    audio.volume = 0.4;
-    audio.preload = 'auto';
-    audio.addEventListener('error', () => {
-      logger.warn(`[Bubble:${toolId}] chime failed to load`, audio.error);
-    });
-    audio.addEventListener('canplaythrough', () => {
-      // console.log(`[Bubble:${toolId}] chime ready`);
-    });
-    chimeRef.current = audio;
-    audio.load();
-  }, [toolId]);
   useEffect(() => {
     const prev = prevState.current;
     prevState.current = state;
     if (prev === null || prev === 'waiting' || state !== 'waiting') return;
-    const audio = chimeRef.current;
-    if (!audio) return;
-    // console.log(`[Bubble:${toolId}] playing chime (${prev} → waiting)`);
-    audio.currentTime = 0;
-    const result = audio.play();
-    if (result && typeof result.then === 'function') {
-      // result.then(
-      //   () => console.log(`[Bubble:${toolId}] chime started`),
-      //   (err) => console.warn(`[Bubble:${toolId}] chime play() rejected`, err),
-      // );
-    }
-  }, [state, toolId]);
+    playBubbleSound(bubbleSound);
+  }, [state, bubbleSound]);
 
-  const onMouseEnter = useCallback(() => {
-    if (!TOOLTIP_ENABLED) return;
-    if (leaveTimer.current) {
-      clearTimeout(leaveTimer.current);
-      leaveTimer.current = null;
-    }
-    setHovered(true);
-    window.electron.send('bubble-hover', { hovered: true });
-  }, []);
-
+  // Hover drives the rich tooltip overlay (a separate window — see
+  // TooltipManager). We only flip `hovered`; the payload + show/hide IPC is
+  // handled by the effect below so the content stays live while hovering.
+  const onMouseEnter = useCallback(() => setHovered(true), []);
   const onMouseLeave = useCallback(() => {
-    if (!TOOLTIP_ENABLED) return;
-    leaveTimer.current = setTimeout(() => {
-      leaveTimer.current = null;
-      setHovered(false);
-      window.electron.send('bubble-hover', { hovered: false });
-    }, 120);
+    setHovered(false);
+    window.electron.send('tooltip:hide');
   }, []);
 
   // Make transparent areas of the window click-through (paused during drag)
@@ -510,8 +578,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
         const agentPid = status?.agentPid;
         const agentPidChain = status?.agentPidChain;
         logger.debug(
-          `[Bubble:${toolId}] click detected, sending focus-tool pid=${agentPid ?? 'none'} chain=${
-            agentPidChain ? agentPidChain.join(',') : 'none'
+          `[Bubble:${toolId}] click detected, sending focus-tool pid=${agentPid ?? 'none'} chain=${agentPidChain ? agentPidChain.join(',') : 'none'
           }`,
         );
         window.electron.send('focus-tool', { toolId, agentPid, agentPidChain });
@@ -524,6 +591,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
 
   const { fill, glow, ring } = colorsFor(state, isDark);
   const borderColor = isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.12)';
+  const dims = ORB_DIMENSIONS[bubbleSize] ?? ORB_DIMENSIONS.medium;
 
   const animations: Record<AgentState, any> = {
     idle: {
@@ -568,81 +636,71 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     error: 'Error',
   };
 
+  // Assemble the consolidated tooltip card content for this tool.
+  const tooltipPayload = useMemo<BubbleTooltipPayload>(() => {
+    const subtitle: string[] = [stateLabel[state]];
+    if (status?.activeAgents && status.activeAgents > 0) {
+      subtitle.push(`${status.activeAgents} agent${status.activeAgents > 1 ? 's' : ''}`);
+    }
+    subtitle.push(formatLastSeen(status?.lastUpdated));
+
+    const lines: string[] = [];
+    if (toolId === 'claude-code') {
+      lines.push(...claudeTooltipLines(usageStatus, showSevenDay));
+    } else if (toolId === 'openai-codex') {
+      lines.push(...codexTooltipLines(codexUsageStatus));
+    } else if (toolId === 'antigravity-cli') {
+      lines.push(...antigravityTooltipLines(antigravityUsageStatus, visibleAntigravityModels(antigravityUsageStatus)));
+    }
+    if (status?.currentTask) lines.unshift(status.currentTask);
+
+    return { title: meta.label, subtitle: subtitle.join(' · '), lines, accent: glow };
+  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow]);
+
+  // Push fresh content to the overlay while hovering (so usage updates show
+  // live); the show/position/visibility is handled by the main process.
+  useEffect(() => {
+    if (!hovered) return;
+    window.electron.send('tooltip:show', tooltipPayload);
+  }, [hovered, tooltipPayload]);
+
+  // Heartbeat while hovering: pings keep the overlay alive (resetting its
+  // watchdog), and the cleanup guarantees a hide when the pointer leaves OR
+  // the bubble unmounts (e.g. the tool is toggled off) without a mouseleave.
+  useEffect(() => {
+    if (!hovered) return;
+    const heartbeat = window.setInterval(() => {
+      window.electron.send('tooltip:ping');
+    }, 1500);
+    return () => {
+      window.clearInterval(heartbeat);
+      window.electron.send('tooltip:hide');
+    };
+  }, [hovered]);
+
+  // The main process owns the authoritative hover check (it polls the real
+  // cursor against this bubble's rect, since DOM mouseleave is unreliable on
+  // the tiny click-through window). When it dismisses, clear our hover state
+  // so the heartbeat stops and we don't re-show on the next content update.
+  useEffect(() => {
+    const handler = () => setHovered(false);
+    window.electron.on('tooltip:dismissed', handler);
+    return () => window.electron.off('tooltip:dismissed', handler);
+  }, []);
+
   return (
     <div
       className='flex flex-col items-center justify-end h-full w-full pb-2'
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      {/* Tooltip — occupies the top portion when window expands */}
-      {TOOLTIP_ENABLED && (
-        <motion.div
-          initial={false}
-          animate={{ opacity: hovered ? 1 : 0, y: hovered ? 0 : 6 }}
-          transition={{ duration: 0.15, ease: 'easeOut' }}
-          className='w-full px-2 mb-2 pointer-events-none'
-          style={{ minHeight: 0 }}
-        >
-          <div
-            className='rounded-xl px-3 py-2 text-left'
-            style={{
-              background: isDark
-                ? 'rgba(15,15,20,0.82)'
-                : 'rgba(255,255,255,0.82)',
-              backdropFilter: 'blur(16px)',
-              WebkitBackdropFilter: 'blur(16px)',
-              border: `1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
-              boxShadow: isDark
-                ? '0 4px 20px rgba(0,0,0,0.5)'
-                : '0 4px 20px rgba(0,0,0,0.12)',
-            }}
-          >
-            <p
-              className='text-[11px] font-semibold leading-tight truncate'
-              style={{
-                color: isDark ? 'rgba(255,255,255,0.95)' : 'rgba(0,0,0,0.85)',
-              }}
-            >
-              {meta.label}
-            </p>
-            <p
-              className='text-[10px] mt-0.5'
-              style={{
-                color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)',
-              }}
-            >
-              {stateLabel[state]}
-              {status?.activeAgents
-                ? ` · ${status.activeAgents} agent${status.activeAgents > 1 ? 's' : ''}`
-                : ''}
-            </p>
-            {status?.currentTask && (
-              <p
-                className='text-[10px] mt-1 truncate'
-                style={{
-                  color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)',
-                }}
-              >
-                {status.currentTask}
-              </p>
-            )}
-            <p
-              className='text-[9px] mt-1'
-              style={{
-                color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)',
-              }}
-            >
-              {formatLastSeen(status?.lastUpdated)}
-            </p>
-          </div>
-        </motion.div>
-      )}
-
       <motion.div
         onMouseDown={onMouseDown}
         animate={animations[state]}
-        className='relative w-12 h-12 rounded-full flex items-center justify-center cursor-pointer select-none shrink-0'
+        className='relative rounded-full flex items-center justify-center cursor-pointer select-none shrink-0'
         style={{
+          width: dims.orb,
+          height: dims.orb,
           marginTop: '5px',
           background: `radial-gradient(circle, ${fill} 0%, rgba(128,128,128,0.06) 100%)`,
           backdropFilter: 'blur(14px)',
@@ -657,8 +715,10 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           src={meta.icon}
           alt={meta.label}
           draggable={false}
-          className='w-6 h-6 object-contain'
+          className='object-contain'
           style={{
+            width: dims.icon,
+            height: dims.icon,
             filter: isDark ? 'none' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))',
           }}
         />
@@ -668,8 +728,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
-            className='absolute w-[56px] h-[56px] rounded-full'
-            style={{ border: `2px dotted ${ring}` }}
+            className='absolute rounded-full'
+            style={{ width: dims.ring, height: dims.ring, border: `2px dotted ${ring}` }}
           />
         )}
 
@@ -678,8 +738,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 2.5, repeat: Infinity, ease: 'linear' }}
-            className='absolute w-[56px] h-[56px] rounded-full'
-            style={{ border: `2px dashed ${ring}` }}
+            className='absolute rounded-full'
+            style={{ width: dims.ring, height: dims.ring, border: `2px dashed ${ring}` }}
           />
         )}
 
@@ -702,26 +762,27 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
               guardrailSignal.decision === 'block'
                 ? { opacity: 1 }
                 : {
-                    opacity: [0.4, 1, 0.4],
-                    boxShadow: [
-                      '0 0 0px 0px rgba(245,158,11,0.0)',
-                      '0 0 10px 4px rgba(245,158,11,0.7)',
-                      '0 0 0px 0px rgba(245,158,11,0.0)',
-                    ],
-                  }
+                  opacity: [0.4, 1, 0.4],
+                  boxShadow: [
+                    '0 0 0px 0px rgba(245,158,11,0.0)',
+                    '0 0 10px 4px rgba(245,158,11,0.7)',
+                    '0 0 0px 0px rgba(245,158,11,0.0)',
+                  ],
+                }
             }
             transition={
               guardrailSignal.decision === 'block'
                 ? { duration: 0.2 }
                 : { duration: 1.2, repeat: Infinity, ease: 'easeInOut' }
             }
-            className='absolute w-[58px] h-[58px] rounded-full pointer-events-none'
+            className='absolute rounded-full pointer-events-none'
             style={{
-              border: `2px solid ${
-                guardrailSignal.decision === 'block'
-                  ? (isDark ? 'rgba(239,68,68,0.95)' : 'rgba(220,38,38,0.95)')
-                  : (isDark ? 'rgba(245,158,11,0.85)' : 'rgba(217,119,6,0.85)')
-              }`,
+              width: dims.ring + 2,
+              height: dims.ring + 2,
+              border: `2px solid ${guardrailSignal.decision === 'block'
+                ? (isDark ? 'rgba(239,68,68,0.95)' : 'rgba(220,38,38,0.95)')
+                : (isDark ? 'rgba(245,158,11,0.85)' : 'rgba(217,119,6,0.85)')
+                }`,
             }}
           />
         )}
@@ -811,17 +872,22 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       {/* Claude subscription usage bars — only rendered for the Claude bubble.
           Sits below the orb; window height was sized to fit (see BUBBLE_HEIGHT). */}
       {toolId === 'claude-code' && (
-        <UsageBars status={usageStatus} isDark={isDark} showSevenDay={showSevenDay} />
+        <UsageBars
+          status={usageStatus}
+          isDark={isDark}
+          showSevenDay={showSevenDay}
+          bar={dims.bar}
+        />
       )}
 
       {/* Codex subscription usage bars — only rendered for the Codex bubble. */}
       {toolId === 'openai-codex' && (
-        <CodexUsageBars status={codexUsageStatus} isDark={isDark} />
+        <CodexUsageBars status={codexUsageStatus} isDark={isDark} bar={dims.bar} />
       )}
 
       {/* Antigravity per-model usage bars — only rendered for the Antigravity bubble. */}
       {toolId === 'antigravity-cli' && (
-        <AntigravityUsageBars status={antigravityUsageStatus} isDark={isDark} />
+        <AntigravityUsageBars status={antigravityUsageStatus} isDark={isDark} bar={dims.bar} />
       )}
     </div>
   );

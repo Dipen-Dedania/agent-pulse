@@ -1,4 +1,5 @@
 import { ToolId } from './types';
+import { CostBreakdown } from './pricing';
 
 export type TimelineRange = '7d' | '30d' | '90d';
 export type HeatmapRange = '30d' | '90d';
@@ -204,6 +205,9 @@ export interface WindowValueSlice {
   cacheRead: number;
   cacheWrite: number;
   sessions: number;
+  // Dollar cost split per token class (sums to costUsd). Lets the UI show the
+  // breakdown behind the total, including the discounted cache contributions.
+  costBreakdown: CostBreakdown;
 }
 
 export interface WindowValuePayload {

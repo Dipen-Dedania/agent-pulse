@@ -32,8 +32,8 @@ describe('rateForModel', () => {
 });
 
 describe('estimateCost', () => {
-  it('prices each token class with the cache split (Opus)', () => {
-    // Opus: $15 in / $75 out / $18.75 cacheWrite / $1.50 cacheRead per 1M.
+  it('prices each token class with the cache split (Opus 4.5+)', () => {
+    // Opus 4.5+: $5 in / $25 out / $6.25 cacheWrite / $0.50 cacheRead per 1M.
     const { costUsd, priced } = estimateCost('claude-opus-4-7', {
       tokensIn: 1_000_000,
       tokensOut: 1_000_000,
@@ -41,7 +41,15 @@ describe('estimateCost', () => {
       cacheRead: 1_000_000,
     });
     expect(priced).toBe(true);
-    expect(costUsd).toBeCloseTo(15 + 75 + 18.75 + 1.5, 6);
+    expect(costUsd).toBeCloseTo(5 + 25 + 6.25 + 0.5, 6);
+  });
+
+  it('prices legacy Opus (3/4/4.1) at the old $15/$75', () => {
+    const { costUsd } = estimateCost('claude-opus-4-1-20250805', {
+      tokensIn: 1_000_000,
+      tokensOut: 1_000_000,
+    });
+    expect(costUsd).toBeCloseTo(15 + 75, 6);
   });
 
   it('scales linearly below 1M tokens', () => {
@@ -52,7 +60,7 @@ describe('estimateCost', () => {
 
   it('treats missing token fields as zero', () => {
     const { costUsd } = estimateCost('claude-opus-4-7', { tokensOut: 1_000_000 });
-    expect(costUsd).toBeCloseTo(75, 6);
+    expect(costUsd).toBeCloseTo(25, 6);
   });
 
   it('returns unpriced zero for unknown models', () => {

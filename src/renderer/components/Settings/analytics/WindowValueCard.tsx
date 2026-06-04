@@ -3,14 +3,26 @@ import { WindowValueSlice } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { formatUsd } from '../../../../common/pricing';
 import { useWindowValue } from './useAnalytics';
-import { Card, EmptyState, InfoPill, SkeletonLine, formatCompactNumber } from './shared';
+import { Card, CostBreakdownContent, EmptyState, InfoPill, InfoTooltip, SkeletonLine, formatCompactNumber } from './shared';
 
 const WindowBlock: React.FC<{ label: string; slice: WindowValueSlice }> = ({ label, slice }) => (
   <div className='flex-1 min-w-0 bg-slate-900/40 border border-slate-700/40 rounded-xl p-4'>
     <p className='text-[10px] uppercase tracking-widest text-slate-500 mb-1'>{label}</p>
-    <p className='text-2xl font-bold text-emerald-300 leading-tight font-mono tabular-nums'>
-      {formatUsd(slice.costUsd)}
-    </p>
+    <div className='flex items-center gap-1.5'>
+      <p className='text-2xl font-bold text-emerald-300 leading-tight font-mono tabular-nums'>
+        {formatUsd(slice.costUsd)}
+      </p>
+      <InfoTooltip label={`${label} cost breakdown`}>
+        <CostBreakdownContent
+          tokensIn={slice.tokensIn}
+          tokensOut={slice.tokensOut}
+          cacheWrite={slice.cacheWrite}
+          cacheRead={slice.cacheRead}
+          breakdown={slice.costBreakdown}
+          totalUsd={slice.costUsd}
+        />
+      </InfoTooltip>
+    </div>
     <p className='text-[11px] text-slate-500 mt-1 font-mono'>
       in {formatCompactNumber(slice.tokensIn)} · out {formatCompactNumber(slice.tokensOut)}
       {' · '}cache {formatCompactNumber(slice.cacheRead)}

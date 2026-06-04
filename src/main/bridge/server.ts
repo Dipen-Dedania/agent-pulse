@@ -16,7 +16,18 @@ import {
 export interface BridgeOptions {
   getGuardrailConfig?: () => GuardrailConfig;
   onGuardrailEvent?: (event: GuardrailEvent) => void;
+  // Called when the bridge cannot bind its port after exhausting retries.
+  // Lets the main process surface a clean notification instead of letting the
+  // listen error escape as a fatal uncaught exception ("A JavaScript error
+  // occurred in the main process").
+  onListenError?: (err: NodeJS.ErrnoException, port: number) => void;
 }
+
+// How many times to retry binding when the port is busy, and how long to wait
+// between attempts. Covers the common case where a previous instance (or an
+// updater-relaunched copy) is still releasing the socket during its shutdown.
+const LISTEN_RETRY_LIMIT = 5;
+const LISTEN_RETRY_DELAY_MS = 500;
 
 // Claude Code hook event names → AgentState
 // `waiting` = agent is *blocked* on the user (permission grant / elicitation response).
@@ -69,6 +80,9 @@ const KIRO_IDLE_EVENTS    = new Set(['postToolUse']);
 // injected by our hook script). Antigravity supports five events; PreInvocation/PreToolUse/
 // PostToolUse keep the loop alive, while PostInvocation/Stop mark turn boundaries.
 // There is no `Notification`-style event, so `waiting` is unreachable for this tool.
+// There is also no dedicated failure event: a turn that errors out still fires a
+// normal `Stop`, signalling the failure via `terminationReason: "ERROR"` + a top-level
+// `error` string in the payload. normalizePayload inspects those to emit `error`.
 const ANTIGRAVITY_WORKING_EVENTS = new Set(['PreInvocation', 'PreToolUse', 'PostToolUse']);
 const ANTIGRAVITY_IDLE_EVENTS    = new Set(['PostInvocation', 'Stop']);
 
@@ -80,6 +94,7 @@ export class StatusBridgeServer {
   private stateManager: StatusStateManager;
   private port: number = BRIDGE_PORT;
   private options: BridgeOptions;
+  private listenAttempts = 0;
 
   constructor(stateManager: StatusStateManager, options: BridgeOptions = {}) {
     this.stateManager = stateManager;
@@ -98,9 +113,30 @@ export class StatusBridgeServer {
   }
 
   public start() {
-    // Bind to loopback only — the bridge is a local IPC channel, never meant
-    // to accept LAN traffic. Anyone needing remote access must explicitly
-    // re-bind by editing this file.
+    // A `listen` failure is emitted as an 'error' event on net.Server. Without
+    // a listener it becomes an uncaught exception → Electron's fatal error
+    // dialog. We handle EADDRINUSE by retrying a few times (a shutting-down
+    // previous instance usually frees the socket within a second), and report
+    // anything else through onListenError so the app can degrade gracefully.
+    this.server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && this.listenAttempts < LISTEN_RETRY_LIMIT) {
+        this.listenAttempts++;
+        logger.warn(
+          `[Bridge] Port ${this.port} in use — retry ${this.listenAttempts}/${LISTEN_RETRY_LIMIT} in ${LISTEN_RETRY_DELAY_MS}ms`,
+        );
+        setTimeout(() => this.listen(), LISTEN_RETRY_DELAY_MS);
+        return;
+      }
+      logger.error(`[Bridge] Failed to bind 127.0.0.1:${this.port} (${err.code ?? 'unknown'}): ${err.message}`);
+      this.options.onListenError?.(err, this.port);
+    });
+    this.listen();
+  }
+
+  // Bind to loopback only — the bridge is a local IPC channel, never meant
+  // to accept LAN traffic. Anyone needing remote access must explicitly
+  // re-bind by editing this file.
+  private listen() {
     this.server.listen(this.port, '127.0.0.1', () => {
       logger.info(`Status Bridge running on 127.0.0.1:${this.port}`);
     });
@@ -421,9 +457,22 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
       // PascalCase ambiguity with CC/Codex events. Antigravity uses Pre/Post Tool/Invocation
       // plus Stop — no Notification-style event, so `waiting` is never produced here.
       if (data._ap_tool === 'antigravity-cli') {
+        // Antigravity has no dedicated failure event — a turn that dies (e.g.
+        // a 503 "high traffic"/no-capacity error) still fires a normal `Stop`,
+        // but the payload carries `terminationReason: "ERROR"` plus a non-empty
+        // top-level `error` string. Detect that first so a failed turn lands on
+        // `error` (red) instead of being mapped to idle by the event name below.
+        const errorMessage: string | undefined =
+          typeof data.error === 'string' && data.error.trim() ? data.error : undefined;
+        const isErrorTermination =
+          (typeof data.terminationReason === 'string' &&
+            data.terminationReason.toUpperCase() === 'ERROR') ||
+          errorMessage !== undefined;
+
         let state: AgentState;
-        if (ANTIGRAVITY_WORKING_EVENTS.has(eventName)) state = 'working';
-        else if (ANTIGRAVITY_IDLE_EVENTS.has(eventName)) state = 'idle-active';
+        if (isErrorTermination)                          state = 'error';
+        else if (ANTIGRAVITY_WORKING_EVENTS.has(eventName)) state = 'working';
+        else if (ANTIGRAVITY_IDLE_EVENTS.has(eventName))   state = 'idle-active';
         else {
           logger.debug(`Ignoring unmapped Antigravity CLI event: ${eventName}`);
           return null;
@@ -440,6 +489,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
             sessionId:   data.conversationId ?? data.session_id,
             taskSummary: toolName ? `Tool: ${toolName}` : undefined,
             model:       typeof data.model === 'string' ? data.model : undefined,
+            errorMessage,
             ...common,
           },
         };

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { ToolId, UsageStatus, CodexUsageStatus, AntigravityUsageStatus } from '../../../common/types';
+import { ToolId, UsageStatus, CodexUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
 import { UsageSection, UsageConfigUI } from './UsageSection';
 import { CodexUsageSection, CodexUsageConfigUI } from './CodexUsageSection';
 import { AntigravityUsageSection, AntigravityUsageConfigUI } from './AntigravityUsageSection';
+import { SchedulerSection, SchedulerConfigUI } from './SchedulerSection';
+import { BubbleSection } from './BubbleSection';
 import { GuardrailsTab } from './GuardrailsTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
 import { UpdatesTab } from './UpdatesTab';
@@ -184,10 +186,11 @@ const HookInfoModal: React.FC<{
 
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
-type TabId = 'hooks' | 'usage' | 'analytics' | 'guardrails' | 'updates';
+type TabId = 'hooks' | 'bubble' | 'usage' | 'analytics' | 'guardrails' | 'updates';
 
 const TABS: { id: TabId; label: string; description: string }[] = [
   { id: 'hooks',      label: 'Hooks',      description: 'Manage which AI tools show a status bubble.' },
+  { id: 'bubble',     label: 'Bubble',     description: 'Size, screen position, and inactivity sound for the bubbles.' },
   { id: 'usage',      label: 'Usage',      description: 'Monitor Claude, Codex, and Antigravity plan usage.' },
   { id: 'analytics',  label: 'Analytics',  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
   { id: 'guardrails', label: 'Guardrails', description: 'Block or warn on risky shell commands.' },
@@ -206,6 +209,11 @@ export const SettingsPanel: React.FC = () => {
   const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
   const [antigravityUsageConfig, setAntigravityUsageConfig] = useState<AntigravityUsageConfigUI | null>(null);
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
+  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfigUI | null>(null);
+  const [bubbleConfig, setBubbleConfig] = useState<BubbleConfig | null>(null);
+  const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus>({
+    mode: 'off', nextFireAt: null, nextEventKind: null, lastRun: null, openersToday: 0, windowResetsAt: null,
+  });
   const [activeTab, setActiveTab] = useState<TabId>('hooks');
   const activeTabMeta = TABS.find((t) => t.id === activeTab)!;
 
@@ -246,6 +254,8 @@ export const SettingsPanel: React.FC = () => {
         if (config?.usage) setUsageConfig(config.usage);
         if (config?.codexUsage) setCodexUsageConfig(config.codexUsage);
         if (config?.antigravityUsage) setAntigravityUsageConfig(config.antigravityUsage);
+        if (config?.scheduler) setSchedulerConfig(config.scheduler);
+        if (config?.bubble) setBubbleConfig(config.bubble);
 
         const initialUsage = await window.electron.invoke('usage:get-current').catch(() => null);
         if (initialUsage) setUsageStatus(initialUsage);
@@ -253,6 +263,8 @@ export const SettingsPanel: React.FC = () => {
         if (initialCodexUsage) setCodexUsageStatus(initialCodexUsage);
         const initialAntigravityUsage = await window.electron.invoke('antigravity-usage:get-current').catch(() => null);
         if (initialAntigravityUsage) setAntigravityUsageStatus(initialAntigravityUsage);
+        const initialScheduler = await window.electron.invoke('scheduler:get-current').catch(() => null);
+        if (initialScheduler) setSchedulerStatus(initialScheduler);
       } catch (error) {
         logger.error('[SettingsPanel] failed to initialize settings', error);
       } finally {
@@ -278,6 +290,12 @@ export const SettingsPanel: React.FC = () => {
     const handler = (_event: unknown, incoming: AntigravityUsageStatus) => setAntigravityUsageStatus(incoming);
     window.electron.on('antigravity-usage:updated', handler);
     return () => window.electron.off('antigravity-usage:updated', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: SchedulerStatus) => setSchedulerStatus(incoming);
+    window.electron.on('scheduler:updated', handler);
+    return () => window.electron.off('scheduler:updated', handler);
   }, []);
 
   const handleUsageConfigChange = async (partial: Partial<UsageConfigUI>) => {
@@ -317,6 +335,35 @@ export const SettingsPanel: React.FC = () => {
 
   const handleAntigravityUsageRefresh = () => {
     window.electron.send('antigravity-usage:refresh-now');
+  };
+
+  const handleSchedulerConfigChange = async (partial: Partial<SchedulerConfigUI>) => {
+    try {
+      const updated = await window.electron.invoke('scheduler:update-config', partial);
+      setSchedulerConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update scheduler config', e);
+    }
+  };
+
+  const handleBubbleConfigChange = async (partial: Partial<BubbleConfig>) => {
+    // Optimistically apply so the UI (selection highlight) feels instant, then
+    // reconcile with the validated config the main process returns.
+    setBubbleConfig((prev) => (prev ? { ...prev, ...partial } : prev));
+    try {
+      const updated = await window.electron.invoke('bubble:update-config', partial);
+      setBubbleConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update bubble config', e);
+    }
+  };
+
+  const handleSchedulerTestOpener = async () => {
+    try {
+      await window.electron.invoke('scheduler:test-opener');
+    } catch (e) {
+      logger.error('[SettingsPanel] test opener failed', e);
+    }
   };
 
   useEffect(() => {
@@ -593,6 +640,14 @@ export const SettingsPanel: React.FC = () => {
 
       {activeTab === 'hooks' && !loading && <StatesReference />}
 
+      {activeTab === 'bubble' && (
+        bubbleConfig ? (
+          <BubbleSection config={bubbleConfig} onChange={handleBubbleConfigChange} />
+        ) : (
+          <p className='text-slate-400 text-sm'>Bubble settings are loading…</p>
+        )
+      )}
+
       {activeTab === 'usage' && (
         <>
           {usageConfig && (
@@ -619,7 +674,15 @@ export const SettingsPanel: React.FC = () => {
               onRefresh={handleAntigravityUsageRefresh}
             />
           )}
-          {!usageConfig && !codexUsageConfig && !antigravityUsageConfig && (
+          {schedulerConfig && (
+            <SchedulerSection
+              config={schedulerConfig}
+              status={schedulerStatus}
+              onChange={handleSchedulerConfigChange}
+              onTestOpener={handleSchedulerTestOpener}
+            />
+          )}
+          {!usageConfig && !codexUsageConfig && !antigravityUsageConfig && !schedulerConfig && (
             <p className='text-slate-400 text-sm'>Usage settings are loading…</p>
           )}
         </>

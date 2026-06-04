@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ToolId } from '../common/types';
+import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId } from '../common/types';
 import { GuardrailConfig } from '../common/guardrails';
 import { logger } from '../common/logger';
 
@@ -40,6 +40,32 @@ export interface AntigravityUsageConfig {
   nudge: UsageNotificationConfig;
 }
 
+// Cowork Scheduler — opens a fresh 5-hour window on the user's schedule by
+// firing a minimal `claude -p` ping (which also refreshes the OAuth token).
+// See scheduler.md. The scheduler reads window state from UsagePoller.
+export interface SchedulerSlot {
+  time: string;      // 'HH:mm' local — the opener fires at this time
+  days: number[];    // weekdays this slot fires on: 0=Sun … 6=Sat
+  enabled: boolean;  // disable a row without deleting it
+}
+
+export interface SchedulerConfig {
+  mode: 'off' | 'fixed' | 'adaptive';
+  // fixed: user-defined slots; the opener fires at each on its enabled days.
+  fixed: SchedulerSlot[];
+  // adaptive: open a window at each block's resetsAt within work hours,
+  // capped per day. Robust to manual drift.
+  adaptive: {
+    workHours: { start: string; end: string }; // 'HH:mm' local
+    maxWindowsPerDay: number;
+  };
+  // tokenNudge: a refresh ping ~leadMs before the OAuth token's expiresAt,
+  // fired only when no opener is coming (off mode / long gaps).
+  tokenNudge: { enabled: boolean; leadMs: number };
+  // Hard cap on opener pings/day so the weekly cap can't quietly drain.
+  maxOpenersPerDay: number;
+}
+
 // Pulse Timeline (Analytics tab) settings. Persists across launches; lightweight.
 export interface AnalyticsConfig {
   redactTaskText: boolean;  // when true, task summaries are written as null
@@ -55,6 +81,7 @@ export interface UpdaterConfig {
 
 export interface UserConfig {
   enabledBubbles: Partial<Record<ToolId, boolean>>;
+  bubble: BubbleConfig;
   usage: UsageConfig;
   codexUsage: CodexUsageConfig;
   antigravityUsage: AntigravityUsageConfig;
@@ -62,6 +89,7 @@ export interface UserConfig {
   autoLaunch: boolean;
   analytics: AnalyticsConfig;
   updates: UpdaterConfig;
+  scheduler: SchedulerConfig;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse-config.json');
@@ -70,6 +98,11 @@ const DEFAULTS: UserConfig = {
   enabledBubbles: {
     'claude-code': true,
     'cursor': true,
+  },
+  bubble: {
+    size: 'medium',
+    stackPosition: 'bottom-right',
+    sound: 'pop',
   },
   usage: {
     enabled: true,
@@ -104,6 +137,16 @@ const DEFAULTS: UserConfig = {
     autoCheck: true,
     lastCheckedAt: null,
   },
+  scheduler: {
+    mode: 'off',
+    fixed: [],
+    adaptive: {
+      workHours: { start: '09:00', end: '18:00' },
+      maxWindowsPerDay: 3,
+    },
+    tokenNudge: { enabled: true, leadMs: 2 * 60 * 1000 },
+    maxOpenersPerDay: 6,
+  },
 };
 
 // Map legacy ToolId keys in persisted configs to their current names so a
@@ -113,6 +156,76 @@ const DEFAULTS: UserConfig = {
 const LEGACY_BUBBLE_KEY_RENAMES: Record<string, ToolId> = {
   'gemini-cli': 'antigravity-cli',
 };
+
+// Merge a persisted scheduler block over DEFAULTS, validating shapes so a
+// corrupt/partial file can't strand the engine. Slots are filtered to valid
+// rows; days are clamped to 0–6 integers.
+function migrateScheduler(raw: unknown): SchedulerConfig {
+  const d = DEFAULTS.scheduler;
+  if (!raw || typeof raw !== 'object') {
+    return { ...d, fixed: [], adaptive: { ...d.adaptive, workHours: { ...d.adaptive.workHours } }, tokenNudge: { ...d.tokenNudge } };
+  }
+  // Raw is parsed-from-disk JSON of unknown shape — treat as `any` and validate
+  // each field below rather than trusting the persisted structure.
+  const s = raw as any;
+  const mode: SchedulerConfig['mode'] =
+    s.mode === 'fixed' || s.mode === 'adaptive' || s.mode === 'off' ? s.mode : d.mode;
+
+  const fixed: SchedulerSlot[] = Array.isArray(s.fixed)
+    ? s.fixed
+        .filter((row: any): row is SchedulerSlot => !!row && typeof row.time === 'string')
+        .map((row: SchedulerSlot) => ({
+          time: row.time,
+          days: Array.isArray(row.days)
+            ? row.days.filter((n: unknown) => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 6)
+            : [0, 1, 2, 3, 4, 5, 6],
+          enabled: typeof row.enabled === 'boolean' ? row.enabled : true,
+        }))
+    : [];
+
+  const adaptiveRaw = s.adaptive ?? {};
+  const adaptive = {
+    workHours: {
+      start: typeof adaptiveRaw.workHours?.start === 'string' ? adaptiveRaw.workHours.start : d.adaptive.workHours.start,
+      end:   typeof adaptiveRaw.workHours?.end === 'string'   ? adaptiveRaw.workHours.end   : d.adaptive.workHours.end,
+    },
+    maxWindowsPerDay:
+      typeof adaptiveRaw.maxWindowsPerDay === 'number' && adaptiveRaw.maxWindowsPerDay >= 1
+        ? Math.floor(adaptiveRaw.maxWindowsPerDay)
+        : d.adaptive.maxWindowsPerDay,
+  };
+
+  const nudgeRaw = s.tokenNudge ?? {};
+  const tokenNudge = {
+    enabled: typeof nudgeRaw.enabled === 'boolean' ? nudgeRaw.enabled : d.tokenNudge.enabled,
+    leadMs:  typeof nudgeRaw.leadMs === 'number' && nudgeRaw.leadMs > 0 ? nudgeRaw.leadMs : d.tokenNudge.leadMs,
+  };
+
+  const maxOpenersPerDay =
+    typeof s.maxOpenersPerDay === 'number' && s.maxOpenersPerDay >= 1
+      ? Math.floor(s.maxOpenersPerDay)
+      : d.maxOpenersPerDay;
+
+  return { mode, fixed, adaptive, tokenNudge, maxOpenersPerDay };
+}
+
+// Validate a persisted bubble block against the known string unions, falling
+// back to defaults for any unrecognized/missing field so a hand-edited or
+// stale config can't strand the bubbles at an invalid size/corner/sound.
+function migrateBubble(raw: unknown): BubbleConfig {
+  const d = DEFAULTS.bubble;
+  const b = (raw && typeof raw === 'object' ? raw : {}) as Partial<BubbleConfig>;
+  const SIZES: BubbleSize[] = ['small', 'medium', 'large'];
+  const POSITIONS: BubbleStackPosition[] = ['bottom-right', 'bottom-left', 'top-right', 'top-left'];
+  const SOUNDS: BubbleSoundId[] = ['pop', 'chime', 'ding', 'marimba', 'none'];
+  return {
+    size: SIZES.includes(b.size as BubbleSize) ? (b.size as BubbleSize) : d.size,
+    stackPosition: POSITIONS.includes(b.stackPosition as BubbleStackPosition)
+      ? (b.stackPosition as BubbleStackPosition)
+      : d.stackPosition,
+    sound: SOUNDS.includes(b.sound as BubbleSoundId) ? (b.sound as BubbleSoundId) : d.sound,
+  };
+}
 
 function migrateEnabledBubbles(raw: unknown): Partial<Record<ToolId, boolean>> {
   if (!raw || typeof raw !== 'object') return {};
@@ -142,6 +255,7 @@ export function loadConfig(): UserConfig {
         ...DEFAULTS,
         ...parsed,
         enabledBubbles: migrateEnabledBubbles(parsed.enabledBubbles),
+        bubble: migrateBubble(parsed.bubble),
         usage: {
           ...DEFAULTS.usage,
           ...usage,
@@ -173,6 +287,7 @@ export function loadConfig(): UserConfig {
           autoCheck: typeof updates.autoCheck === 'boolean' ? updates.autoCheck : DEFAULTS.updates.autoCheck,
           lastCheckedAt: typeof updates.lastCheckedAt === 'number' ? updates.lastCheckedAt : null,
         },
+        scheduler: migrateScheduler(parsed.scheduler),
       };
     }
   } catch {
@@ -180,6 +295,7 @@ export function loadConfig(): UserConfig {
   }
   return {
     ...DEFAULTS,
+    bubble: { ...DEFAULTS.bubble },
     usage: {
       ...DEFAULTS.usage,
       capWarning: { ...DEFAULTS.usage.capWarning },
@@ -202,11 +318,17 @@ export function loadConfig(): UserConfig {
     },
     analytics: { ...DEFAULTS.analytics },
     updates: { ...DEFAULTS.updates },
+    scheduler: migrateScheduler(undefined),
   };
 }
 
 export function saveConfig(config: UserConfig): void {
   try {
+    // ~/.claude may not exist on a machine where Claude Code was never
+    // installed (e.g. a fresh Linux box), so create the parent dir before
+    // writing — otherwise writeFileSync throws ENOENT and config never
+    // persists across launches.
+    fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
   } catch (e) {
     logger.error('Failed to save user config:', e);

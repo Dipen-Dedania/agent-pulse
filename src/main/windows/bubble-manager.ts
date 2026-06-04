@@ -4,8 +4,18 @@ import fs from 'fs';
 import os from 'os';
 import { execFile } from 'child_process';
 import open, { openApp } from 'open';
-import { ToolId } from '../../common/types';
+import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition } from '../../common/types';
 import { logger } from '../../common/logger';
+
+// Pixel footprint of the bubble window per size. Width hugs the orb; height is
+// taller so Claude's usage bars render in the bottom strip without a per-tool
+// resize. `tooltip` is the extra height the hover tooltip would claim (the
+// tooltip is currently disabled, but the value is kept consistent per size).
+const BUBBLE_DIMENSIONS: Record<BubbleSize, { width: number; height: number; tooltip: number }> = {
+  small:  { width: 58, height: 76,  tooltip: 90 },
+  medium: { width: 70, height: 90,  tooltip: 110 },
+  large:  { width: 86, height: 110, tooltip: 132 },
+};
 
 // ─── macOS / Linux ────────────────────────────────────────────────────────────
 // macOS: `open -a <name>` activates the existing window (or launches if not running)
@@ -375,32 +385,64 @@ function getAppIconPath(): string {
 export class BubbleManager {
   private bubbles: Map<ToolId, BrowserWindow> = new Map();
 
-  // Width matches the orb area; height is taller so Claude's usage bars can
-  // render in the bottom strip without resizing the window per-tool. Other
-  // tools just leave that strip transparent.
-  private static readonly BUBBLE_WIDTH = 70;
-  private static readonly BUBBLE_HEIGHT = 90;
-  private static readonly TOOLTIP_HEIGHT = 110;
   private static readonly EDGE_PADDING = 20;
   private static readonly STACK_GAP = 4;
+
+  // Live dimensions + anchor, derived from the user's BubbleConfig. Mutated by
+  // applyConfig() and read everywhere a window is sized or placed.
+  private width = BUBBLE_DIMENSIONS.medium.width;
+  private height = BUBBLE_DIMENSIONS.medium.height;
+  private tooltipHeight = BUBBLE_DIMENSIONS.medium.tooltip;
+  private stackPosition: BubbleStackPosition = 'bottom-right';
+
+  constructor(config?: BubbleConfig) {
+    if (config) this.applyDims(config);
+  }
+
+  private applyDims(config: BubbleConfig) {
+    const d = BUBBLE_DIMENSIONS[config.size] ?? BUBBLE_DIMENSIONS.medium;
+    this.width = d.width;
+    this.height = d.height;
+    this.tooltipHeight = d.tooltip;
+    this.stackPosition = config.stackPosition;
+  }
+
+  // Re-apply size/position prefs to every live bubble. Called when the user
+  // changes appearance in Settings — restack repositions and resizes in place.
+  public applyConfig(config: BubbleConfig) {
+    logger.debug('[BubbleManager] applyConfig:', JSON.stringify(config));
+    this.applyDims(config);
+    this.restackBubbles('applyConfig');
+  }
 
   private isUsableBubble(window: BrowserWindow): boolean {
     return !window.isDestroyed() && !window.webContents.isDestroyed();
   }
 
+  // Resize/move a bubble window, briefly relaxing the min/max clamp (set at
+  // creation to block WM resizes) so growing past the old max — or shrinking
+  // below the old min — isn't rejected. Order-independent for grow vs shrink.
+  private applyBounds(window: BrowserWindow, x: number, y: number, width: number, height: number) {
+    window.setMinimumSize(1, 1);
+    window.setMaximumSize(10000, 10000);
+    window.setBounds({ x, y, width, height });
+    window.setMinimumSize(width, height);
+    window.setMaximumSize(width, height);
+  }
+
   private getStackPosition(index: number) {
     const { workArea } = screen.getPrimaryDisplay();
-    const x =
-      workArea.x +
-      workArea.width -
-      BubbleManager.BUBBLE_WIDTH -
-      BubbleManager.EDGE_PADDING;
-    const y =
-      workArea.y +
-      workArea.height -
-      BubbleManager.BUBBLE_HEIGHT -
-      BubbleManager.EDGE_PADDING -
-      index * (BubbleManager.BUBBLE_HEIGHT + BubbleManager.STACK_GAP);
+    const onLeft = this.stackPosition === 'bottom-left' || this.stackPosition === 'top-left';
+    const onTop = this.stackPosition === 'top-left' || this.stackPosition === 'top-right';
+
+    const x = onLeft
+      ? workArea.x + BubbleManager.EDGE_PADDING
+      : workArea.x + workArea.width - this.width - BubbleManager.EDGE_PADDING;
+
+    const offset = index * (this.height + BubbleManager.STACK_GAP);
+    const y = onTop
+      ? workArea.y + BubbleManager.EDGE_PADDING + offset
+      : workArea.y + workArea.height - this.height - BubbleManager.EDGE_PADDING - offset;
 
     return { x, y };
   }
@@ -423,18 +465,13 @@ export class BubbleManager {
       if (
         bounds.x !== x ||
         bounds.y !== y ||
-        bounds.width !== BubbleManager.BUBBLE_WIDTH ||
-        bounds.height !== BubbleManager.BUBBLE_HEIGHT
+        bounds.width !== this.width ||
+        bounds.height !== this.height
       ) {
         logger.debug(
-          `[BubbleManager] restacking ${toolId} for ${reason}: from=${JSON.stringify(bounds)} to=${JSON.stringify({ x, y, width: BubbleManager.BUBBLE_WIDTH, height: BubbleManager.BUBBLE_HEIGHT })}`,
+          `[BubbleManager] restacking ${toolId} for ${reason}: from=${JSON.stringify(bounds)} to=${JSON.stringify({ x, y, width: this.width, height: this.height })}`,
         );
-        window.setBounds({
-          x,
-          y,
-          width: BubbleManager.BUBBLE_WIDTH,
-          height: BubbleManager.BUBBLE_HEIGHT,
-        });
+        this.applyBounds(window, x, y, this.width, this.height);
       }
 
       if (!window.isVisible()) {
@@ -497,8 +534,8 @@ export class BubbleManager {
         win.setBounds({
           x: bounds.x + dx,
           y: bounds.y + dy,
-          width: BubbleManager.BUBBLE_WIDTH,
-          height: BubbleManager.BUBBLE_HEIGHT,
+          width: this.width,
+          height: this.height,
         });
       },
     );
@@ -523,20 +560,16 @@ export class BubbleManager {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (!win) return;
       const [x, y] = win.getPosition();
-      const totalHeight =
-        BubbleManager.BUBBLE_HEIGHT + BubbleManager.TOOLTIP_HEIGHT;
+      const totalHeight = this.height + this.tooltipHeight;
       if (hovered) {
         // Relax max constraint, expand upward so the bubble stays in place
-        win.setMaximumSize(BubbleManager.BUBBLE_WIDTH, totalHeight);
-        win.setSize(BubbleManager.BUBBLE_WIDTH, totalHeight);
-        win.setPosition(x, y - BubbleManager.TOOLTIP_HEIGHT);
+        win.setMaximumSize(this.width, totalHeight);
+        win.setSize(this.width, totalHeight);
+        win.setPosition(x, y - this.tooltipHeight);
       } else {
-        win.setPosition(x, y + BubbleManager.TOOLTIP_HEIGHT);
-        win.setSize(BubbleManager.BUBBLE_WIDTH, BubbleManager.BUBBLE_HEIGHT);
-        win.setMaximumSize(
-          BubbleManager.BUBBLE_WIDTH,
-          BubbleManager.BUBBLE_HEIGHT,
-        );
+        win.setPosition(x, y + this.tooltipHeight);
+        win.setSize(this.width, this.height);
+        win.setMaximumSize(this.width, this.height);
       }
     });
   }
@@ -569,12 +602,12 @@ export class BubbleManager {
       title: `Agent Pulse - ${toolId}`,
       x,
       y,
-      width: BubbleManager.BUBBLE_WIDTH,
-      height: BubbleManager.BUBBLE_HEIGHT,
-      minWidth: BubbleManager.BUBBLE_WIDTH,
-      minHeight: BubbleManager.BUBBLE_HEIGHT,
-      maxWidth: BubbleManager.BUBBLE_WIDTH,
-      maxHeight: BubbleManager.BUBBLE_HEIGHT,
+      width: this.width,
+      height: this.height,
+      minWidth: this.width,
+      minHeight: this.height,
+      maxWidth: this.width,
+      maxHeight: this.height,
       frame: false,
       transparent: true,
       alwaysOnTop: true,

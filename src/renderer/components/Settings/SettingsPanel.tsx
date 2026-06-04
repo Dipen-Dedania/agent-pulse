@@ -11,6 +11,7 @@ import { BubbleSection } from './BubbleSection';
 import { GuardrailsTab } from './GuardrailsTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
 import { UpdatesTab } from './UpdatesTab';
+import { usePricingSync } from '../../pricing-sync';
 
 interface ToolConfig {
   enabled: boolean;
@@ -216,6 +217,10 @@ export const SettingsPanel: React.FC = () => {
   });
   const [activeTab, setActiveTab] = useState<TabId>('hooks');
   const activeTabMeta = TABS.find((t) => t.id === activeTab)!;
+
+  // Install live LiteLLM rates; re-renders this panel (and its cost-showing
+  // children) when fresher prices arrive from the main process.
+  usePricingSync();
 
   const getBubbleStates = React.useCallback(async (
     config?: { enabledBubbles?: Partial<Record<ToolId, boolean>> },

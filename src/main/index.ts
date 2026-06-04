@@ -18,6 +18,7 @@ import { installFileLogSink } from './file-log-sink';
 import { UsagePoller } from './usage/poller';
 import { CodexUsagePoller } from './codex-usage/poller';
 import { AntigravityUsagePoller } from './antigravity-usage/poller';
+import { LlmPricingPoller } from './llm-pricing/poller';
 import { Scheduler } from './scheduler/scheduler';
 import { isAutoLaunchEnabled, setAutoLaunch } from './auto-launch';
 import { bootTimeline, TimelineHandle } from './timeline';
@@ -48,6 +49,7 @@ class AgentPulseApp {
   private usagePoller: UsagePoller;
   private codexUsagePoller: CodexUsagePoller;
   private antigravityUsagePoller: AntigravityUsagePoller;
+  private llmPricingPoller: LlmPricingPoller;
   private scheduler: Scheduler;
   private timeline: TimelineHandle | null = null;
   private updater!: UpdaterHandle;
@@ -74,6 +76,7 @@ class AgentPulseApp {
     this.usagePoller = new UsagePoller(this.userConfig.usage);
     this.codexUsagePoller = new CodexUsagePoller(this.userConfig.codexUsage);
     this.antigravityUsagePoller = new AntigravityUsagePoller(this.userConfig.antigravityUsage);
+    this.llmPricingPoller = new LlmPricingPoller();
     // Scheduler consumes the usage poller (live 5-hour resetsAt), so construct
     // it after the poller exists.
     this.scheduler = new Scheduler(this.userConfig.scheduler, { usagePoller: this.usagePoller });
@@ -104,6 +107,9 @@ class AgentPulseApp {
       this.codexUsagePoller.start();
       this.antigravityUsagePoller.init();
       this.antigravityUsagePoller.start();
+      // Refresh model pricing from LiteLLM (cached daily; bundled fallback).
+      this.llmPricingPoller.init();
+      this.llmPricingPoller.start();
 
       // Scheduler starts after the pollers so it can subscribe to live window
       // state on its first reschedule.
@@ -169,6 +175,7 @@ class AgentPulseApp {
       this.usagePoller.stop();
       this.codexUsagePoller.stop();
       this.antigravityUsagePoller.stop();
+      this.llmPricingPoller.stop();
       this.scheduler.stop();
       this.tooltipManager.destroy();
       this.timeline?.shutdown();

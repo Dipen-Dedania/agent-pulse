@@ -12,7 +12,7 @@ import { TokensTimelineCard } from './analytics/TokensTimelineCard';
 import { GuardrailsCard } from './analytics/GuardrailsCard';
 import { Card } from './analytics/shared';
 import { bustCache } from './analytics/useAnalytics';
-import { PRICING_LAST_UPDATED } from '../../../common/pricing';
+import { usePricingSync } from '../../pricing-sync';
 
 interface TimelineStatus {
   available: boolean;
@@ -106,6 +106,13 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
     onConfigChange(partial);
   };
 
+  // Provenance of the rates behind every cost on this tab.
+  const pricing = usePricingSync();
+  const priceProvenance =
+    pricing.source === 'litellm'
+      ? `from LiteLLM, updated ${pricing.lastUpdated}`
+      : `updated ${pricing.lastUpdated}`;
+
   return (
     <div>
       {!status.available && (
@@ -124,7 +131,7 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
       <GuardrailsCard />
       <PrivacyAndSettings config={config} onConfigChange={handleConfigChange} />
       <p className='text-[11px] text-slate-500 text-center mt-1 mb-3'>
-        Costs are estimates at public API list prices (updated {PRICING_LAST_UPDATED}), not your actual plan billing.
+        Costs are estimates at public API list prices ({priceProvenance}), not your actual plan billing.
         Only agents that expose token usage can be priced.
       </p>
     </div>

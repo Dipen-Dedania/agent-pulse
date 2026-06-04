@@ -10,14 +10,22 @@
 // providers. The API list price is the one honest common denominator.
 //
 // Units: USD per 1,000,000 tokens. Source: public Anthropic / OpenAI / Google
-// pricing pages. These DRIFT — treat this table as the single place to edit
-// when rates change, and bump LAST_UPDATED so stale numbers are obvious.
+// pricing pages. These DRIFT — this table is the BUNDLED FALLBACK that ships
+// with the app and works offline. At runtime the main process refreshes these
+// numbers from LiteLLM's published price list (see src/main/llm-pricing/) and
+// installs the result via `installRates`, so estimates track current list
+// prices without a code change. Each row names the LiteLLM model id it tracks
+// in `source`; rows whose source is missing from the feed keep their bundled
+// number, so a partial/stale feed can never make an estimate wildly wrong.
 //
 // Coverage reality: only agents that expose token counts get a cost. Today
-// that's Claude Code (transcript parsing) and Antigravity (hook payload).
-// Cursor, VS Code Copilot, and Kiro report no tokens, so they have no cost —
-// callers must treat a null/zero result as "not priced", not "$0 of work".
+// that's Claude Code and OpenAI Codex (both via rollout/transcript parsing)
+// and Antigravity (hook payload). Cursor, VS Code Copilot, and Kiro report no
+// tokens, so they have no cost — callers must treat a null/zero result as
+// "not priced", not "$0 of work".
 
+// Date the BUNDLED fallback numbers below were last hand-checked. When live
+// LiteLLM prices are installed, getPricingMeta() reports the fetch time instead.
 export const PRICING_LAST_UPDATED = '2026-06-02';
 
 /** USD per 1M tokens for each billable token class. */
@@ -35,55 +43,165 @@ export interface ModelRate {
 // Ordered most-specific → least-specific. The first entry whose `match`
 // substrings ALL appear in the lowercased model id wins, so put versioned /
 // size-qualified rows before the generic family fallback.
-interface RateEntry {
+export interface RateEntry {
   match: string[];     // all must be substrings of the normalized id
   rate: ModelRate;
+  /**
+   * LiteLLM model id whose live prices refresh this row's numbers (see
+   * applyLitellmPricing). Pick a key on the SAME price tier as this row — e.g.
+   * modern Opus rows track 'claude-opus-4-5' ($5/$25), NOT 'claude-opus-4-1'
+   * (the legacy $15/$75 tier). Omit to pin the row to its bundled numbers.
+   */
+  source?: string;
 }
 
 // Anthropic cache convention: 5-minute cache write ≈ 1.25× input, read ≈ 0.1×
 // input. We encode the resolved per-1M numbers directly rather than deriving
 // them, so a vendor change to the multiplier is a one-line edit.
+// The `source` on each row is the LiteLLM key whose live prices refresh that
+// row (see applyLitellmPricing). Legacy rows that share no current API model
+// (legacy Haiku) omit `source` and stay pinned to their bundled numbers.
 const TABLE: RateEntry[] = [
   // ── Anthropic — Claude ────────────────────────────────────────────────────
   // Opus 4.5 and later (4.5, 4.6, 4.7, 4.8 …): $5 / $25. Anthropic cut the Opus
   // price ~3× starting with 4.5 — modern ids ("claude-opus-4-8") MUST hit this
-  // row, not the legacy one below, or every estimate runs 3× high.
-  { match: ['opus', '4-5'], rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
-  { match: ['opus', '4-6'], rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
-  { match: ['opus', '4-7'], rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
-  { match: ['opus', '4-8'], rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
+  // row, not the legacy one below, or every estimate runs 3× high. All modern
+  // rows track 'claude-opus-4-5' (the $5/$25 tier), never 'claude-opus-4-1'.
+  { match: ['opus', '4-5'], source: 'claude-opus-4-5', rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
+  { match: ['opus', '4-6'], source: 'claude-opus-4-5', rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
+  { match: ['opus', '4-7'], source: 'claude-opus-4-5', rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
+  { match: ['opus', '4-8'], source: 'claude-opus-4-5', rate: { label: 'Claude Opus', provider: 'anthropic', input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 } },
   // Legacy Opus (3, 4, 4.1): $15 / $75.
-  { match: ['opus'], rate: { label: 'Claude Opus (legacy)', provider: 'anthropic', input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 } },
+  { match: ['opus'], source: 'claude-opus-4-1', rate: { label: 'Claude Opus (legacy)', provider: 'anthropic', input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 } },
   // Sonnet family (3.5, 3.7, 4, 4.5, 4.6 …): $3 / $15 (≤200K context tier).
-  { match: ['sonnet'], rate: { label: 'Claude Sonnet', provider: 'anthropic', input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 } },
+  { match: ['sonnet'], source: 'claude-sonnet-4-5', rate: { label: 'Claude Sonnet', provider: 'anthropic', input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 } },
   // Haiku 4.x: $1 / $5.
-  { match: ['haiku', '4'], rate: { label: 'Claude Haiku', provider: 'anthropic', input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 } },
-  // Haiku 3 / 3.5 (legacy): $0.80 / $4.
+  { match: ['haiku', '4'], source: 'claude-haiku-4-5', rate: { label: 'Claude Haiku', provider: 'anthropic', input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 } },
+  // Haiku 3 / 3.5 (legacy): $0.80 / $4. No stable current LiteLLM key → pinned.
   { match: ['haiku'], rate: { label: 'Claude Haiku (3.x)', provider: 'anthropic', input: 0.8, output: 4, cacheWrite: 1.0, cacheRead: 0.08 } },
 
   // ── OpenAI — GPT / Codex ──────────────────────────────────────────────────
   // OpenAI has no separate cache-WRITE charge; writes bill at input price, and
   // cached input reads get a discount. cacheWrite = input, cacheRead = cached.
-  { match: ['gpt-5', 'mini'], rate: { label: 'GPT-5 mini', provider: 'openai', input: 0.25, output: 2.0, cacheWrite: 0.25, cacheRead: 0.025 } },
-  { match: ['gpt-5', 'nano'], rate: { label: 'GPT-5 nano', provider: 'openai', input: 0.05, output: 0.4, cacheWrite: 0.05, cacheRead: 0.005 } },
-  { match: ['codex'],         rate: { label: 'GPT-5 Codex', provider: 'openai', input: 1.25, output: 10, cacheWrite: 1.25, cacheRead: 0.125 } },
-  { match: ['gpt-5'],         rate: { label: 'GPT-5',      provider: 'openai', input: 1.25, output: 10, cacheWrite: 1.25, cacheRead: 0.125 } },
-  { match: ['gpt-4.1', 'mini'], rate: { label: 'GPT-4.1 mini', provider: 'openai', input: 0.4, output: 1.6, cacheWrite: 0.4, cacheRead: 0.1 } },
-  { match: ['gpt-4.1'],       rate: { label: 'GPT-4.1',    provider: 'openai', input: 2, output: 8, cacheWrite: 2, cacheRead: 0.5 } },
-  { match: ['gpt-4o', 'mini'], rate: { label: 'GPT-4o mini', provider: 'openai', input: 0.15, output: 0.6, cacheWrite: 0.15, cacheRead: 0.075 } },
-  { match: ['gpt-4o'],        rate: { label: 'GPT-4o',     provider: 'openai', input: 2.5, output: 10, cacheWrite: 2.5, cacheRead: 1.25 } },
-  { match: ['o3'],            rate: { label: 'OpenAI o3',  provider: 'openai', input: 2, output: 8, cacheWrite: 2, cacheRead: 0.5 } },
+  { match: ['gpt-5', 'mini'], source: 'gpt-5-mini', rate: { label: 'GPT-5 mini', provider: 'openai', input: 0.25, output: 2.0, cacheWrite: 0.25, cacheRead: 0.025 } },
+  { match: ['gpt-5', 'nano'], source: 'gpt-5-nano', rate: { label: 'GPT-5 nano', provider: 'openai', input: 0.05, output: 0.4, cacheWrite: 0.05, cacheRead: 0.005 } },
+  { match: ['codex'],         source: 'gpt-5-codex', rate: { label: 'GPT-5 Codex', provider: 'openai', input: 1.25, output: 10, cacheWrite: 1.25, cacheRead: 0.125 } },
+  { match: ['gpt-5'],         source: 'gpt-5',      rate: { label: 'GPT-5',      provider: 'openai', input: 1.25, output: 10, cacheWrite: 1.25, cacheRead: 0.125 } },
+  { match: ['gpt-4.1', 'mini'], source: 'gpt-4.1-mini', rate: { label: 'GPT-4.1 mini', provider: 'openai', input: 0.4, output: 1.6, cacheWrite: 0.4, cacheRead: 0.1 } },
+  { match: ['gpt-4.1'],       source: 'gpt-4.1',    rate: { label: 'GPT-4.1',    provider: 'openai', input: 2, output: 8, cacheWrite: 2, cacheRead: 0.5 } },
+  { match: ['gpt-4o', 'mini'], source: 'gpt-4o-mini', rate: { label: 'GPT-4o mini', provider: 'openai', input: 0.15, output: 0.6, cacheWrite: 0.15, cacheRead: 0.075 } },
+  { match: ['gpt-4o'],        source: 'gpt-4o',     rate: { label: 'GPT-4o',     provider: 'openai', input: 2.5, output: 10, cacheWrite: 2.5, cacheRead: 1.25 } },
+  { match: ['o3'],            source: 'o3',         rate: { label: 'OpenAI o3',  provider: 'openai', input: 2, output: 8, cacheWrite: 2, cacheRead: 0.5 } },
 
   // ── Google — Gemini ───────────────────────────────────────────────────────
   // Gemini cache reads are discounted; no separate cache-write charge.
-  { match: ['gemini', '3', 'pro'],   rate: { label: 'Gemini 3 Pro',   provider: 'google', input: 2, output: 12, cacheWrite: 2, cacheRead: 0.5 } },
-  { match: ['gemini', '2.5', 'pro'], rate: { label: 'Gemini 2.5 Pro', provider: 'google', input: 1.25, output: 10, cacheWrite: 1.25, cacheRead: 0.31 } },
-  { match: ['gemini', 'flash', 'lite'], rate: { label: 'Gemini Flash-Lite', provider: 'google', input: 0.1, output: 0.4, cacheWrite: 0.1, cacheRead: 0.025 } },
-  { match: ['gemini', 'flash'], rate: { label: 'Gemini Flash', provider: 'google', input: 0.3, output: 2.5, cacheWrite: 0.3, cacheRead: 0.075 } },
-  { match: ['gemini'],          rate: { label: 'Gemini',      provider: 'google', input: 1.25, output: 10, cacheWrite: 1.25, cacheRead: 0.31 } },
+  { match: ['gemini', '3', 'pro'],   source: 'gemini-3-pro-preview', rate: { label: 'Gemini 3 Pro',   provider: 'google', input: 2, output: 12, cacheWrite: 2, cacheRead: 0.5 } },
+  { match: ['gemini', '2.5', 'pro'], source: 'gemini-2.5-pro', rate: { label: 'Gemini 2.5 Pro', provider: 'google', input: 1.25, output: 10, cacheWrite: 1.25, cacheRead: 0.31 } },
+  { match: ['gemini', 'flash', 'lite'], source: 'gemini-2.5-flash-lite', rate: { label: 'Gemini Flash-Lite', provider: 'google', input: 0.1, output: 0.4, cacheWrite: 0.1, cacheRead: 0.025 } },
+  { match: ['gemini', 'flash'], source: 'gemini-2.5-flash', rate: { label: 'Gemini Flash', provider: 'google', input: 0.3, output: 2.5, cacheWrite: 0.3, cacheRead: 0.075 } },
+  { match: ['gemini'],          source: 'gemini-2.5-pro', rate: { label: 'Gemini',      provider: 'google', input: 1.25, output: 10, cacheWrite: 1.25, cacheRead: 0.31 } },
 ];
 
 const PER_MILLION = 1_000_000;
+
+// ─── Live pricing (LiteLLM) ────────────────────────────────────────────────
+// One subset of LiteLLM's model_prices_and_context_window.json entry — only
+// the four cost fields we consume. All values are USD *per token*; multiply by
+// PER_MILLION for our per-1M units. Fields are optional because the feed omits
+// cache costs for providers that don't charge separately for them.
+export interface LitellmModelPrice {
+  input_cost_per_token?: number;
+  output_cost_per_token?: number;
+  cache_creation_input_token_cost?: number;
+  cache_read_input_token_cost?: number;
+}
+/** Map of LiteLLM model id → its price entry (the file's top-level shape). */
+export type LitellmPriceMap = Record<string, LitellmModelPrice>;
+
+/** Where the active rates came from, for the UI's freshness line. */
+export interface PricingMeta {
+  source: 'litellm' | 'bundled';
+  /** Bundled hand-check date, or the ISO date portion for a live fetch. */
+  lastUpdated: string;
+  /** Epoch ms of the live fetch; null when running on bundled numbers. */
+  fetchedAt: number | null;
+}
+
+/** The active rate table plus its provenance — handed main → renderer over IPC. */
+export interface PricingSnapshot {
+  table: RateEntry[];
+  meta: PricingMeta;
+}
+
+// The table `rateForModel` actually reads. Defaults to the bundled TABLE so the
+// app prices correctly before (or without) any live fetch. The main process and
+// each renderer install their own refreshed copy via installRates().
+let activeTable: RateEntry[] = TABLE;
+let activeMeta: PricingMeta = { source: 'bundled', lastUpdated: PRICING_LAST_UPDATED, fetchedAt: null };
+
+/** Unique LiteLLM ids the bundled table references — the set the fetcher needs. */
+export function referencedModelIds(): string[] {
+  return Array.from(new Set(TABLE.map((e) => e.source).filter((s): s is string => !!s)));
+}
+
+const perMillion = (v: number | undefined): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) && v > 0 ? v * PER_MILLION : undefined;
+
+/**
+ * Refresh a rate table's numbers from a LiteLLM price map, leaving its match
+ * patterns / labels / providers / ordering untouched. Pure — returns a new
+ * table. For each row with a `source` present in `data`, the four cost fields
+ * are replaced with the feed's per-1M numbers; any field the feed omits (or
+ * that is zero/non-finite) keeps the row's bundled value. Providers with no
+ * separate cache-write charge (OpenAI, Gemini) report no cache_creation cost,
+ * so cacheWrite falls back to the refreshed input price — matching the bundled
+ * convention. A missing `source` row is returned unchanged.
+ */
+export function applyLitellmPricing(entries: RateEntry[], data: LitellmPriceMap): RateEntry[] {
+  return entries.map((entry) => {
+    const price = entry.source ? data[entry.source] : undefined;
+    if (!price) return entry;
+    const input = perMillion(price.input_cost_per_token);
+    const base = entry.rate;
+    return {
+      ...entry,
+      rate: {
+        ...base,
+        input:      input ?? base.input,
+        output:     perMillion(price.output_cost_per_token) ?? base.output,
+        cacheRead:  perMillion(price.cache_read_input_token_cost) ?? base.cacheRead,
+        cacheWrite: perMillion(price.cache_creation_input_token_cost) ?? input ?? base.cacheWrite,
+      },
+    };
+  });
+}
+
+/** Refresh the BUNDLED table from a LiteLLM map — what the fetcher installs. */
+export function buildRatesFromLitellm(data: LitellmPriceMap): RateEntry[] {
+  return applyLitellmPricing(TABLE, data);
+}
+
+/** Install a refreshed rate table (+ its provenance) as the active source. */
+export function installRates(table: RateEntry[], meta: PricingMeta): void {
+  activeTable = table && table.length > 0 ? table : TABLE;
+  activeMeta = meta;
+}
+
+/** Revert to the bundled table — used by tests and as a safety reset. */
+export function resetRates(): void {
+  activeTable = TABLE;
+  activeMeta = { source: 'bundled', lastUpdated: PRICING_LAST_UPDATED, fetchedAt: null };
+}
+
+/** The table currently backing rateForModel (for IPC hand-off to renderers). */
+export function getActiveTable(): RateEntry[] {
+  return activeTable;
+}
+
+/** Provenance of the active rates, for the "prices updated …" UI line. */
+export function getPricingMeta(): PricingMeta {
+  return activeMeta;
+}
 
 /** Token counts for one priced unit (session, day, model row …). */
 export interface TokenCounts {
@@ -101,7 +219,7 @@ export interface TokenCounts {
 export function rateForModel(model: string | null | undefined): ModelRate | null {
   if (!model) return null;
   const id = model.toLowerCase();
-  for (const entry of TABLE) {
+  for (const entry of activeTable) {
     if (entry.match.every((m) => id.includes(m))) return entry.rate;
   }
   return null;

@@ -10,7 +10,7 @@ const COLORS = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee'
 
 const COVERAGE_NOTE =
   'Cost is estimated at API list prices from token usage. Only agents that expose tokens ' +
-  '(Claude Code, Antigravity) can be priced — Cursor, Copilot, and Kiro show activity only.';
+  '(Claude Code, OpenAI Codex, Antigravity) can be priced — Cursor, Copilot, and Kiro show activity only.';
 
 export const ToolMixCard: React.FC = () => {
   const [range, setRange] = useState<ToolMixRange>('30d');

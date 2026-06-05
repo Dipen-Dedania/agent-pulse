@@ -54,9 +54,11 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
   // ── Wire bridge event stream → events writer + sessions deriver. ─────
   const unsubEvents = opts.stateManager.onEvent((event) => {
     // Transcript reading runs first so any token delta is staged before the
-    // events-writer attaches it to the row being written.
-    if (event.payload.transcriptPath && event.payload.sessionId) {
-      transcriptReader.onTranscriptEvent(event.payload.transcriptPath, event.payload.sessionId);
+    // events-writer attaches it to the row being written. Codex is triggered
+    // even without a hook-supplied path — the reader resolves its rollout file
+    // from the sessionId under ~/.codex/sessions.
+    if (event.payload.sessionId && (event.payload.transcriptPath || event.toolId === 'openai-codex')) {
+      transcriptReader.onTranscriptEvent(event.payload.transcriptPath, event.payload.sessionId, event.toolId);
     }
     // Take the staged delta (if any) to also feed the session rollup, then
     // re-stage it for the events-writer to consume. (Simpler than wiring two

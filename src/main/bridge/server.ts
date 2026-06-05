@@ -447,6 +447,9 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
           payload: {
             sessionId:   data.session_id,
             taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+            // Fallback model id; the rollout transcript parser supplies a more
+            // precise one (turn_context.model) when it reads token usage.
+            model:       typeof data.model === 'string' ? data.model : undefined,
             ...common,
           },
         };
@@ -603,6 +606,9 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
           payload: {
             sessionId:   data.session_id,
             taskSummary: data.tool_name ? `Tool: ${data.tool_name}` : undefined,
+            // Fallback model id; the rollout transcript parser supplies a more
+            // precise one (turn_context.model) when it reads token usage.
+            model:       typeof data.model === 'string' ? data.model : undefined,
             ...common,
           },
         };

@@ -241,6 +241,16 @@ describe('OpenAI Codex events', () => {
   it('unknown Codex event → null', () => {
     expect(normalizePayload(codex('UnknownEvent'))).toBeNull();
   });
+
+  it('surfaces model and transcript_path so the rollout parser can price it', () => {
+    const r = normalizePayload({
+      ...codex('PostToolUse'),
+      model: 'gpt-5.5',
+      transcript_path: 'C:\\Users\\test\\.codex\\sessions\\2026\\06\\01\\rollout-x-sess-codex.jsonl',
+    });
+    expect(r?.payload.model).toBe('gpt-5.5');
+    expect(r?.payload.transcriptPath).toBe('C:\\Users\\test\\.codex\\sessions\\2026\\06\\01\\rollout-x-sess-codex.jsonl');
+  });
 });
 
 // ── Kiro ──────────────────────────────────────────────────────────────────────

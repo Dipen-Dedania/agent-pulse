@@ -1,6 +1,8 @@
 // Polls the Antigravity IDE's local language-server endpoint
-// (https://127.0.0.1:5362/.../GetAvailableModels) at a user-configurable
-// interval and broadcasts the latest snapshot to renderer windows.
+// (https://127.0.0.1:<dynamic-port>/.../GetAvailableModels) at a
+// user-configurable interval and broadcasts the latest snapshot to renderer
+// windows. The port is read fresh from the IDE log on every poll because the
+// IDE assigns a new one on each launch (see ./credentials).
 //
 // This differs from the Codex/Claude pollers in three ways:
 //   1. The endpoint is LOCAL — it only exists while the IDE is running.
@@ -27,9 +29,7 @@ import { parseModelsResponse } from './parse';
 import { encodeJsonRequest, extractJsonData, extractTrailers } from './grpc-web';
 
 const HOST = '127.0.0.1';
-const PORT = 5362;
 const RPC_PATH = '/exa.language_server_pb.LanguageServerService/GetAvailableModels';
-const ENDPOINT_URL = `https://${HOST}:${PORT}${RPC_PATH}`;
 
 const MIN_INTERVAL_MS = 60_000;
 const RATE_LIMIT_CAP_MS = 60 * 60_000;
@@ -133,7 +133,7 @@ export class AntigravityUsagePoller {
       logger.warn(`[AntigravityUsagePoller] credentials unavailable (${creds.reason}): ${creds.detail}`);
       this.setStatus({
         state: 'unauthenticated',
-        message: 'Could not find a CSRF token in the Antigravity log. Restart the IDE so it writes a fresh one.',
+        message: 'Could not find a CSRF token and port in the Antigravity log. Restart the IDE so it writes a fresh one.',
       });
       // Retry on the normal interval — a token will appear as soon as the
       // IDE starts and writes its Args line.
@@ -142,7 +142,7 @@ export class AntigravityUsagePoller {
     }
 
     try {
-      const { status, body } = await this.request(creds.token);
+      const { status, body } = await this.request(creds.token, creds.port);
 
       if (status === 401 || status === 403) {
         logger.warn(`[AntigravityUsagePoller] ${status} unauthorized — pausing until manual refresh`);
@@ -253,13 +253,13 @@ export class AntigravityUsagePoller {
     }
   }
 
-  private request(csrfToken: string): Promise<{ status: number; body: Buffer }> {
+  private request(csrfToken: string, port: number): Promise<{ status: number; body: Buffer }> {
     return new Promise((resolve, reject) => {
       const payload = encodeJsonRequest({});
       const req = https.request(
         {
           host: HOST,
-          port: PORT,
+          port,
           path: RPC_PATH,
           method: 'POST',
           rejectUnauthorized: false, // self-signed cert on localhost
@@ -269,7 +269,7 @@ export class AntigravityUsagePoller {
             'accept-language': 'en-US',
             'content-type': 'application/grpc-web+json',
             'content-length': payload.length.toString(),
-            'origin': `https://${HOST}:${PORT}`,
+            'origin': `https://${HOST}:${port}`,
             'x-codeium-csrf-token': csrfToken,
             'x-grpc-web': '1',
             'x-user-agent': 'CONNECT_ES_USER_AGENT',
@@ -388,7 +388,3 @@ function formatRelative(targetMs: number): string {
   const days = Math.round(hours / 24);
   return `in ${days}d`;
 }
-
-// Suppress an unused-export warning for the URL constant; it's documentation
-// for the endpoint location and may be useful for diagnostics later.
-void ENDPOINT_URL;

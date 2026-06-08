@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ToolId, UsageStatus, CodexUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig } from '../../../common/types';
+import { ToolId, UsageStatus, CodexUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
@@ -9,6 +9,7 @@ import { AntigravityUsageSection, AntigravityUsageConfigUI } from './Antigravity
 import { SchedulerSection, SchedulerConfigUI } from './SchedulerSection';
 import { BubbleSection } from './BubbleSection';
 import { AttentionSection } from './AttentionSection';
+import { StatusLineSection } from './StatusLineSection';
 import { GuardrailsTab } from './GuardrailsTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
 import { UpdatesTab } from './UpdatesTab';
@@ -193,7 +194,7 @@ type TabId = 'hooks' | 'bubble' | 'usage' | 'analytics' | 'guardrails' | 'update
 const TABS: { id: TabId; label: string; description: string }[] = [
   { id: 'hooks',      label: 'Hooks',      description: 'Manage which AI tools show a status bubble.' },
   { id: 'bubble',     label: 'Bubble',     description: 'Size, screen position, and inactivity sound for the bubbles.' },
-  { id: 'usage',      label: 'Usage',      description: 'Monitor Claude, Codex, and Antigravity plan usage.' },
+  { id: 'usage',      label: 'Usage',      description: 'Monitor plan usage and configure Claude Code’s scheduler & status line.' },
   { id: 'analytics',  label: 'Analytics',  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
   { id: 'guardrails', label: 'Guardrails', description: 'Block or warn on risky shell commands.' },
   { id: 'updates',    label: 'Updates',    description: 'Check for and install new versions of Agent Pulse.' },
@@ -214,6 +215,8 @@ export const SettingsPanel: React.FC = () => {
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfigUI | null>(null);
   const [bubbleConfig, setBubbleConfig] = useState<BubbleConfig | null>(null);
   const [attentionConfig, setAttentionConfig] = useState<AttentionConfig | null>(null);
+  const [statusLineConfig, setStatusLineConfig] = useState<StatusLineConfig | null>(null);
+  const [statusLineDetect, setStatusLineDetect] = useState<StatusLineDetectInfo | null>(null);
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus>({
     mode: 'off', nextFireAt: null, nextEventKind: null, lastRun: null, openersToday: 0, windowResetsAt: null,
   });
@@ -264,6 +267,9 @@ export const SettingsPanel: React.FC = () => {
         if (config?.scheduler) setSchedulerConfig(config.scheduler);
         if (config?.bubble) setBubbleConfig(config.bubble);
         if (config?.attention) setAttentionConfig(config.attention);
+        if (config?.statusLine) setStatusLineConfig(config.statusLine);
+        const detectStatusLine = await window.electron.invoke('status-line:detect').catch(() => null);
+        if (detectStatusLine) setStatusLineDetect(detectStatusLine);
 
         const initialUsage = await window.electron.invoke('usage:get-current').catch(() => null);
         if (initialUsage) setUsageStatus(initialUsage);
@@ -304,6 +310,12 @@ export const SettingsPanel: React.FC = () => {
     const handler = (_event: unknown, incoming: SchedulerStatus) => setSchedulerStatus(incoming);
     window.electron.on('scheduler:updated', handler);
     return () => window.electron.off('scheduler:updated', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: StatusLineConfig) => setStatusLineConfig(incoming);
+    window.electron.on('status-line:config-updated', handler);
+    return () => window.electron.off('status-line:config-updated', handler);
   }, []);
 
   const handleUsageConfigChange = async (partial: Partial<UsageConfigUI>) => {
@@ -375,6 +387,57 @@ export const SettingsPanel: React.FC = () => {
       setAttentionConfig(updated);
     } catch (e) {
       logger.error('[SettingsPanel] failed to update attention config', e);
+    }
+  };
+
+  const handleStatusLineConfigChange = async (partial: Partial<StatusLineConfig>) => {
+    // Optimistic apply for an instant preview, then reconcile with the
+    // validated config the main process returns.
+    setStatusLineConfig((prev) => (prev ? { ...prev, ...partial } : prev));
+    try {
+      const updated = await window.electron.invoke('status-line:update-config', partial);
+      setStatusLineConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update status-line config', e);
+    }
+  };
+
+  const handleStatusLineReset = async () => {
+    try {
+      const updated = await window.electron.invoke('status-line:reset-config');
+      if (updated) setStatusLineConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to reset status-line config', e);
+    }
+  };
+
+  const refreshStatusLineDetect = async () => {
+    const detect = await window.electron.invoke('status-line:detect').catch(() => null);
+    if (detect) setStatusLineDetect(detect);
+  };
+
+  const handleStatusLineInstall = async (replace?: boolean) => {
+    try {
+      const result = await window.electron.invoke('status-line:install', { replace });
+      if (result?.reason === 'no-runtime') {
+        alert('No script runtime (Node, Python, or PowerShell) was found on your PATH. Install Node.js to enable the status line.');
+      } else if (result?.reason === 'error') {
+        alert('Failed to install status line: ' + (result.message ?? 'unknown error'));
+      }
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to install status line', e);
+    } finally {
+      await refreshStatusLineDetect();
+    }
+  };
+
+  const handleStatusLineRemove = async () => {
+    try {
+      await window.electron.invoke('status-line:remove');
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to remove status line', e);
+    } finally {
+      await refreshStatusLineDetect();
     }
   };
 
@@ -705,6 +768,16 @@ export const SettingsPanel: React.FC = () => {
               status={schedulerStatus}
               onChange={handleSchedulerConfigChange}
               onTestOpener={handleSchedulerTestOpener}
+            />
+          )}
+          {statusLineConfig && statusLineDetect && (
+            <StatusLineSection
+              config={statusLineConfig}
+              detect={statusLineDetect}
+              onChange={handleStatusLineConfigChange}
+              onInstall={handleStatusLineInstall}
+              onRemove={handleStatusLineRemove}
+              onReset={handleStatusLineReset}
             />
           )}
           {!usageConfig && !codexUsageConfig && !antigravityUsageConfig && !schedulerConfig && (

@@ -3,6 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { ConfigWriter } from '../config-writer';
+import { ToolDetector } from '../detector';
+import { renderStatusLine } from '../../../common/statusline-render';
+import { StatusLineConfig } from '../../../common/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -457,5 +460,207 @@ describe('ConfigWriter — unknown tool', () => {
   it('rejects for an unrecognized toolId', async () => {
     const writer = new ConfigWriter();
     await expect(writer.installHook('unknown-ide' as any)).rejects.toThrow();
+  });
+});
+
+// ── Status line ───────────────────────────────────────────────────────────────
+
+const sampleStatusLine: StatusLineConfig = {
+  version: 1,
+  separator: '  ·  ',
+  lines: [
+    {
+      segments: [
+        { type: 'model', enabled: true, color: 'white' },
+        { type: 'contextBar', enabled: true, color: 'auto', width: 10, showPercent: true },
+      ],
+    },
+  ],
+};
+
+describe('ConfigWriter — status line', () => {
+  it('reports state none on a fresh machine', async () => {
+    await withFakeHome(async (writer) => {
+      expect(writer.statusLineState()).toBe('none');
+    });
+  });
+
+  it('installs the statusLine key and projects the config, preserving other settings', async () => {
+    await withFakeHome(async (writer) => {
+      // Pre-existing settings the installer must not clobber.
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.writeFileSync(settingsPath, JSON.stringify({ model: 'opus', hooks: { Stop: [] } }));
+
+      const result = writer.installStatusLine(sampleStatusLine, 'node', '/usr/bin/node');
+      expect(result.success).toBe(true);
+      expect(result.state).toBe('ours');
+      expect(writer.statusLineState()).toBe('ours');
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.model).toBe('opus');         // untouched
+      expect(settings.hooks.Stop).toBeDefined();    // untouched
+      expect(settings.statusLine.type).toBe('command');
+      expect(settings.statusLine.command).toContain('node');
+      expect(settings.statusLine.command).toContain('statusline.js');
+
+      // The deployed script + config projection exist.
+      const dir = path.join(tmpDir, '.claude', 'agent-pulse');
+      expect(fs.existsSync(path.join(dir, 'statusline.js'))).toBe(true);
+      expect(fs.existsSync(path.join(dir, 'statusline.config.json'))).toBe(true);
+    });
+  });
+
+  it('does NOT back up settings when there is no prior status line', async () => {
+    await withFakeHome(async (writer) => {
+      writer.installStatusLine(sampleStatusLine, 'node', '/usr/bin/node');
+      const claudeDir = path.join(tmpDir, '.claude');
+      const backups = fs.readdirSync(claudeDir).filter((f) => f.startsWith('settings.backup-'));
+      expect(backups.length).toBe(0);
+    });
+  });
+
+  it('backs up a FOREIGN status line before replacing it', async () => {
+    await withFakeHome(async (writer) => {
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.writeFileSync(settingsPath, JSON.stringify({ statusLine: { type: 'command', command: 'echo custom' } }));
+      expect(writer.statusLineState()).toBe('foreign');
+
+      const result = writer.installStatusLine(sampleStatusLine, 'node', '/usr/bin/node');
+      expect(result.backup).toBeTruthy();
+      expect(fs.existsSync(result.backup as string)).toBe(true);
+
+      // The backup retains the original foreign command.
+      const backed = JSON.parse(fs.readFileSync(result.backup as string, 'utf8'));
+      expect(backed.statusLine.command).toBe('echo custom');
+      expect(writer.statusLineState()).toBe('ours');
+    });
+  });
+
+  it('removes only the statusLine key, leaving other settings intact', async () => {
+    await withFakeHome(async (writer) => {
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.writeFileSync(settingsPath, JSON.stringify({ model: 'opus' }));
+      writer.installStatusLine(sampleStatusLine, 'node', '/usr/bin/node');
+
+      writer.removeStatusLine();
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.statusLine).toBeUndefined();
+      expect(settings.model).toBe('opus');
+      expect(writer.statusLineState()).toBe('none');
+    });
+  });
+
+  it('installedStatusLineRuntime reports the wired-in runtime, and refreshes the same script', async () => {
+    await withFakeHome(async (writer) => {
+      writer.installStatusLine(sampleStatusLine, 'node', '/usr/bin/node');
+      expect(writer.installedStatusLineRuntime()).toBe('node');
+
+      // A refresh rewrites the deployed script (current app version) in place.
+      const scriptPath = path.join(tmpDir, '.claude', 'agent-pulse', 'statusline.js');
+      fs.writeFileSync(scriptPath, '// stale');
+      writer.deployStatusLineScript('node');
+      const refreshed = fs.readFileSync(scriptPath, 'utf8');
+      expect(refreshed).not.toBe('// stale');
+      expect(refreshed).toContain('renderSegment');
+    });
+  });
+
+  it('reports null installed runtime on a fresh machine', async () => {
+    await withFakeHome(async (writer) => {
+      expect(writer.installedStatusLineRuntime()).toBeNull();
+    });
+  });
+
+  it('builds a PowerShell command with the -File form', async () => {
+    await withFakeHome(async (writer) => {
+      writer.installStatusLine(sampleStatusLine, 'powershell', 'powershell');
+      const settings = JSON.parse(fs.readFileSync(path.join(tmpDir, '.claude', 'settings.json'), 'utf8'));
+      expect(settings.statusLine.command).toContain('-ExecutionPolicy Bypass -File');
+      expect(settings.statusLine.command).toContain('statusline.ps1');
+    });
+  });
+});
+
+describe('ToolDetector — status line runtime', () => {
+  it('detects a runtime with an absolute interpreter path (node in the test env)', () => {
+    const detected = new ToolDetector().detectStatusLineRuntime();
+    expect(detected).not.toBeNull();
+    expect(detected?.runtime).toBe('node');
+    expect(detected?.binPath && detected.binPath.length).toBeGreaterThan(0);
+  });
+});
+
+describe('statusline-render — reference renderer', () => {
+  it('renders enabled segments, skips disabled ones, and joins by separator', () => {
+    const out = renderStatusLine(sampleStatusLine, {
+      model: { display_name: 'Opus 4.8' },
+      context_window: { used_percentage: 50 },
+    });
+    expect(out.lines[0].segments.map((s) => s.text)).toEqual([
+      'Opus 4.8',
+      '[█████░░░░░] 50%',
+    ]);
+    // 50% lands on the yellow threshold.
+    expect(out.lines[0].segments[1].color).toBe('yellow');
+    expect(out.text).toBe('Opus 4.8  ·  [█████░░░░░] 50%');
+  });
+
+  it('prefixes a segment icon (sharing the segment color)', () => {
+    const withIcon: StatusLineConfig = {
+      version: 1,
+      separator: '  ·  ',
+      lines: [{ segments: [{ type: 'model', enabled: true, color: 'white', icon: '🧠' }] }],
+    };
+    const out = renderStatusLine(withIcon, { model: { display_name: 'Opus 4.8' } });
+    expect(out.lines[0].segments[0].text).toBe('🧠 Opus 4.8');
+  });
+
+  it('wraps a crowded line into multiple rows at maxItemsPerLine', () => {
+    const crowded: StatusLineConfig = {
+      version: 1,
+      separator: ' | ',
+      maxItemsPerLine: 2,
+      lines: [{
+        segments: [
+          { type: 'model', enabled: true },
+          { type: 'cwd', enabled: true, basenameOnly: true },
+          { type: 'gitBranch', enabled: true },
+        ],
+      }],
+    };
+    const out = renderStatusLine(crowded, {
+      model: { display_name: 'Opus' },
+      workspace: { current_dir: '/x/agent-pulse', git_worktree: 'main' },
+    });
+    // 3 segments, wrap after 2 → two rows (2 + 1).
+    expect(out.lines).toHaveLength(2);
+    expect(out.lines[0].segments.map((s) => s.text)).toEqual(['Opus', 'agent-pulse']);
+    expect(out.lines[1].segments.map((s) => s.text)).toEqual(['main']);
+    expect(out.text).toBe('Opus | agent-pulse\nmain');
+  });
+
+  it('renders each config line as its own output line', () => {
+    const twoLines: StatusLineConfig = {
+      version: 1,
+      separator: '  ·  ',
+      lines: [
+        { segments: [{ type: 'model', enabled: true }] },
+        { segments: [{ type: 'cwd', enabled: true, basenameOnly: true }] },
+      ],
+    };
+    const out = renderStatusLine(twoLines, {
+      model: { display_name: 'Opus' },
+      workspace: { current_dir: '/home/me/agent-pulse' },
+    });
+    expect(out.text).toBe('Opus\nagent-pulse');
+  });
+
+  it('skips a segment whose field is absent', () => {
+    const out = renderStatusLine(sampleStatusLine, { model: { display_name: 'Opus' } });
+    // contextBar dropped (no context_window) — only the model remains.
+    expect(out.lines[0].segments.map((s) => s.text)).toEqual(['Opus']);
   });
 });

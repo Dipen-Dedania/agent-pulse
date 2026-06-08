@@ -19,10 +19,17 @@ export type BubbleStackPosition = 'bottom-right' | 'bottom-left' | 'top-right' |
 // is the bundled wav; the rest are synthesized in the renderer; 'none' is silent.
 export type BubbleSoundId = 'pop' | 'chime' | 'ding' | 'marimba' | 'none';
 
+// Backdrop behind the orb. 'glass' keeps the frosted, state-tinted gradient
+// (default). 'solid' paints `fillColor` opaquely so logos stay legible against
+// busy/dark desktops (e.g. Cursor's black icon over a dark VS Code window).
+export type BubbleFillMode = 'glass' | 'solid';
+
 export interface BubbleConfig {
   size: BubbleSize;
   stackPosition: BubbleStackPosition;
   sound: BubbleSoundId;
+  fillMode: BubbleFillMode;
+  fillColor: string;          // CSS color used when fillMode === 'solid' (e.g. '#ffffff')
 }
 
 // ─── "Needs you" attention escalation ────────────────────────────────────────
@@ -217,4 +224,93 @@ export interface SchedulerStatus {
   lastRun: SchedulerLastRun | null;
   openersToday: number;           // count of openers fired since local midnight
   windowResetsAt?: number | null; // mirror of the live 5-hour resetsAt, for the glance
+}
+
+// ─── Claude Code status line ─────────────────────────────────────────────────
+// Agent Pulse can install & configure Claude Code's custom status line — the bar
+// at the bottom of the terminal. Claude Code runs a command after each message,
+// feeding it session JSON on stdin (model, context %, cost, rate limits, git, …)
+// and renders whatever the command prints. We deploy ONE renderer script (in the
+// first available runtime) that reads a config file projected from `StatusLineConfig`.
+// Kept in src/common so the main process (writes config + script) and the renderer
+// (segment editor + live preview) agree on the exact shape.
+
+// Which session field a segment renders. Maps to the documented stdin schema.
+export type StatusLineSegmentType =
+  | 'model'        // model.display_name
+  | 'contextBar'   // context_window.used_percentage → bar + %
+  | 'cwd'          // workspace.current_dir
+  | 'projectDir'   // workspace.project_dir
+  | 'gitBranch'    // workspace.git_worktree / worktree.branch
+  | 'repo'         // workspace.repo.owner/name
+  | 'cost'         // cost.total_cost_usd
+  | 'duration'     // cost.total_duration_ms
+  | 'linesChanged' // cost.total_lines_added/removed
+  | 'rateLimit'    // rate_limits.{five_hour,seven_day}.used_percentage
+  | 'outputStyle'  // output_style.name
+  | 'effort'       // effort.level
+  | 'vimMode'      // vim.mode
+  | 'pr';          // pr.number / pr.review_state
+
+// Named ANSI colors (resolved to escape codes by the renderer). `auto` lets a
+// segment color itself by value (e.g. the context bar / rate-limit thresholds).
+export type StatusLineColor =
+  | 'auto' | 'white' | 'gray' | 'red' | 'green' | 'yellow' | 'blue' | 'magenta' | 'cyan';
+
+// One threshold stop for value-colored segments: at `at`% or above, use `color`.
+export interface StatusLineThreshold {
+  at: number;             // 0–100
+  color: StatusLineColor;
+}
+
+// A single segment. Type-specific options are optional and only read for the
+// relevant `type`; the renderer ignores irrelevant fields.
+export interface StatusLineSegment {
+  type: StatusLineSegmentType;
+  enabled: boolean;
+  color?: StatusLineColor;        // base color (ignored where `auto`/thresholds apply)
+  icon?: string;                  // optional emoji/glyph prefixed before the text (e.g. 📁)
+  // contextBar
+  width?: number;                 // bar width in chars (clamped 4–40)
+  fillChar?: string;              // filled cell glyph (default █)
+  emptyChar?: string;             // empty cell glyph (default ░)
+  showPercent?: boolean;          // append "NN%"
+  thresholds?: StatusLineThreshold[]; // value→color stops (contextBar, rateLimit)
+  // rateLimit
+  window?: 'five_hour' | 'seven_day';
+  // cwd
+  basenameOnly?: boolean;         // show only the last path segment
+}
+
+// One rendered line. Multi-line status is supported via multiple entries.
+export interface StatusLineRow {
+  separator?: string;             // joins segments on this row (overrides top-level)
+  segments: StatusLineSegment[];
+}
+
+export interface StatusLineConfig {
+  version: 1;
+  separator: string;              // default separator between segments
+  lines: StatusLineRow[];
+  // When > 0, a configured line with more than this many rendered segments is
+  // wrapped onto multiple terminal rows (chunks of this size). Lets a crowded
+  // line flow across lines instead of overflowing/truncating. 0/undefined = off.
+  maxItemsPerLine?: number;
+}
+
+// First script runtime found on PATH, in preference order.
+export type StatusLineRuntime = 'node' | 'python' | 'powershell';
+
+// Install state of the `statusLine` key in ~/.claude/settings.json:
+//   none    — no status line configured
+//   ours    — points at a script under ~/.claude/agent-pulse/ (Agent Pulse owns it)
+//   foreign — a status line exists but someone else configured it (back up before replacing)
+export type StatusLineState = 'none' | 'ours' | 'foreign';
+
+// What `status-line:detect` returns to the renderer.
+export interface StatusLineDetectInfo {
+  runtime: StatusLineRuntime | null; // null when no runtime is available
+  binPath: string | null;            // absolute path to the interpreter
+  state: StatusLineState;
+  settingsPath: string;              // ~/.claude/settings.json (for the "open" link)
 }

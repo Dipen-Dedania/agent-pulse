@@ -2,12 +2,17 @@ import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
-import { ToolId } from '../../common/types';
+import { ToolId, StatusLineRuntime } from '../../common/types';
 
 export interface ToolDetection {
   installed: boolean;
   hookInstalled?: boolean;
   location?: string;
+}
+
+export interface StatusLineRuntimeDetection {
+  runtime: StatusLineRuntime;
+  binPath: string; // absolute path to the interpreter, written into the command
 }
 
 export type DetectionResult = Record<ToolId, ToolDetection>;
@@ -41,6 +46,28 @@ export class ToolDetector {
     } catch {
       return undefined;
     }
+  }
+
+  // Find the best script runtime for the Claude Code status line. Claude Code
+  // spawns the status-line command as its own process, so we write the resolved
+  // ABSOLUTE interpreter path into the command (not a bare `node`) to dodge the
+  // PATH-resolution gap between a GUI-launched app and the terminal. Probe in
+  // preference order: node (matches our stack) → python3/python → powershell
+  // (Windows-only fallback, always present there).
+  public detectStatusLineRuntime(): StatusLineRuntimeDetection | null {
+    const node = this.whichCommand('node');
+    if (node) return { runtime: 'node', binPath: node };
+
+    const py3 = this.whichCommand('python3');
+    if (py3) return { runtime: 'python', binPath: py3 };
+    const py = this.whichCommand('python');
+    if (py) return { runtime: 'python', binPath: py };
+
+    if (process.platform === 'win32') {
+      const pwsh = this.whichCommand('powershell');
+      if (pwsh) return { runtime: 'powershell', binPath: pwsh };
+    }
+    return null;
   }
 
   private detectClaudeCode(): ToolDetection {
@@ -77,12 +104,17 @@ export class ToolDetector {
     // by Windows itself.
     const programFiles    = process.env['ProgramFiles']      ?? 'C:\\Program Files';
     const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
-    return [
+    const installDirs = [
       path.join(home, 'AppData', 'Local', 'Programs', 'cursor'),
       path.join(home, 'AppData', 'Local', 'Programs', 'Cursor'),
       path.join(programFiles, 'Cursor'),
       path.join(programFilesX86, 'Cursor'),
     ];
+    // Probe the actual executable, not just the install folder. An uninstall
+    // (or a half-finished install) can leave an empty `cursor` directory behind,
+    // and a bare-directory check would read that as "Cursor installed" — the
+    // false positive that seeds a phantom Cursor bubble on machines without it.
+    return installDirs.map((d) => path.join(d, 'Cursor.exe'));
   }
 
   private detectVSCodeCopilot(): ToolDetection {

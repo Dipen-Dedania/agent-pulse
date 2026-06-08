@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
-import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleTooltipPayload } from '../../../common/types';
+import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload } from '../../../common/types';
 import { GuardrailEvent } from '../../../common/guardrails';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
@@ -307,23 +307,27 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
   const [bubbleSize, setBubbleSize] = useState<BubbleSize>('medium');
   const [bubbleSound, setBubbleSound] = useState<BubbleSoundId>('pop');
+  const [fillMode, setFillMode] = useState<BubbleFillMode>('glass');
+  const [fillColor, setFillColor] = useState<string>('#ffffff');
 
   // Pull bubble appearance/behavior prefs on mount and stay in sync with live
-  // edits from Settings. Every bubble listens so size/sound changes apply
+  // edits from Settings. Every bubble listens so size/sound/fill changes apply
   // without recreating the window.
   useEffect(() => {
+    const applyBubble = (b?: Partial<BubbleConfig>) => {
+      if (!b) return;
+      if (b.size) setBubbleSize(b.size);
+      if (b.sound) setBubbleSound(b.sound);
+      if (b.fillMode) setFillMode(b.fillMode);
+      if (b.fillColor) setFillColor(b.fillColor);
+    };
+
     window.electron
       .invoke('get-config')
-      .then((cfg: { bubble?: { size?: BubbleSize; sound?: BubbleSoundId } } | null) => {
-        if (cfg?.bubble?.size) setBubbleSize(cfg.bubble.size);
-        if (cfg?.bubble?.sound) setBubbleSound(cfg.bubble.sound);
-      })
+      .then((cfg: { bubble?: Partial<BubbleConfig> } | null) => applyBubble(cfg?.bubble))
       .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] get-config (bubble) failed`, e));
 
-    const handler = (_event: unknown, cfg: { size?: BubbleSize; sound?: BubbleSoundId }) => {
-      if (cfg?.size) setBubbleSize(cfg.size);
-      if (cfg?.sound) setBubbleSound(cfg.sound);
-    };
+    const handler = (_event: unknown, cfg: Partial<BubbleConfig>) => applyBubble(cfg);
     window.electron.on('bubble:config-updated', handler);
     return () => window.electron.off('bubble:config-updated', handler);
   }, [toolId]);
@@ -745,9 +749,15 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           width: dims.orb,
           height: dims.orb,
           marginTop: '5px',
-          background: `radial-gradient(circle, ${fill} 0%, rgba(128,128,128,0.06) 100%)`,
-          backdropFilter: 'blur(14px)',
-          WebkitBackdropFilter: 'blur(14px)',
+          // Solid fill paints an opaque backdrop so logos stay legible over busy
+          // desktops; glass keeps the frosted, state-tinted gradient. The
+          // state-color glow (boxShadow animation) still reads in both modes.
+          background:
+            fillMode === 'solid'
+              ? fillColor
+              : `radial-gradient(circle, ${fill} 0%, rgba(128,128,128,0.06) 100%)`,
+          backdropFilter: fillMode === 'solid' ? undefined : 'blur(14px)',
+          WebkitBackdropFilter: fillMode === 'solid' ? undefined : 'blur(14px)',
           border: `1.5px solid ${borderColor}`,
           boxShadow: isDark
             ? '0 8px 8px 0 rgba(0,0,0,0.4)'

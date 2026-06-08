@@ -1,5 +1,5 @@
 import React from 'react';
-import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId } from '../../../common/types';
+import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode } from '../../../common/types';
 import { BUBBLE_SOUNDS, playBubbleSound } from '../../sound';
 
 interface Props {
@@ -12,6 +12,15 @@ const SIZE_OPTIONS: { id: BubbleSize; label: string; orb: number }[] = [
   { id: 'medium', label: 'Medium', orb: 30 },
   { id: 'large',  label: 'Large',  orb: 40 },
 ];
+
+const FILL_OPTIONS: { id: BubbleFillMode; label: string }[] = [
+  { id: 'glass', label: 'Glass' },
+  { id: 'solid', label: 'Solid' },
+];
+
+// Quick-pick fill colors. White covers the common "dark logo, dark desktop"
+// case; the rest are neutral backdrops. Any color is reachable via the picker.
+const FILL_SWATCHES = ['#ffffff', '#f1f5f9', '#1e293b', '#000000'];
 
 const POSITION_OPTIONS: { id: BubbleStackPosition; label: string }[] = [
   { id: 'top-left',     label: 'Top left' },
@@ -104,6 +113,76 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             );
           })}
         </div>
+      </div>
+
+      {/* ── Fill ─────────────────────────────────────────────────────────── */}
+      <div className='flex flex-col gap-3'>
+        <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Fill</p>
+        <p className='text-xs text-slate-400 -mt-1'>
+          Frosted glass blends with your desktop, but a dark logo (e.g. Cursor) can vanish over a dark
+          window. A solid fill paints a consistent backdrop so every logo stays clearly visible.
+        </p>
+        <div className='flex gap-3'>
+          {FILL_OPTIONS.map((opt) => {
+            const active = (config.fillMode ?? 'glass') === opt.id;
+            return (
+              <button
+                key={opt.id}
+                onClick={() => onChange({ fillMode: opt.id })}
+                className={`flex-1 flex flex-col items-center justify-center gap-2 py-4 rounded-xl border transition-colors cursor-pointer ${
+                  active
+                    ? 'bg-blue-500/15 border-blue-500/50 text-white'
+                    : 'bg-slate-900/40 border-slate-700/60 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                }`}
+              >
+                <span
+                  className='rounded-full'
+                  style={{
+                    width: 30,
+                    height: 30,
+                    background:
+                      opt.id === 'solid'
+                        ? config.fillColor || '#ffffff'
+                        : 'radial-gradient(circle, rgba(148,163,184,0.55) 0%, rgba(128,128,128,0.06) 100%)',
+                    backdropFilter: opt.id === 'glass' ? 'blur(6px)' : undefined,
+                    border: '1.5px solid rgba(255,255,255,0.25)',
+                  }}
+                />
+                <span className='text-sm font-medium'>{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {(config.fillMode ?? 'glass') === 'solid' && (
+          <div className='flex flex-wrap items-center gap-2 mt-1'>
+            {FILL_SWATCHES.map((c) => {
+              const active = (config.fillColor || '#ffffff').toLowerCase() === c.toLowerCase();
+              return (
+                <button
+                  key={c}
+                  onClick={() => onChange({ fillColor: c })}
+                  aria-label={`Fill color ${c}`}
+                  title={c}
+                  className={`w-7 h-7 rounded-full cursor-pointer transition-transform ${
+                    active ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-slate-800 scale-110' : 'hover:scale-105'
+                  }`}
+                  style={{ background: c, border: '1.5px solid rgba(255,255,255,0.25)' }}
+                />
+              );
+            })}
+            <label className='flex items-center gap-2 ml-1 text-xs text-slate-400 cursor-pointer'>
+              <input
+                type='color'
+                value={/^#[0-9a-f]{6}$/i.test(config.fillColor || '') ? config.fillColor : '#ffffff'}
+                onChange={(e) => onChange({ fillColor: e.target.value })}
+                className='w-7 h-7 rounded-lg bg-transparent border border-slate-700/70 cursor-pointer p-0'
+                aria-label='Custom fill color'
+              />
+              Custom
+            </label>
+          </div>
+        )}
       </div>
 
       {/* ── Stack position ───────────────────────────────────────────────── */}

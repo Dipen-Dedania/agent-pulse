@@ -136,46 +136,67 @@ export const TokensTimelineCard: React.FC = () => {
               </>
             )}
           </div>
-          <svg
-            viewBox={`0 0 ${W} ${H}`}
-            preserveAspectRatio='none'
-            className='w-full h-36'
-          >
-            {!isCost && showCache === 'on' && data.maxCacheRead > 0 && (
-              <>
-                <path d={buildArea(cachePoints)}  fill={CACHE_FILL} />
-                <path d={buildLine(cachePoints)}  fill='none' stroke={CACHE_STROKE} strokeWidth={1} vectorEffect='non-scaling-stroke' />
-              </>
-            )}
-            {primaryMax > 0 && (
-              <>
-                <path d={buildArea(primaryPoints)} fill={primaryFill} />
-                <path d={buildLine(primaryPoints)} fill='none' stroke={primaryStroke} strokeWidth={1.5} vectorEffect='non-scaling-stroke' />
-              </>
-            )}
-            {/* Hover hit-targets, one per bucket */}
-            {data.buckets.map((b, i) => {
-              const fresh = b.tokensIn + b.tokensOut;
-              const rectW = step > 0 ? step : innerW;
-              const rectX = step > 0 ? xs(i) - step / 2 : PAD_X;
-              return (
-                <rect
-                  key={b.date}
-                  x={Math.max(0, rectX)}
-                  y={0}
-                  width={rectW}
-                  height={H}
-                  fill='transparent'
-                >
-                  <title>
-                    {isCost
-                      ? `${b.date} · ${formatUsd(b.costUsd)} est. · fresh ${fresh.toLocaleString()} tokens`
-                      : `${b.date} · fresh ${fresh.toLocaleString()} (in ${b.tokensIn.toLocaleString()} / out ${b.tokensOut.toLocaleString()}) · cache ${b.cacheRead.toLocaleString()} · ${formatUsd(b.costUsd)} est.`}
-                  </title>
-                </rect>
-              );
-            })}
-          </svg>
+          {/* Cost: discrete daily bars (solid CSS bars, matching the
+              Hour-of-day rhythm chart so the two read as a family). Tokens:
+              smooth SVG area+line, which suits a continuous flow. */}
+          {isCost ? (
+            <div className='flex items-end gap-[3px] h-36'>
+              {data.buckets.map((b) => {
+                const fresh = b.tokensIn + b.tokensOut;
+                // Floor a non-zero day at 4% so a tiny spend still shows a sliver.
+                const pct = b.costUsd > 0 && primaryMax > 0
+                  ? Math.max(4, (b.costUsd / primaryMax) * 100)
+                  : 0;
+                return (
+                  <div
+                    key={b.date}
+                    className='flex-1 bg-emerald-500/40 hover:bg-emerald-400/60 rounded-t transition-colors'
+                    style={{ height: `${pct}%` }}
+                    title={`${b.date} · ${formatUsd(b.costUsd)} est. · fresh ${fresh.toLocaleString()} tokens`}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <svg
+              viewBox={`0 0 ${W} ${H}`}
+              preserveAspectRatio='none'
+              className='w-full h-36'
+            >
+              {showCache === 'on' && data.maxCacheRead > 0 && (
+                <>
+                  <path d={buildArea(cachePoints)}  fill={CACHE_FILL} />
+                  <path d={buildLine(cachePoints)}  fill='none' stroke={CACHE_STROKE} strokeWidth={1} vectorEffect='non-scaling-stroke' />
+                </>
+              )}
+              {primaryMax > 0 && (
+                <>
+                  <path d={buildArea(primaryPoints)} fill={primaryFill} />
+                  <path d={buildLine(primaryPoints)} fill='none' stroke={primaryStroke} strokeWidth={1.5} vectorEffect='non-scaling-stroke' />
+                </>
+              )}
+              {/* Hover hit-targets, one per bucket */}
+              {data.buckets.map((b, i) => {
+                const fresh = b.tokensIn + b.tokensOut;
+                const rectW = step > 0 ? step : innerW;
+                const rectX = step > 0 ? xs(i) - step / 2 : PAD_X;
+                return (
+                  <rect
+                    key={b.date}
+                    x={Math.max(0, rectX)}
+                    y={0}
+                    width={rectW}
+                    height={H}
+                    fill='transparent'
+                  >
+                    <title>
+                      {`${b.date} · fresh ${fresh.toLocaleString()} (in ${b.tokensIn.toLocaleString()} / out ${b.tokensOut.toLocaleString()}) · cache ${b.cacheRead.toLocaleString()} · ${formatUsd(b.costUsd)} est.`}
+                    </title>
+                  </rect>
+                );
+              })}
+            </svg>
+          )}
           <div className='flex justify-between mt-1 text-[10px] text-slate-500 font-mono'>
             {axisLabels.map((l) => (
               <span key={l.date}>{l.date}</span>

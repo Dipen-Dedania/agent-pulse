@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
 import { BRIDGE_URL } from '../bridge/config';
-import { ToolId } from '../../common/types';
+import { ToolId, StatusLineConfig, StatusLineRuntime, StatusLineState } from '../../common/types';
 
 export class ConfigWriter {
   private bridgeUrl = BRIDGE_URL;
@@ -929,5 +929,544 @@ exit 0
     }
 
     return { success: true };
+  }
+
+  // ── Claude Code status line ───────────────────────────────────────────────
+  // Unlike the hooks (which POST to our bridge), the status line is a command
+  // Claude Code spawns to render the bottom bar. We deploy ONE renderer script
+  // (in the detected runtime) under ~/.claude/agent-pulse/ that reads a config
+  // file projected from UserConfig.statusLine, then merge a `statusLine` key
+  // into ~/.claude/settings.json the same non-clobbering way writeClaudeCodeHook
+  // merges `hooks`.
+
+  private statusLineDir(): string {
+    return path.join(os.homedir(), '.claude', 'agent-pulse');
+  }
+
+  public statusLineSettingsPath(): string {
+    return path.join(os.homedir(), '.claude', 'settings.json');
+  }
+
+  public statusLineConfigPath(): string {
+    return path.join(this.statusLineDir(), 'statusline.config.json');
+  }
+
+  private statusLineScriptName(runtime: StatusLineRuntime): string {
+    return runtime === 'python' ? 'statusline.py' : runtime === 'powershell' ? 'statusline.ps1' : 'statusline.js';
+  }
+
+  private statusLineScriptPath(runtime: StatusLineRuntime): string {
+    return path.join(this.statusLineDir(), this.statusLineScriptName(runtime));
+  }
+
+  // Which runtime's script is currently wired into settings.json (inferred from
+  // the script filename in the command), or null if none/foreign/unparseable.
+  // Lets a config edit refresh the SAME deployed script without re-detecting.
+  public installedStatusLineRuntime(): StatusLineRuntime | null {
+    const settings = this.readJson(this.statusLineSettingsPath());
+    const command = settings?.statusLine?.command;
+    if (typeof command !== 'string') return null;
+    const norm = command.replace(/\\/g, '/').toLowerCase();
+    if (norm.includes('statusline.ps1')) return 'powershell';
+    if (norm.includes('statusline.py')) return 'python';
+    if (norm.includes('statusline.js')) return 'node';
+    return null;
+  }
+
+  // Write (or overwrite) the renderer script for a runtime. Separate from
+  // installStatusLine so a config edit can refresh the deployed script to the
+  // current app version — otherwise script-level features added after the user
+  // first installed (new segments, icon prefixes, …) never reach them.
+  public deployStatusLineScript(runtime: StatusLineRuntime): string {
+    const dir = this.statusLineDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const scriptPath = this.statusLineScriptPath(runtime);
+    if (runtime === 'powershell') {
+      // UTF-8 BOM so Windows PowerShell 5.1 decodes the non-ASCII glyphs/emoji.
+      fs.writeFileSync(scriptPath, '﻿' + this.buildStatusLinePowerShellScript());
+    } else {
+      const script = runtime === 'python' ? this.buildStatusLinePythonScript() : this.buildStatusLineNodeScript();
+      fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+    }
+    return scriptPath;
+  }
+
+  // Classify the existing statusLine in settings.json: ours (points at our
+  // agent-pulse script), foreign (someone else's), or none.
+  public statusLineState(): StatusLineState {
+    const settings = this.readJson(this.statusLineSettingsPath());
+    const command = settings?.statusLine?.command;
+    if (!command || typeof command !== 'string') return 'none';
+    const norm = command.replace(/\\/g, '/').toLowerCase();
+    return norm.includes('/agent-pulse/statusline') ? 'ours' : 'foreign';
+  }
+
+  // Write the projected config the deployed script reads at runtime.
+  public writeStatusLineConfig(cfg: StatusLineConfig): string {
+    const dir = this.statusLineDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const p = this.statusLineConfigPath();
+    fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+    return p;
+  }
+
+  // Copy settings.json aside before we replace a foreign statusLine, so the
+  // user can recover their hand-crafted line. Returns the backup path.
+  private backupSettings(settingsPath: string): string {
+    let n = 1;
+    let dest = path.join(path.dirname(settingsPath), `settings.backup-${n}.json`);
+    while (fs.existsSync(dest) && n < 1000) {
+      n += 1;
+      dest = path.join(path.dirname(settingsPath), `settings.backup-${n}.json`);
+    }
+    fs.copyFileSync(settingsPath, dest);
+    return dest;
+  }
+
+  public installStatusLine(cfg: StatusLineConfig, runtime: StatusLineRuntime, binPath: string): { success: boolean; state: StatusLineState; path: string; backup?: string } {
+    const dir = this.statusLineDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    // Deploy the renderer script for the chosen runtime + the config projection.
+    const scriptPath = this.deployStatusLineScript(runtime);
+    this.writeStatusLineConfig(cfg);
+
+    // Build the command with ABSOLUTE interpreter + script paths (quoted for
+    // spaces). PowerShell needs the -File invocation form.
+    const q = (p: string) => `"${p}"`;
+    const command = runtime === 'powershell'
+      ? `${q(binPath)} -ExecutionPolicy Bypass -File ${q(scriptPath)}`
+      : `${q(binPath)} ${q(scriptPath)}`;
+
+    // Back up a foreign status line before clobbering it.
+    const settingsPath = this.statusLineSettingsPath();
+    let backup: string | undefined;
+    if (this.statusLineState() === 'foreign' && fs.existsSync(settingsPath)) {
+      try { backup = this.backupSettings(settingsPath); } catch { /* best effort */ }
+    }
+
+    // Merge into settings.json, preserving every other key (hooks, model, …).
+    const claudeDir = path.join(os.homedir(), '.claude');
+    if (!fs.existsSync(claudeDir)) fs.mkdirSync(claudeDir, { recursive: true });
+    const settings = this.readJson(settingsPath) ?? {};
+    settings.statusLine = { type: 'command', command };
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+    return { success: true, state: 'ours', path: settingsPath, backup };
+  }
+
+  // Remove only the statusLine key; leave the deployed script/config files
+  // (harmless) and every other settings.json key intact.
+  public removeStatusLine(): { success: boolean } {
+    const settingsPath = this.statusLineSettingsPath();
+    const settings = this.readJson(settingsPath);
+    if (settings && settings.statusLine) {
+      delete settings.statusLine;
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    }
+    return { success: true };
+  }
+
+  // The three renderer scripts below are deliberately written WITHOUT backslash,
+  // backtick, or the "${" sequence so they survive being embedded verbatim in
+  // these generating template literals. ESC/backslash are produced via char-code
+  // helpers at runtime. All three implement the same contract as
+  // src/common/statusline-render.ts (preview ≡ Node output).
+
+  private buildStatusLineNodeScript(): string {
+    return `#!/usr/bin/env node
+'use strict';
+var fs = require('fs');
+var os = require('os');
+var path = require('path');
+
+var ESC = String.fromCharCode(27);
+var BS = String.fromCharCode(92);
+var NL = String.fromCharCode(10);
+function esc(c){ return ESC + '[' + c + 'm'; }
+var ANSI = { white: esc(37), gray: esc(90), red: esc(31), green: esc(32), yellow: esc(33), blue: esc(34), magenta: esc(35), cyan: esc(36) };
+var RESET = esc(0);
+var DEFAULT_THRESHOLDS = [{ at: 0, color: 'green' }, { at: 50, color: 'yellow' }, { at: 80, color: 'red' }];
+var DEFAULT_COLOR = { model: 'white', cwd: 'cyan', projectDir: 'cyan', gitBranch: 'magenta', repo: 'blue', cost: 'gray', duration: 'gray', linesChanged: 'gray', outputStyle: 'gray', effort: 'gray', vimMode: 'gray', pr: 'blue' };
+
+function clamp(n, lo, hi){ return Math.max(lo, Math.min(hi, n)); }
+function get(o){ var c = o; for (var i = 1; i < arguments.length; i++){ if (c == null) return undefined; c = c[arguments[i]]; } return c; }
+function basename(p){ p = String(p); var i = Math.max(p.lastIndexOf('/'), p.lastIndexOf(BS)); return i >= 0 ? p.slice(i + 1) : p; }
+function fmtDur(ms){ var s = Math.floor(ms / 1000); if (s < 60) return s + 's'; var m = Math.floor(s / 60); if (m < 60) return (s % 60) ? (m + 'm ' + (s % 60) + 's') : (m + 'm'); var h = Math.floor(m / 60); return h + 'h ' + (m % 60) + 'm'; }
+function colorForValue(pct, th){ var stops = ((th && th.length) ? th : DEFAULT_THRESHOLDS).slice().sort(function(a, b){ return a.at - b.at; }); var c = stops.length ? stops[0].color : 'green'; for (var i = 0; i < stops.length; i++){ if (pct >= stops[i].at) c = stops[i].color; } return c === 'auto' ? 'white' : c; }
+function colorize(t, c){ return (ANSI[c] || ANSI.white) + t + RESET; }
+
+function renderSegment(seg, session){
+  var base = (seg.color && seg.color !== 'auto') ? seg.color : (DEFAULT_COLOR[seg.type] || 'white');
+  var t = seg.type;
+  if (t === 'model'){ var mv = get(session, 'model', 'display_name'); return mv ? { text: String(mv), color: base } : null; }
+  if (t === 'contextBar'){
+    var pct = get(session, 'context_window', 'used_percentage');
+    if (pct == null) return null;
+    var value = clamp(Math.round(Number(pct)), 0, 100);
+    var width = clamp(Math.floor(seg.width == null ? 20 : seg.width), 4, 40);
+    var fillChar = seg.fillChar || '█';
+    var emptyChar = seg.emptyChar || '░';
+    var filled = clamp(Math.round((value / 100) * width), 0, width);
+    var bar = '[' + fillChar.repeat(filled) + emptyChar.repeat(width - filled) + ']';
+    var text = (seg.showPercent === false) ? bar : (bar + ' ' + value + '%');
+    var color = (seg.color && seg.color !== 'auto') ? seg.color : colorForValue(value, seg.thresholds);
+    return { text: text, color: color };
+  }
+  if (t === 'cwd' || t === 'projectDir'){
+    var dir = (t === 'cwd') ? (get(session, 'workspace', 'current_dir') == null ? get(session, 'cwd') : get(session, 'workspace', 'current_dir')) : get(session, 'workspace', 'project_dir');
+    if (!dir) return null;
+    var dtext = (seg.basenameOnly === false) ? String(dir) : basename(String(dir));
+    return { text: dtext, color: base };
+  }
+  if (t === 'gitBranch'){ var gb = get(session, 'workspace', 'git_worktree'); if (gb == null) gb = get(session, 'worktree', 'branch'); return gb ? { text: String(gb), color: base } : null; }
+  if (t === 'repo'){ var owner = get(session, 'workspace', 'repo', 'owner'); var name = get(session, 'workspace', 'repo', 'name'); if (!name) return null; return { text: owner ? (owner + '/' + name) : String(name), color: base }; }
+  if (t === 'cost'){ var usd = get(session, 'cost', 'total_cost_usd'); if (usd == null) return null; return { text: '$' + Number(usd).toFixed(4), color: base }; }
+  if (t === 'duration'){ var ms = get(session, 'cost', 'total_duration_ms'); if (ms == null) return null; return { text: fmtDur(Number(ms)), color: base }; }
+  if (t === 'linesChanged'){ var add = get(session, 'cost', 'total_lines_added'); var rem = get(session, 'cost', 'total_lines_removed'); if (add == null && rem == null) return null; return { text: '+' + (add == null ? 0 : add) + ' -' + (rem == null ? 0 : rem), color: base }; }
+  if (t === 'rateLimit'){ var win = seg.window || 'five_hour'; var rp = get(session, 'rate_limits', win, 'used_percentage'); if (rp == null) return null; var rv = clamp(Math.round(Number(rp)), 0, 100); var label = (win === 'five_hour') ? '5h' : '7d'; var rc = (seg.color && seg.color !== 'auto') ? seg.color : colorForValue(rv, seg.thresholds); return { text: label + ' ' + rv + '%', color: rc }; }
+  if (t === 'outputStyle'){ var ov = get(session, 'output_style', 'name'); return ov ? { text: String(ov), color: base } : null; }
+  if (t === 'effort'){ var ev = get(session, 'effort', 'level'); return ev ? { text: 'effort:' + ev, color: base } : null; }
+  if (t === 'vimMode'){ var vv = get(session, 'vim', 'mode'); return vv ? { text: String(vv), color: base } : null; }
+  if (t === 'pr'){ var num = get(session, 'pr', 'number'); if (num == null) return null; var prs = get(session, 'pr', 'review_state'); return { text: prs ? ('PR #' + num + ' (' + prs + ')') : ('PR #' + num), color: base }; }
+  return null;
+}
+
+var CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse', 'statusline.config.json');
+var raw = '';
+try { raw = fs.readFileSync(0, 'utf8'); } catch (e) { raw = ''; }
+var session = {};
+try { session = JSON.parse(raw || '{}'); } catch (e) { session = {}; }
+var cfg = null;
+try { cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch (e) { cfg = null; }
+if (!cfg || !Array.isArray(cfg.lines)) {
+  cfg = { version: 1, separator: '  ', lines: [{ segments: [{ type: 'model', enabled: true }, { type: 'contextBar', enabled: true, color: 'auto', width: 20, showPercent: true }] }] };
+}
+var out = [];
+var wrapAt = (typeof cfg.maxItemsPerLine === 'number' && cfg.maxItemsPerLine > 0) ? Math.floor(cfg.maxItemsPerLine) : 0;
+for (var li = 0; li < cfg.lines.length; li++){
+  var row = cfg.lines[li];
+  var segs = Array.isArray(row.segments) ? row.segments : [];
+  var pieces = [];
+  for (var si = 0; si < segs.length; si++){
+    if (!segs[si] || !segs[si].enabled) continue;
+    var rr = renderSegment(segs[si], session);
+    if (rr){
+      var ic = segs[si].icon;
+      if (ic && typeof ic === 'string' && ic.length) rr.text = ic + ' ' + rr.text;
+      pieces.push(colorize(rr.text, rr.color));
+    }
+  }
+  if (pieces.length){
+    var sep = (typeof row.separator === 'string') ? row.separator : (typeof cfg.separator === 'string' ? cfg.separator : '  ');
+    if (wrapAt > 0 && pieces.length > wrapAt){
+      for (var ci = 0; ci < pieces.length; ci += wrapAt){ out.push(pieces.slice(ci, ci + wrapAt).join(sep)); }
+    } else {
+      out.push(pieces.join(sep));
+    }
+  }
+}
+process.stdout.write(out.join(NL));
+`;
+  }
+
+  private buildStatusLinePythonScript(): string {
+    return `#!/usr/bin/env python3
+import sys, os, json
+
+ESC = chr(27)
+BS = chr(92)
+NL = chr(10)
+def esc(c): return ESC + '[' + str(c) + 'm'
+ANSI = {'white': esc(37), 'gray': esc(90), 'red': esc(31), 'green': esc(32), 'yellow': esc(33), 'blue': esc(34), 'magenta': esc(35), 'cyan': esc(36)}
+RESET = esc(0)
+DEFAULT_THRESHOLDS = [{'at': 0, 'color': 'green'}, {'at': 50, 'color': 'yellow'}, {'at': 80, 'color': 'red'}]
+DEFAULT_COLOR = {'model': 'white', 'cwd': 'cyan', 'projectDir': 'cyan', 'gitBranch': 'magenta', 'repo': 'blue', 'cost': 'gray', 'duration': 'gray', 'linesChanged': 'gray', 'outputStyle': 'gray', 'effort': 'gray', 'vimMode': 'gray', 'pr': 'blue'}
+
+def clamp(n, lo, hi): return max(lo, min(hi, n))
+
+def get(o, *keys):
+    c = o
+    for k in keys:
+        if not isinstance(c, dict):
+            return None
+        c = c.get(k)
+    return c
+
+def basename(p):
+    p = str(p)
+    i = max(p.rfind('/'), p.rfind(BS))
+    return p[i + 1:] if i >= 0 else p
+
+def fmt_dur(ms):
+    s = int(ms // 1000)
+    if s < 60: return str(s) + 's'
+    m = s // 60
+    if m < 60:
+        return (str(m) + 'm ' + str(s % 60) + 's') if (s % 60) else (str(m) + 'm')
+    h = m // 60
+    return str(h) + 'h ' + str(m % 60) + 'm'
+
+def color_for_value(pct, th):
+    stops = sorted(th if th else DEFAULT_THRESHOLDS, key=lambda x: x['at'])
+    c = stops[0]['color'] if stops else 'green'
+    for st in stops:
+        if pct >= st['at']: c = st['color']
+    return 'white' if c == 'auto' else c
+
+def colorize(t, c): return (ANSI.get(c) or ANSI['white']) + t + RESET
+
+def render_segment(seg, session):
+    sc = seg.get('color')
+    base = sc if (sc and sc != 'auto') else DEFAULT_COLOR.get(seg.get('type'), 'white')
+    t = seg.get('type')
+    if t == 'model':
+        v = get(session, 'model', 'display_name')
+        return {'text': str(v), 'color': base} if v else None
+    if t == 'contextBar':
+        pct = get(session, 'context_window', 'used_percentage')
+        if pct is None: return None
+        value = clamp(int(round(float(pct))), 0, 100)
+        width = clamp(int(seg.get('width') or 20), 4, 40)
+        fill = seg.get('fillChar') or '█'
+        empty = seg.get('emptyChar') or '░'
+        filled = clamp(int(round(value / 100.0 * width)), 0, width)
+        bar = '[' + (fill * filled) + (empty * (width - filled)) + ']'
+        text = bar if seg.get('showPercent') is False else (bar + ' ' + str(value) + '%')
+        color = sc if (sc and sc != 'auto') else color_for_value(value, seg.get('thresholds'))
+        return {'text': text, 'color': color}
+    if t == 'cwd' or t == 'projectDir':
+        if t == 'cwd':
+            d = get(session, 'workspace', 'current_dir')
+            if d is None: d = get(session, 'cwd')
+        else:
+            d = get(session, 'workspace', 'project_dir')
+        if not d: return None
+        text = str(d) if seg.get('basenameOnly') is False else basename(str(d))
+        return {'text': text, 'color': base}
+    if t == 'gitBranch':
+        b = get(session, 'workspace', 'git_worktree')
+        if b is None: b = get(session, 'worktree', 'branch')
+        return {'text': str(b), 'color': base} if b else None
+    if t == 'repo':
+        owner = get(session, 'workspace', 'repo', 'owner')
+        name = get(session, 'workspace', 'repo', 'name')
+        if not name: return None
+        return {'text': (str(owner) + '/' + str(name)) if owner else str(name), 'color': base}
+    if t == 'cost':
+        usd = get(session, 'cost', 'total_cost_usd')
+        if usd is None: return None
+        return {'text': '$' + format(float(usd), '.4f'), 'color': base}
+    if t == 'duration':
+        ms = get(session, 'cost', 'total_duration_ms')
+        if ms is None: return None
+        return {'text': fmt_dur(float(ms)), 'color': base}
+    if t == 'linesChanged':
+        add = get(session, 'cost', 'total_lines_added')
+        rem = get(session, 'cost', 'total_lines_removed')
+        if add is None and rem is None: return None
+        return {'text': '+' + str(add or 0) + ' -' + str(rem or 0), 'color': base}
+    if t == 'rateLimit':
+        win = seg.get('window') or 'five_hour'
+        rp = get(session, 'rate_limits', win, 'used_percentage')
+        if rp is None: return None
+        rv = clamp(int(round(float(rp))), 0, 100)
+        label = '5h' if win == 'five_hour' else '7d'
+        rc = sc if (sc and sc != 'auto') else color_for_value(rv, seg.get('thresholds'))
+        return {'text': label + ' ' + str(rv) + '%', 'color': rc}
+    if t == 'outputStyle':
+        v = get(session, 'output_style', 'name')
+        return {'text': str(v), 'color': base} if v else None
+    if t == 'effort':
+        v = get(session, 'effort', 'level')
+        return {'text': 'effort:' + str(v), 'color': base} if v else None
+    if t == 'vimMode':
+        v = get(session, 'vim', 'mode')
+        return {'text': str(v), 'color': base} if v else None
+    if t == 'pr':
+        num = get(session, 'pr', 'number')
+        if num is None: return None
+        rs = get(session, 'pr', 'review_state')
+        return {'text': ('PR #' + str(num) + ' (' + str(rs) + ')') if rs else ('PR #' + str(num)), 'color': base}
+    return None
+
+CONFIG_PATH = os.path.join(os.path.expanduser('~'), '.claude', 'agent-pulse', 'statusline.config.json')
+try:
+    raw = sys.stdin.read()
+except Exception:
+    raw = ''
+try:
+    session = json.loads(raw or '{}')
+except Exception:
+    session = {}
+try:
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        cfg = json.load(f)
+except Exception:
+    cfg = None
+if not cfg or not isinstance(cfg.get('lines'), list):
+    cfg = {'version': 1, 'separator': '  ', 'lines': [{'segments': [{'type': 'model', 'enabled': True}, {'type': 'contextBar', 'enabled': True, 'color': 'auto', 'width': 20, 'showPercent': True}]}]}
+out = []
+_mipl = cfg.get('maxItemsPerLine')
+wrap_at = int(_mipl) if isinstance(_mipl, (int, float)) and _mipl > 0 else 0
+for row in cfg['lines']:
+    segs = row.get('segments') if isinstance(row.get('segments'), list) else []
+    pieces = []
+    for seg in segs:
+        if not seg or not seg.get('enabled'): continue
+        r = render_segment(seg, session)
+        if r:
+            ic = seg.get('icon')
+            if ic and isinstance(ic, str) and len(ic) > 0:
+                r['text'] = ic + ' ' + r['text']
+            pieces.append(colorize(r['text'], r['color']))
+    if pieces:
+        sep = row.get('separator') if isinstance(row.get('separator'), str) else (cfg.get('separator') if isinstance(cfg.get('separator'), str) else '  ')
+        if wrap_at > 0 and len(pieces) > wrap_at:
+            for ci in range(0, len(pieces), wrap_at):
+                out.append(sep.join(pieces[ci:ci + wrap_at]))
+        else:
+            out.append(sep.join(pieces))
+# Write UTF-8 bytes directly: Windows Python defaults stdout to the locale
+# codepage (cp1252), which cannot encode the bar glyphs.
+sys.stdout.buffer.write(NL.join(out).encode('utf-8'))
+`;
+  }
+
+  private buildStatusLinePowerShellScript(): string {
+    return `$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ESC = [char]27
+$NL = [char]10
+function Esc([int]$c){ return $ESC + '[' + $c + 'm' }
+$ANSI = @{ white = (Esc 37); gray = (Esc 90); red = (Esc 31); green = (Esc 32); yellow = (Esc 33); blue = (Esc 34); magenta = (Esc 35); cyan = (Esc 36) }
+$RESET = (Esc 0)
+$DEFAULT_COLOR = @{ model = 'white'; cwd = 'cyan'; projectDir = 'cyan'; gitBranch = 'magenta'; repo = 'blue'; cost = 'gray'; duration = 'gray'; linesChanged = 'gray'; outputStyle = 'gray'; effort = 'gray'; vimMode = 'gray'; pr = 'blue' }
+$DEFAULT_THRESHOLDS = @( @{ at = 0; color = 'green' }, @{ at = 50; color = 'yellow' }, @{ at = 80; color = 'red' } )
+
+function Clamp($n, $lo, $hi){ if ($n -lt $lo){ return $lo }; if ($n -gt $hi){ return $hi }; return $n }
+
+function GetVal($obj, [string[]]$keys){
+  $c = $obj
+  foreach ($k in $keys){
+    if ($null -eq $c){ return $null }
+    $prop = $c.PSObject.Properties[$k]
+    if ($null -eq $prop){ return $null }
+    $c = $prop.Value
+  }
+  return $c
+}
+
+function BaseName($p){
+  $p = [string]$p
+  $i = [Math]::Max($p.LastIndexOf('/'), $p.LastIndexOf([char]92))
+  if ($i -ge 0){ return $p.Substring($i + 1) }
+  return $p
+}
+
+function FmtDur([double]$ms){
+  $s = [int][Math]::Floor($ms / 1000)
+  if ($s -lt 60){ return ([string]$s + 's') }
+  $m = [int][Math]::Floor($s / 60)
+  if ($m -lt 60){ if (($s % 60) -ne 0){ return ([string]$m + 'm ' + [string]($s % 60) + 's') } else { return ([string]$m + 'm') } }
+  $h = [int][Math]::Floor($m / 60)
+  return ([string]$h + 'h ' + [string]($m % 60) + 'm')
+}
+
+function ColorForValue([double]$pct, $th){
+  $stops = if ($th){ $th } else { $DEFAULT_THRESHOLDS }
+  $stops = $stops | Sort-Object { $_.at }
+  $c = 'green'
+  if ($stops.Count -gt 0){ $c = $stops[0].color }
+  foreach ($s in $stops){ if ($pct -ge $s.at){ $c = $s.color } }
+  if ($c -eq 'auto'){ return 'white' }
+  return $c
+}
+
+function Colorize($t, $c){
+  $code = $ANSI[$c]
+  if ($null -eq $code){ $code = $ANSI['white'] }
+  return $code + $t + $RESET
+}
+
+function RenderSegment($seg, $session){
+  $base = $seg.color
+  if ($null -eq $base -or $base -eq 'auto'){ $base = $DEFAULT_COLOR[$seg.type]; if ($null -eq $base){ $base = 'white' } }
+  $t = $seg.type
+  if ($t -eq 'model'){ $v = GetVal $session @('model', 'display_name'); if ($v){ return @{ text = [string]$v; color = $base } }; return $null }
+  if ($t -eq 'contextBar'){
+    $pct = GetVal $session @('context_window', 'used_percentage')
+    if ($null -eq $pct){ return $null }
+    $value = [int](Clamp ([Math]::Round([double]$pct)) 0 100)
+    $w = if ($null -ne $seg.width){ $seg.width } else { 20 }
+    $width = [int](Clamp ([Math]::Floor([double]$w)) 4 40)
+    $fill = if ($seg.fillChar){ [string]$seg.fillChar } else { '█' }
+    $empty = if ($seg.emptyChar){ [string]$seg.emptyChar } else { '░' }
+    $filled = [int](Clamp ([Math]::Round($value / 100.0 * $width)) 0 $width)
+    $bar = '[' + ($fill * $filled) + ($empty * ($width - $filled)) + ']'
+    $text = if ($seg.showPercent -eq $false){ $bar } else { $bar + ' ' + [string]$value + '%' }
+    $color = $seg.color
+    if ($null -eq $color -or $color -eq 'auto'){ $color = ColorForValue $value $seg.thresholds }
+    return @{ text = $text; color = $color }
+  }
+  if ($t -eq 'cwd' -or $t -eq 'projectDir'){
+    if ($t -eq 'cwd'){ $d = GetVal $session @('workspace', 'current_dir'); if ($null -eq $d){ $d = GetVal $session @('cwd') } } else { $d = GetVal $session @('workspace', 'project_dir') }
+    if (-not $d){ return $null }
+    $text = if ($seg.basenameOnly -eq $false){ [string]$d } else { BaseName $d }
+    return @{ text = $text; color = $base }
+  }
+  if ($t -eq 'gitBranch'){ $b = GetVal $session @('workspace', 'git_worktree'); if ($null -eq $b){ $b = GetVal $session @('worktree', 'branch') }; if ($b){ return @{ text = [string]$b; color = $base } }; return $null }
+  if ($t -eq 'repo'){ $owner = GetVal $session @('workspace', 'repo', 'owner'); $name = GetVal $session @('workspace', 'repo', 'name'); if (-not $name){ return $null }; if ($owner){ return @{ text = ([string]$owner + '/' + [string]$name); color = $base } }; return @{ text = [string]$name; color = $base } }
+  if ($t -eq 'cost'){ $usd = GetVal $session @('cost', 'total_cost_usd'); if ($null -eq $usd){ return $null }; return @{ text = ('$' + ([double]$usd).ToString('F4')); color = $base } }
+  if ($t -eq 'duration'){ $ms = GetVal $session @('cost', 'total_duration_ms'); if ($null -eq $ms){ return $null }; return @{ text = (FmtDur ([double]$ms)); color = $base } }
+  if ($t -eq 'linesChanged'){ $add = GetVal $session @('cost', 'total_lines_added'); $rem = GetVal $session @('cost', 'total_lines_removed'); if (($null -eq $add) -and ($null -eq $rem)){ return $null }; $a = if ($null -ne $add){ $add } else { 0 }; $r = if ($null -ne $rem){ $rem } else { 0 }; return @{ text = ('+' + [string]$a + ' -' + [string]$r); color = $base } }
+  if ($t -eq 'rateLimit'){ $win = if ($seg.window){ [string]$seg.window } else { 'five_hour' }; $rp = GetVal $session @('rate_limits', $win, 'used_percentage'); if ($null -eq $rp){ return $null }; $rv = [int](Clamp ([Math]::Round([double]$rp)) 0 100); $label = if ($win -eq 'five_hour'){ '5h' } else { '7d' }; $rc = $seg.color; if ($null -eq $rc -or $rc -eq 'auto'){ $rc = ColorForValue $rv $seg.thresholds }; return @{ text = ($label + ' ' + [string]$rv + '%'); color = $rc } }
+  if ($t -eq 'outputStyle'){ $v = GetVal $session @('output_style', 'name'); if ($v){ return @{ text = [string]$v; color = $base } }; return $null }
+  if ($t -eq 'effort'){ $v = GetVal $session @('effort', 'level'); if ($v){ return @{ text = ('effort:' + [string]$v); color = $base } }; return $null }
+  if ($t -eq 'vimMode'){ $v = GetVal $session @('vim', 'mode'); if ($v){ return @{ text = [string]$v; color = $base } }; return $null }
+  if ($t -eq 'pr'){ $num = GetVal $session @('pr', 'number'); if ($null -eq $num){ return $null }; $rs = GetVal $session @('pr', 'review_state'); if ($rs){ return @{ text = ('PR #' + [string]$num + ' (' + [string]$rs + ')'); color = $base } }; return @{ text = ('PR #' + [string]$num); color = $base } }
+  return $null
+}
+
+$CONFIG_PATH = Join-Path (Join-Path (Join-Path $HOME '.claude') 'agent-pulse') 'statusline.config.json'
+$raw = [Console]::In.ReadToEnd()
+try { $session = $raw | ConvertFrom-Json } catch { $session = $null }
+if ($null -eq $session){ $session = (New-Object PSObject) }
+$cfg = $null
+try { if (Test-Path $CONFIG_PATH){ $cfg = (Get-Content -Raw -Encoding UTF8 -Path $CONFIG_PATH) | ConvertFrom-Json } } catch { $cfg = $null }
+if ($null -eq $cfg -or $null -eq $cfg.lines){
+  $cfg = ('{"version":1,"separator":"  ","lines":[{"segments":[{"type":"model","enabled":true},{"type":"contextBar","enabled":true,"color":"auto","width":20,"showPercent":true}]}]}' | ConvertFrom-Json)
+}
+$out = @()
+$wrapAt = 0
+if ($null -ne $cfg.maxItemsPerLine){ try { $w = [int]$cfg.maxItemsPerLine; if ($w -gt 0){ $wrapAt = $w } } catch { } }
+foreach ($row in $cfg.lines){
+  $segs = $row.segments
+  $pieces = @()
+  foreach ($seg in $segs){
+    if ($null -eq $seg -or -not $seg.enabled){ continue }
+    $r = RenderSegment $seg $session
+    if ($null -ne $r){
+      $ic = $seg.icon
+      if ($ic -and ($ic -is [string]) -and $ic.Length -gt 0){ $r.text = [string]$ic + ' ' + $r.text }
+      $pieces += (Colorize $r.text $r.color)
+    }
+  }
+  if ($pieces.Count -gt 0){
+    $sep = $row.separator
+    if ($null -eq $sep){ $sep = $cfg.separator }
+    if ($null -eq $sep){ $sep = '  ' }
+    if ($wrapAt -gt 0 -and $pieces.Count -gt $wrapAt){
+      for ($ci = 0; $ci -lt $pieces.Count; $ci += $wrapAt){
+        $end = [Math]::Min($ci + $wrapAt, $pieces.Count) - 1
+        $out += (($pieces[$ci..$end]) -join $sep)
+      }
+    } else {
+      $out += ($pieces -join $sep)
+    }
+  }
+}
+[Console]::Out.Write($out -join $NL)
+`;
   }
 }

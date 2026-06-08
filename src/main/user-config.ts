@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, AttentionConfig, WebhookTarget, WebhookKind } from '../common/types';
+import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold } from '../common/types';
 import { GuardrailConfig } from '../common/guardrails';
 import { logger } from '../common/logger';
 
@@ -91,19 +91,24 @@ export interface UserConfig {
   analytics: AnalyticsConfig;
   updates: UpdaterConfig;
   scheduler: SchedulerConfig;
+  statusLine: StatusLineConfig;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse-config.json');
 
 const DEFAULTS: UserConfig = {
-  enabledBubbles: {
-    'claude-code': true,
-    'cursor': true,
-  },
+  // Empty by design: on a machine with no saved config we seed enabled bubbles
+  // from *detection* at startup (see AgentPulseApp.restoreBubbles) so only tools
+  // actually installed get a bubble. A hard-coded `cursor: true` here used to
+  // force a phantom Cursor bubble — turned on, undismissable — onto PCs that
+  // never had Cursor. Don't reintroduce static defaults.
+  enabledBubbles: {},
   bubble: {
     size: 'medium',
     stackPosition: 'bottom-right',
     sound: 'pop',
+    fillMode: 'glass',
+    fillColor: '#ffffff',
   },
   attention: {
     enabled: true,
@@ -154,6 +159,50 @@ const DEFAULTS: UserConfig = {
     },
     tokenNudge: { enabled: true, leadMs: 2 * 60 * 1000 },
     maxOpenersPerDay: 6,
+  },
+  statusLine: {
+    version: 1,
+    separator: '  ·  ',
+    // Two-line default: an identity row (model · folder · branch) above a
+    // metrics row (context bar · cost · …). Every segment ships its docs-style
+    // emoji so enabling one looks polished out of the box.
+    lines: [
+      {
+        segments: [
+          { type: 'model', enabled: true, color: 'white', icon: '🧠' },
+          { type: 'cwd', enabled: true, color: 'cyan', basenameOnly: true, icon: '📁' },
+          { type: 'gitBranch', enabled: true, color: 'magenta', icon: '🌿' },
+          { type: 'repo', enabled: false, color: 'blue', icon: '📦' },
+          { type: 'pr', enabled: false, color: 'blue', icon: '🔀' },
+        ],
+      },
+      {
+        segments: [
+          {
+            type: 'contextBar',
+            enabled: true,
+            color: 'auto',
+            width: 20,
+            fillChar: '█',
+            emptyChar: '░',
+            showPercent: true,
+            thresholds: [
+              { at: 0, color: 'green' },
+              { at: 50, color: 'yellow' },
+              { at: 80, color: 'red' },
+            ],
+          },
+          { type: 'cost', enabled: false, color: 'gray', icon: '💰' },
+          { type: 'duration', enabled: false, color: 'gray', icon: '⏰' },
+          { type: 'linesChanged', enabled: false, color: 'gray', icon: '±' },
+          { type: 'rateLimit', enabled: false, color: 'auto', window: 'five_hour', icon: '📊' },
+          { type: 'rateLimit', enabled: false, color: 'auto', window: 'seven_day', icon: '📊' },
+          { type: 'outputStyle', enabled: false, color: 'gray', icon: '🎨' },
+          { type: 'effort', enabled: false, color: 'gray', icon: '⚡' },
+          { type: 'vimMode', enabled: false, color: 'gray', icon: '⌨' },
+        ],
+      },
+    ],
   },
 };
 
@@ -226,12 +275,19 @@ function migrateBubble(raw: unknown): BubbleConfig {
   const SIZES: BubbleSize[] = ['small', 'medium', 'large'];
   const POSITIONS: BubbleStackPosition[] = ['bottom-right', 'bottom-left', 'top-right', 'top-left'];
   const SOUNDS: BubbleSoundId[] = ['pop', 'chime', 'ding', 'marimba', 'none'];
+  const FILL_MODES: BubbleFillMode[] = ['glass', 'solid'];
+  // Accept #rgb/#rrggbb or rgb()/rgba() so a hand-edited config can't feed an
+  // arbitrary string into the orb's inline style. Anything else → default.
+  const isColor = (v: unknown): v is string =>
+    typeof v === 'string' && /^(#([0-9a-f]{3}|[0-9a-f]{6})|rgba?\([\d.,\s%]+\))$/i.test(v.trim());
   return {
     size: SIZES.includes(b.size as BubbleSize) ? (b.size as BubbleSize) : d.size,
     stackPosition: POSITIONS.includes(b.stackPosition as BubbleStackPosition)
       ? (b.stackPosition as BubbleStackPosition)
       : d.stackPosition,
     sound: SOUNDS.includes(b.sound as BubbleSoundId) ? (b.sound as BubbleSoundId) : d.sound,
+    fillMode: FILL_MODES.includes(b.fillMode as BubbleFillMode) ? (b.fillMode as BubbleFillMode) : d.fillMode,
+    fillColor: isColor(b.fillColor) ? b.fillColor.trim() : d.fillColor,
   };
 }
 
@@ -273,6 +329,94 @@ function migrateAttention(raw: unknown): AttentionConfig {
     osNotification: typeof a.osNotification === 'boolean' ? a.osNotification : d.osNotification,
     webhooks,
   };
+}
+
+// Whitelists for status-line validation — anything off-list falls back to a
+// default so a hand-edited or stale config can't feed garbage to the deployed
+// renderer script (which trusts the projected JSON).
+const STATUS_LINE_SEGMENT_TYPES: StatusLineSegmentType[] = [
+  'model', 'contextBar', 'cwd', 'projectDir', 'gitBranch', 'repo', 'cost',
+  'duration', 'linesChanged', 'rateLimit', 'outputStyle', 'effort', 'vimMode', 'pr',
+];
+const STATUS_LINE_COLORS: StatusLineColor[] = [
+  'auto', 'white', 'gray', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
+];
+
+function migrateStatusLineColor(raw: unknown, fallback: StatusLineColor): StatusLineColor {
+  return STATUS_LINE_COLORS.includes(raw as StatusLineColor) ? (raw as StatusLineColor) : fallback;
+}
+
+function migrateStatusLineThresholds(raw: unknown): StatusLineThreshold[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const stops = raw
+    .filter((t: any) => t && typeof t.at === 'number')
+    .map((t: any) => ({
+      at: Math.max(0, Math.min(100, Math.floor(t.at))),
+      color: migrateStatusLineColor(t.color, 'white'),
+    }))
+    .sort((a, b) => a.at - b.at);
+  return stops.length ? stops : undefined;
+}
+
+function migrateStatusLineSegment(raw: any): StatusLineSegment | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if (!STATUS_LINE_SEGMENT_TYPES.includes(raw.type)) return null;
+  const seg: StatusLineSegment = {
+    type: raw.type,
+    enabled: typeof raw.enabled === 'boolean' ? raw.enabled : true,
+  };
+  if (raw.color !== undefined) seg.color = migrateStatusLineColor(raw.color, 'white');
+  if (typeof raw.icon === 'string') seg.icon = raw.icon.slice(0, 8);
+  if (typeof raw.width === 'number') seg.width = Math.max(4, Math.min(40, Math.floor(raw.width)));
+  if (typeof raw.fillChar === 'string' && raw.fillChar.length) seg.fillChar = raw.fillChar.slice(0, 2);
+  if (typeof raw.emptyChar === 'string' && raw.emptyChar.length) seg.emptyChar = raw.emptyChar.slice(0, 2);
+  if (typeof raw.showPercent === 'boolean') seg.showPercent = raw.showPercent;
+  const thresholds = migrateStatusLineThresholds(raw.thresholds);
+  if (thresholds) seg.thresholds = thresholds;
+  if (raw.window === 'five_hour' || raw.window === 'seven_day') seg.window = raw.window;
+  if (typeof raw.basenameOnly === 'boolean') seg.basenameOnly = raw.basenameOnly;
+  return seg;
+}
+
+// Validate a persisted status-line block. Falls back wholesale to defaults when
+// the shape is unusable so the installer always has a sane config to project.
+function migrateStatusLine(raw: unknown): StatusLineConfig {
+  const d = DEFAULTS.statusLine;
+  if (!raw || typeof raw !== 'object') {
+    return { version: 1, separator: d.separator, lines: d.lines.map((l) => ({ ...l, segments: l.segments.map((s) => ({ ...s })) })) };
+  }
+  const s = raw as any;
+  const separator = typeof s.separator === 'string' ? s.separator : d.separator;
+  const maxItemsPerLine = typeof s.maxItemsPerLine === 'number' && s.maxItemsPerLine > 0
+    ? Math.max(1, Math.min(20, Math.floor(s.maxItemsPerLine)))
+    : undefined;
+  const wrap = maxItemsPerLine ? { maxItemsPerLine } : {};
+  const linesRaw = Array.isArray(s.lines) ? s.lines : [];
+  const lines = linesRaw
+    .map((row: any) => {
+      if (!row || !Array.isArray(row.segments)) return null;
+      const segments = row.segments
+        .map(migrateStatusLineSegment)
+        .filter((seg: StatusLineSegment | null): seg is StatusLineSegment => seg != null);
+      return {
+        ...(typeof row.separator === 'string' ? { separator: row.separator } : {}),
+        segments,
+      };
+    })
+    .filter((row: any): row is { separator?: string; segments: StatusLineSegment[] } => row != null && row.segments.length > 0);
+
+  // Empty/garbage → fall back to defaults rather than render a blank line.
+  if (!lines.length) {
+    return { version: 1, separator, lines: d.lines.map((l) => ({ ...l, segments: l.segments.map((seg) => ({ ...seg })) })), ...wrap };
+  }
+  return { version: 1, separator, lines, ...wrap };
+}
+
+// A fresh copy of the shipped default status-line layout (two lines + icons).
+// Used by the "Reset to default" action so the renderer never has to duplicate
+// the DEFAULTS shape.
+export function defaultStatusLineConfig(): StatusLineConfig {
+  return migrateStatusLine(undefined);
 }
 
 function migrateEnabledBubbles(raw: unknown): Partial<Record<ToolId, boolean>> {
@@ -337,6 +481,7 @@ export function loadConfig(): UserConfig {
           lastCheckedAt: typeof updates.lastCheckedAt === 'number' ? updates.lastCheckedAt : null,
         },
         scheduler: migrateScheduler(parsed.scheduler),
+        statusLine: migrateStatusLine(parsed.statusLine),
       };
     }
   } catch {
@@ -369,6 +514,7 @@ export function loadConfig(): UserConfig {
     analytics: { ...DEFAULTS.analytics },
     updates: { ...DEFAULTS.updates },
     scheduler: migrateScheduler(undefined),
+    statusLine: migrateStatusLine(undefined),
   };
 }
 

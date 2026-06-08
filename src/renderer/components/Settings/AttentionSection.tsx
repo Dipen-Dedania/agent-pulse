@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AttentionConfig, WebhookKind, WebhookTarget } from '../../../common/types';
 import { logger } from '../../../common/logger';
+import { Select } from '../Shared/Select';
 
 interface Props {
   config: AttentionConfig;
@@ -70,15 +71,13 @@ const WebhookRow: React.FC<{
   return (
     <div className='flex flex-col gap-2 px-4 py-3 rounded-xl border border-slate-700/60 bg-slate-900/40'>
       <div className='flex items-center gap-2'>
-        <select
+        <Select<WebhookKind>
           value={target.kind}
-          onChange={(e) => onChange({ ...target, kind: e.target.value as WebhookKind })}
-          className='bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-slate-200 cursor-pointer'
-        >
-          {KIND_OPTIONS.map((k) => (
-            <option key={k.id} value={k.id}>{k.label}</option>
-          ))}
-        </select>
+          onChange={(kind) => onChange({ ...target, kind })}
+          ariaLabel='Webhook platform'
+          className='px-2 py-1.5 text-sm w-28'
+          options={KIND_OPTIONS.map((k) => ({ value: k.id, label: k.label }))}
+        />
         <input
           type='text'
           value={target.label ?? ''}

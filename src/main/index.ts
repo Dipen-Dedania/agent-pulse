@@ -8,8 +8,8 @@ import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
-import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
-import { ToolId, BubbleConfig, AttentionConfig } from '../common/types';
+import { loadConfig, saveConfig, defaultStatusLineConfig, UserConfig, UsageConfig, CodexUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
+import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
 import { isPatternSafe } from './guardrails/engine';
@@ -104,6 +104,10 @@ class AgentPulseApp {
         Menu.setApplicationMenu(null);
       }
       this.setupIpc();
+      // Refresh an already-installed status line to this app version so script
+      // improvements (e.g. icon rendering) propagate on upgrade without a manual
+      // re-apply. No-ops unless we own the installed status line.
+      this.refreshDeployedStatusLine();
       this.bubbleManager.init();
       this.tooltipManager.init();
       this.usagePoller.init();
@@ -164,10 +168,8 @@ class AgentPulseApp {
         },
       });
 
-      // Restore bubbles from last saved state
-      const enabled = this.userConfig.enabledBubbles;
-      logger.info('[AgentPulseApp] restoring enabled bubbles:', JSON.stringify(enabled));
-      this.bubbleManager.syncEnabledBubbles(enabled);
+      // Restore bubbles from last saved state (seeds from detection on first run).
+      this.restoreBubbles();
 
       this.settingsWindow.show();
     });
@@ -195,6 +197,33 @@ class AgentPulseApp {
     app.on('will-quit', () => {
       logger.info('[AgentPulseApp] will-quit');
     });
+  }
+
+  // Decide which bubbles to show at launch. Normally this is just the user's
+  // persisted choices. But on a fresh machine (nothing persisted yet) we seed
+  // from detection so only *installed* tools get a bubble — never a phantom
+  // Cursor bubble on a PC without Cursor. An explicit choice (any key present,
+  // including `false` values from a user who turned bubbles off) is left alone.
+  private async restoreBubbles() {
+    let enabled = this.userConfig.enabledBubbles;
+    const firstRun = !enabled || Object.keys(enabled).length === 0;
+    if (firstRun) {
+      try {
+        const detected = await this.detector.detectAll();
+        enabled = {};
+        for (const toolId of Object.keys(detected) as ToolId[]) {
+          if (detected[toolId]?.installed) enabled[toolId] = true;
+        }
+        this.userConfig.enabledBubbles = enabled;
+        saveConfig(this.userConfig);
+        logger.info('[AgentPulseApp] first-run bubble seed from detection:', JSON.stringify(enabled));
+      } catch (e) {
+        logger.warn('[AgentPulseApp] detection-based bubble seed failed; starting with none', e);
+        enabled = {};
+      }
+    }
+    logger.info('[AgentPulseApp] restoring enabled bubbles:', JSON.stringify(enabled));
+    this.bubbleManager.syncEnabledBubbles(enabled);
   }
 
   private setupIpc() {
@@ -321,6 +350,69 @@ class AgentPulseApp {
       return updated;
     });
 
+    // ── Claude Code status line ───────────────────────────────────────────
+    // Detect an available script runtime + the current install state so the
+    // Settings UI can show a runtime badge and the right install/remove control.
+    ipcMain.handle('status-line:detect', (): StatusLineDetectInfo => {
+      const runtime = this.detector.detectStatusLineRuntime();
+      return {
+        runtime: runtime?.runtime ?? null,
+        binPath: runtime?.binPath ?? null,
+        state: this.writer.statusLineState(),
+        settingsPath: this.writer.statusLineSettingsPath(),
+      };
+    });
+
+    ipcMain.handle('status-line:get-config', () => this.userConfig.statusLine);
+
+    // Merge + persist the segment/color config. If the status line is already
+    // installed, re-project the deployed config file AND refresh the deployed
+    // renderer script so changes (including script-level features like icons)
+    // take effect immediately. Broadcast so other windows stay in sync.
+    ipcMain.handle('status-line:update-config', (_event, partial: Partial<StatusLineConfig>) => {
+      this.userConfig.statusLine = { ...this.userConfig.statusLine, ...partial };
+      saveConfig(this.userConfig);
+      this.refreshDeployedStatusLine();
+      const updated = this.userConfig.statusLine;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('status-line:config-updated', updated);
+      }
+      return updated;
+    });
+
+    // Reset the status line to the shipped default (two-line layout with icons)
+    // and re-project it live if installed. Lets a user on an older single-line
+    // config jump to the current look without rebuilding it by hand.
+    ipcMain.handle('status-line:reset-config', () => {
+      this.userConfig.statusLine = defaultStatusLineConfig();
+      saveConfig(this.userConfig);
+      this.refreshDeployedStatusLine();
+      const updated = this.userConfig.statusLine;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('status-line:config-updated', updated);
+      }
+      return updated;
+    });
+
+    // Install (or re-install) the status line. Refuses if no runtime is found,
+    // and requires an explicit `replace` flag before clobbering a foreign one.
+    ipcMain.handle('status-line:install', (_event, args: { replace?: boolean } = {}) => {
+      const runtime = this.detector.detectStatusLineRuntime();
+      if (!runtime) return { success: false, reason: 'no-runtime' as const };
+      if (this.writer.statusLineState() === 'foreign' && !args.replace) {
+        return { success: false, reason: 'needs-confirm' as const };
+      }
+      try {
+        const result = this.writer.installStatusLine(this.userConfig.statusLine, runtime.runtime, runtime.binPath);
+        return { ...result, runtime: runtime.runtime };
+      } catch (e) {
+        logger.error('[status-line] install failed', e);
+        return { success: false, reason: 'error' as const, message: String(e) };
+      }
+    });
+
+    ipcMain.handle('status-line:remove', () => this.writer.removeStatusLine());
+
     // ── Guardrails IPC ────────────────────────────────────────────────────
     // Returns built-in rule metadata so the UI can render the rule list
     // without duplicating it. (Patterns are stringified — RegExp doesn't
@@ -398,6 +490,21 @@ class AgentPulseApp {
         packaged: app.isPackaged,
       };
     });
+  }
+
+  // When the status line is installed (ours), push the current config to its
+  // projected JSON and refresh the deployed renderer script to this app
+  // version. The script refresh is what lets features added after first
+  // install — e.g. icon prefixes — start rendering without a manual re-apply.
+  private refreshDeployedStatusLine() {
+    if (this.writer.statusLineState() !== 'ours') return;
+    try {
+      this.writer.writeStatusLineConfig(this.userConfig.statusLine);
+      const runtime = this.writer.installedStatusLineRuntime();
+      if (runtime) this.writer.deployStatusLineScript(runtime);
+    } catch (e) {
+      logger.error('[status-line] failed to refresh deployed status line', e);
+    }
   }
 
   // The bridge couldn't bind its port after retries. The self-collision case

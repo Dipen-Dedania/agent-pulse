@@ -9,7 +9,7 @@ import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
 import { loadConfig, saveConfig, UserConfig, UsageConfig, CodexUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
-import { ToolId, BubbleConfig } from '../common/types';
+import { ToolId, BubbleConfig, AttentionConfig } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
 import { isPatternSafe } from './guardrails/engine';
@@ -20,6 +20,7 @@ import { CodexUsagePoller } from './codex-usage/poller';
 import { AntigravityUsagePoller } from './antigravity-usage/poller';
 import { LlmPricingPoller } from './llm-pricing/poller';
 import { Scheduler } from './scheduler/scheduler';
+import { AttentionEngine } from './attention/engine';
 import { isAutoLaunchEnabled, setAutoLaunch } from './auto-launch';
 import { bootTimeline, TimelineHandle } from './timeline';
 import { bootUpdater, UpdaterHandle } from './updater';
@@ -51,6 +52,7 @@ class AgentPulseApp {
   private antigravityUsagePoller: AntigravityUsagePoller;
   private llmPricingPoller: LlmPricingPoller;
   private scheduler: Scheduler;
+  private attentionEngine: AttentionEngine;
   private timeline: TimelineHandle | null = null;
   private updater!: UpdaterHandle;
 
@@ -80,6 +82,9 @@ class AgentPulseApp {
     // Scheduler consumes the usage poller (live 5-hour resetsAt), so construct
     // it after the poller exists.
     this.scheduler = new Scheduler(this.userConfig.scheduler, { usagePoller: this.usagePoller });
+    // Attention escalation watches state transitions from the bridge's state
+    // manager, so it can be built as soon as the state manager exists.
+    this.attentionEngine = new AttentionEngine(this.userConfig.attention, { stateManager: this.stateManager });
   }
 
   public init() {
@@ -115,6 +120,10 @@ class AgentPulseApp {
       // state on its first reschedule.
       this.scheduler.init();
       this.scheduler.start();
+
+      // Attention escalation: arms timers off waiting-state transitions.
+      this.attentionEngine.init();
+      this.attentionEngine.start();
 
       // Boot Pulse Timeline persistence. Subscribers wire up *after* the
       // pollers are init'd so we don't miss their first emit. If better-
@@ -225,6 +234,20 @@ class AgentPulseApp {
       const updated = this.userConfig.bubble;
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send('bubble:config-updated', updated);
+      }
+      return updated;
+    });
+
+    // Attention escalation config (threshold, channels, webhooks). Merges the
+    // partial, persists, applies to the live engine, and broadcasts so any open
+    // Settings view stays in sync. Returns the merged config.
+    ipcMain.handle('attention:update-config', (_event, partial: Partial<AttentionConfig>) => {
+      this.userConfig.attention = { ...this.userConfig.attention, ...partial };
+      saveConfig(this.userConfig);
+      this.attentionEngine.applyConfig(this.userConfig.attention);
+      const updated = this.userConfig.attention;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('attention:config-updated', updated);
       }
       return updated;
     });

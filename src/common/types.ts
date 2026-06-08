@@ -25,6 +25,30 @@ export interface BubbleConfig {
   sound: BubbleSoundId;
 }
 
+// ─── "Needs you" attention escalation ────────────────────────────────────────
+// When a tool stays in the `waiting` state (agent finished, blocked on the
+// user) longer than `escalateAfterSeconds`, Agent Pulse escalates: it
+// intensifies the bubble animation and POSTs to the user's chat webhook(s).
+// Notify-once per waiting episode; clicking the bubble acknowledges it.
+
+export type WebhookKind = 'discord' | 'slack';
+
+export interface WebhookTarget {
+  id: string;        // stable key for list rendering + delete
+  kind: WebhookKind;
+  label?: string;    // optional user note, e.g. "team channel"
+  url: string;
+  enabled: boolean;
+}
+
+export interface AttentionConfig {
+  enabled: boolean;             // master switch
+  escalateAfterSeconds: number; // delay in `waiting` before escalating (floor enforced)
+  intensifyBubble: boolean;     // visual escalation on the bubble
+  osNotification: boolean;      // also fire a native OS notification (default off)
+  webhooks: WebhookTarget[];
+}
+
 // Content for the rich hover tooltip rendered in a dedicated overlay window
 // (the bubble window is too small to host it). Sent from the bubble renderer
 // to the main process, which positions the overlay and forwards the payload.

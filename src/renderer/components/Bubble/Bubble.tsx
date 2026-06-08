@@ -505,6 +505,31 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     };
   }, [toolId, updateStatus]);
 
+  // Attention escalation — the main-process engine flips this on when the tool
+  // has sat in "waiting" past the user's threshold, and off when it's
+  // acknowledged or the agent moves on. Mirrors the guardrail listener below.
+  const [escalated, setEscalated] = useState(false);
+  useEffect(() => {
+    const onEscalate = (_e: unknown, { toolId: id }: { toolId: ToolId }) => {
+      if (id === toolId) setEscalated(true);
+    };
+    const onClear = (_e: unknown, { toolId: id }: { toolId: ToolId }) => {
+      if (id === toolId) setEscalated(false);
+    };
+    window.electron.on('attention:escalate', onEscalate);
+    window.electron.on('attention:clear', onClear);
+    return () => {
+      window.electron.off('attention:escalate', onEscalate);
+      window.electron.off('attention:clear', onClear);
+    };
+  }, [toolId]);
+
+  // Belt-and-suspenders: drop the local escalation the moment we leave waiting,
+  // so the badge never lingers if the clear broadcast is missed.
+  useEffect(() => {
+    if (state !== 'waiting') setEscalated(false);
+  }, [state]);
+
   // Guardrail signal — amber pulse for warn (~6s auto-fade), red dot for
   // block (persistent until the next event or click). Each bubble listens
   // independently and filters by toolId.
@@ -582,6 +607,10 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           }`,
         );
         window.electron.send('focus-tool', { toolId, agentPid, agentPidChain });
+        // Clicking the bubble counts as "I've seen it" — clear any attention
+        // escalation locally (instant) and tell the engine to stop/cancel.
+        setEscalated(false);
+        window.electron.send('attention:ack', { toolId });
       }
     };
 
@@ -627,6 +656,20 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       transition: { duration: 0.5, repeat: Infinity, repeatDelay: 2 },
     },
   };
+
+  // Escalated "needs you" variant — a faster, larger, bobbing pulse that reads
+  // as more urgent than the calm waiting breath. Only used while still waiting.
+  const escalatedAnimation = {
+    y: [0, -3, 0],
+    boxShadow: [
+      `0 0 2px 1px ${glow}`,
+      `0 0 14px 7px ${glow}`,
+      `0 0 2px 1px ${glow}`,
+    ],
+    transition: { duration: 0.8, repeat: Infinity, ease: 'easeInOut' },
+  };
+  const isEscalated = escalated && state === 'waiting';
+  const activeAnimation = isEscalated ? escalatedAnimation : animations[state];
 
   const stateLabel: Record<AgentState, string> = {
     idle: 'Idle',
@@ -696,7 +739,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     >
       <motion.div
         onMouseDown={onMouseDown}
-        animate={animations[state]}
+        animate={activeAnimation}
         className='relative rounded-full flex items-center justify-center cursor-pointer select-none shrink-0'
         style={{
           width: dims.orb,
@@ -741,6 +784,43 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
             className='absolute rounded-full'
             style={{ width: dims.ring, height: dims.ring, border: `2px dashed ${ring}` }}
           />
+        )}
+
+        {/* Attention escalation — warm-orange ring + bell badge when the tool
+            has waited on the user past the threshold. Distinct from the teal
+            nudge badge and amber/red guardrail ring. */}
+        {isEscalated && (
+          <motion.div
+            animate={{
+              opacity: [0.5, 1, 0.5],
+              boxShadow: [
+                '0 0 0px 0px rgba(249,115,22,0.0)',
+                '0 0 12px 5px rgba(249,115,22,0.75)',
+                '0 0 0px 0px rgba(249,115,22,0.0)',
+              ],
+            }}
+            transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut' }}
+            className='absolute rounded-full pointer-events-none'
+            style={{
+              width: dims.ring + 4,
+              height: dims.ring + 4,
+              border: `2px solid ${isDark ? 'rgba(249,115,22,0.9)' : 'rgba(234,88,12,0.9)'}`,
+            }}
+          />
+        )}
+        {isEscalated && (
+          <div
+            className='absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center'
+            style={{
+              background: isDark ? 'rgba(249,115,22,0.95)' : 'rgba(234,88,12,0.95)',
+              boxShadow: isDark ? '0 0 8px rgba(249,115,22,0.7)' : '0 0 6px rgba(234,88,12,0.5)',
+            }}
+            title='Waiting on you'
+          >
+            <svg viewBox='0 0 24 24' className='w-2.5 h-2.5' fill='white'>
+              <path d='M12 2a6 6 0 0 0-6 6v3.6L4.3 15a1 1 0 0 0 .9 1.4h13.6a1 1 0 0 0 .9-1.4L18 11.6V8a6 6 0 0 0-6-6zm0 20a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22z' />
+            </svg>
+          </div>
         )}
 
         {/* Error dot */}

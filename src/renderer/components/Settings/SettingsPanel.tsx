@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ToolId, UsageStatus, CodexUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig } from '../../../common/types';
+import { ToolId, UsageStatus, CodexUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
@@ -8,6 +8,7 @@ import { CodexUsageSection, CodexUsageConfigUI } from './CodexUsageSection';
 import { AntigravityUsageSection, AntigravityUsageConfigUI } from './AntigravityUsageSection';
 import { SchedulerSection, SchedulerConfigUI } from './SchedulerSection';
 import { BubbleSection } from './BubbleSection';
+import { AttentionSection } from './AttentionSection';
 import { GuardrailsTab } from './GuardrailsTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
 import { UpdatesTab } from './UpdatesTab';
@@ -212,6 +213,7 @@ export const SettingsPanel: React.FC = () => {
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfigUI | null>(null);
   const [bubbleConfig, setBubbleConfig] = useState<BubbleConfig | null>(null);
+  const [attentionConfig, setAttentionConfig] = useState<AttentionConfig | null>(null);
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus>({
     mode: 'off', nextFireAt: null, nextEventKind: null, lastRun: null, openersToday: 0, windowResetsAt: null,
   });
@@ -261,6 +263,7 @@ export const SettingsPanel: React.FC = () => {
         if (config?.antigravityUsage) setAntigravityUsageConfig(config.antigravityUsage);
         if (config?.scheduler) setSchedulerConfig(config.scheduler);
         if (config?.bubble) setBubbleConfig(config.bubble);
+        if (config?.attention) setAttentionConfig(config.attention);
 
         const initialUsage = await window.electron.invoke('usage:get-current').catch(() => null);
         if (initialUsage) setUsageStatus(initialUsage);
@@ -360,6 +363,18 @@ export const SettingsPanel: React.FC = () => {
       setBubbleConfig(updated);
     } catch (e) {
       logger.error('[SettingsPanel] failed to update bubble config', e);
+    }
+  };
+
+  const handleAttentionConfigChange = async (partial: Partial<AttentionConfig>) => {
+    // Optimistic apply for instant feedback, then reconcile with the validated
+    // config the main process returns.
+    setAttentionConfig((prev) => (prev ? { ...prev, ...partial } : prev));
+    try {
+      const updated = await window.electron.invoke('attention:update-config', partial);
+      setAttentionConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update attention config', e);
     }
   };
 
@@ -647,7 +662,12 @@ export const SettingsPanel: React.FC = () => {
 
       {activeTab === 'bubble' && (
         bubbleConfig ? (
-          <BubbleSection config={bubbleConfig} onChange={handleBubbleConfigChange} />
+          <div className='flex flex-col gap-6'>
+            <BubbleSection config={bubbleConfig} onChange={handleBubbleConfigChange} />
+            {attentionConfig && (
+              <AttentionSection config={attentionConfig} onChange={handleAttentionConfigChange} />
+            )}
+          </div>
         ) : (
           <p className='text-slate-400 text-sm'>Bubble settings are loading…</p>
         )

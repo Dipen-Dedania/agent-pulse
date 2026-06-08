@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId } from '../common/types';
+import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, AttentionConfig, WebhookTarget, WebhookKind } from '../common/types';
 import { GuardrailConfig } from '../common/guardrails';
 import { logger } from '../common/logger';
 
@@ -82,6 +82,7 @@ export interface UpdaterConfig {
 export interface UserConfig {
   enabledBubbles: Partial<Record<ToolId, boolean>>;
   bubble: BubbleConfig;
+  attention: AttentionConfig;
   usage: UsageConfig;
   codexUsage: CodexUsageConfig;
   antigravityUsage: AntigravityUsageConfig;
@@ -103,6 +104,13 @@ const DEFAULTS: UserConfig = {
     size: 'medium',
     stackPosition: 'bottom-right',
     sound: 'pop',
+  },
+  attention: {
+    enabled: true,
+    escalateAfterSeconds: 30,
+    intensifyBubble: true,
+    osNotification: false,
+    webhooks: [],
   },
   usage: {
     enabled: true,
@@ -227,6 +235,46 @@ function migrateBubble(raw: unknown): BubbleConfig {
   };
 }
 
+// Smallest allowed escalation delay. Below this the feature would fire almost
+// instantly on every `waiting` flip, defeating the "give the user a moment"
+// intent and risking webhook spam.
+const MIN_ESCALATE_SECONDS = 5;
+
+// Validate a persisted attention block. Clamps the threshold to a sane floor
+// and filters the webhook list to well-formed rows so a hand-edited or stale
+// config can't strand the engine or POST to a garbage URL.
+function migrateAttention(raw: unknown): AttentionConfig {
+  const d = DEFAULTS.attention;
+  const a = (raw && typeof raw === 'object' ? raw : {}) as Partial<AttentionConfig>;
+  const KINDS: WebhookKind[] = ['discord', 'slack'];
+
+  const seconds =
+    typeof a.escalateAfterSeconds === 'number' && a.escalateAfterSeconds >= MIN_ESCALATE_SECONDS
+      ? Math.floor(a.escalateAfterSeconds)
+      : d.escalateAfterSeconds;
+
+  const webhooks: WebhookTarget[] = Array.isArray(a.webhooks)
+    ? a.webhooks
+        .filter((row: any): row is WebhookTarget =>
+          !!row && typeof row.url === 'string' && row.url.trim().length > 0 && KINDS.includes(row.kind))
+        .map((row: any, i: number) => ({
+          id: typeof row.id === 'string' && row.id.length > 0 ? row.id : `wh-${i}-${row.kind}`,
+          kind: row.kind as WebhookKind,
+          label: typeof row.label === 'string' ? row.label : undefined,
+          url: row.url,
+          enabled: typeof row.enabled === 'boolean' ? row.enabled : true,
+        }))
+    : [];
+
+  return {
+    enabled: typeof a.enabled === 'boolean' ? a.enabled : d.enabled,
+    escalateAfterSeconds: seconds,
+    intensifyBubble: typeof a.intensifyBubble === 'boolean' ? a.intensifyBubble : d.intensifyBubble,
+    osNotification: typeof a.osNotification === 'boolean' ? a.osNotification : d.osNotification,
+    webhooks,
+  };
+}
+
 function migrateEnabledBubbles(raw: unknown): Partial<Record<ToolId, boolean>> {
   if (!raw || typeof raw !== 'object') return {};
   const out: Partial<Record<ToolId, boolean>> = {};
@@ -256,6 +304,7 @@ export function loadConfig(): UserConfig {
         ...parsed,
         enabledBubbles: migrateEnabledBubbles(parsed.enabledBubbles),
         bubble: migrateBubble(parsed.bubble),
+        attention: migrateAttention(parsed.attention),
         usage: {
           ...DEFAULTS.usage,
           ...usage,
@@ -296,6 +345,7 @@ export function loadConfig(): UserConfig {
   return {
     ...DEFAULTS,
     bubble: { ...DEFAULTS.bubble },
+    attention: { ...DEFAULTS.attention, webhooks: [] },
     usage: {
       ...DEFAULTS.usage,
       capWarning: { ...DEFAULTS.usage.capWarning },

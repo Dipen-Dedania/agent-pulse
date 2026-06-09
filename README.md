@@ -8,7 +8,7 @@
 
 Agent Pulse is a cross-platform Electron desktop app that surfaces the state of every AI coding agent on your machine through floating, always-on-top status bubbles. Instead of tab-hopping between Claude Code, Cursor, Codex, Copilot, Kiro, and Antigravity to check whether an agent is still working, idle, or has crashed, you see it at a glance in a frosted-glass bubble — anywhere on your desktop.
 
-It also bundles a unified status bridge, subscription usage meters for Claude / Codex / Antigravity, and a configurable shell-command guardrail engine.
+It also bundles a unified status bridge, subscription usage meters for Claude / Codex / Cursor / Antigravity, a local Pulse Timeline with estimated-cost analytics, a configurable Claude Code status line, Discord/Slack attention webhooks, a cowork session scheduler, and a configurable shell-command guardrail engine.
 
 ---
 
@@ -58,6 +58,7 @@ https://github.com/Dipen-Dedania/agent-pulse/releases/latest/download/Agent-Puls
 ### Subscription usage tracking
 - **Claude Code** — polls Anthropic's OAuth usage endpoint for the 5-hour and 7-day windows.
 - **OpenAI Codex** — polls ChatGPT's `/backend-api/wham/usage` for primary (and optional secondary) windows.
+- **Cursor** — polls `cursor.com/api/usage-summary` for the billing-cycle window (utilization %, reset time, plan), authenticated via a session cookie built from Cursor's local `state.vscdb`.
 - **Antigravity** — polls the IDE's local gRPC-Web endpoint for per-model quotas while the IDE is running.
 - Configurable cap-warning ("you're about to hit your limit") and nudge ("use it or lose it before reset") notifications.
 
@@ -73,9 +74,26 @@ https://github.com/Dipen-Dedania/agent-pulse/releases/latest/download/Agent-Puls
 - **Hour-of-day rhythm** — 24-bucket histogram of when you actually pair with agents.
 - **Tool mix** — share of active time per tool over 7 or 30 days.
 - **Model usage** — token + session breakdown per model. v1 captures Claude Code via transcript tailing; other tools' coverage depends on whether their hooks expose a model field.
+- **Estimated cost** — digest, model-usage, tool-mix, and token-timeline cards can switch to a cost view. These are **estimated API list prices only** (input / output / cache-write / cache-read), never real subscription billing. Prices come from a live LiteLLM table cached locally and refreshed daily (offline-safe; falls back to a bundled table). Models without a known price are flagged "unpriced".
 - **Project breakdown** — ranked list of `.git` roots by total active time, with the agents that touched each.
 - Fully local; no telemetry. Privacy toggle redacts task summaries from storage. Idle-gap is configurable. 60-day retention on events and quota samples; sessions kept forever (~300 KB / 30 days).
 - Requires the native module `better-sqlite3`. Run `npm run rebuild:native` after install. If the rebuild fails, the rest of the app keeps working — the timeline simply records nothing until you rebuild.
+
+### Claude Code status line
+- Configurable status line rendered by Claude Code at the bottom of each turn, installed into `~/.claude/settings.json` with one click.
+- Segment-based: pick from model name, context-usage bar, cwd, project dir, git branch, repo, session cost, duration, lines changed, 5-hour / 7-day rate-limit windows, output style, effort level, vim mode, and PR number.
+- A single reference renderer (`src/common/statusline-render.ts`) is exported to a Node/Python/PowerShell script so the line stays consistent across shells; layout, separators, colors, and per-line wrapping are configurable in Settings.
+- Detects and backs up an existing status line before replacing it.
+
+### Attention webhooks (Discord / Slack)
+- An attention engine watches each tool; when an agent sits in the **Waiting** state past a configurable threshold, it escalates once per waiting episode.
+- Escalation can intensify the bubble badge, raise an OS notification, and POST to one or more **Discord** and/or **Slack** webhooks (Discord embeds / Slack mrkdwn) with the tool name, task summary, and idle duration.
+- Per-webhook enable toggles and a "send test" button to validate a URL before relying on it.
+
+### Cowork scheduler
+- Optionally keeps Claude Code's 5-hour windows warm by firing minimal `claude -p` opener pings on a schedule, so a fresh window is ready when you start work.
+- **Fixed** mode (explicit time + weekday slots) or **adaptive** mode (one opener per window reset inside your work hours), with a per-day opener cap.
+- Optional token-refresh nudge fires shortly before the OAuth token expires when no opener is otherwise due. Openers are tiny (~a fraction of a cent each).
 
 ### Desktop integration
 - **Single-instance** — launching the app a second time focuses the running instance instead of spawning a duplicate (which would also collide on the bridge port).
@@ -225,7 +243,13 @@ src/
 │   ├── installer/     # Tool detection + hook config writers
 │   ├── usage/         # Claude usage poller
 │   ├── codex-usage/   # Codex usage poller
+│   ├── cursor-usage/  # Cursor usage poller
 │   ├── antigravity-usage/  # Antigravity IDE usage poller
+│   ├── llm-pricing/   # LiteLLM price-table poller (estimated-cost analytics)
+│   ├── timeline/      # SQLite Pulse Timeline store + writers
+│   ├── attention/     # Waiting-state escalation engine
+│   ├── notifications/ # Discord/Slack webhook senders
+│   ├── scheduler/     # Cowork session opener scheduler
 │   ├── guardrails/    # Core rules + regex safety engine
 │   ├── windows/       # Bubble/Settings BrowserWindow + tray + preload
 │   ├── auto-launch.ts # Cross-OS login-item / autostart integration
@@ -263,8 +287,11 @@ npm run test:bridge
 
 | Path | Purpose |
 | --- | --- |
-| `~/.claude/agent-pulse-config.json` | Persisted user settings (enabled bubbles, usage, guardrails, auto-launch). |
-| `~/.claude/settings.json` | Claude Code HTTP hooks. |
+| `~/.claude/agent-pulse-config.json` | Persisted user settings (enabled bubbles, usage, guardrails, status line, attention webhooks, scheduler, auto-launch). |
+| `~/.claude/settings.json` | Claude Code HTTP hooks + status line registration. |
+| `~/.claude/` status-line script (`.js` / `.py` / `.ps1`) | Status line renderer invoked by Claude Code. |
+| `~/.claude/llm-pricing-cache.json` | Cached LiteLLM price table for estimated-cost analytics. |
+| `~/.cursor/.../state.vscdb` *(read-only)* | Source of the Cursor session token used for usage polling. |
 | `~/.cursor/hooks.json` (+ script) | Cursor shell hooks. |
 | `.github/hooks/agent-pulse-hooks.json` (+ script) | GitHub Copilot per-workspace hooks. |
 | `~/.codex/hooks.json` + `~/.codex/config.toml` | Codex hooks + `codex_hooks` feature flag. |

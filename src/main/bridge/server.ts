@@ -517,6 +517,12 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
             sessionId:    data.conversation_id,
             taskSummary:  data.tool_name ? `Tool: ${data.tool_name}` : undefined,
             errorMessage: data.error_message,
+            // Cursor's base hook payload carries `model` (a model-ID string like
+            // "claude-sonnet-4-20250514"). It's the ONLY model source for Cursor —
+            // there's no token transcript to read — so capturing it here feeds the
+            // session model-usage analytics. Tokens/cost still come from the
+            // usage-summary API; this is attribution only.
+            model:        typeof data.model === 'string' ? data.model : undefined,
             ...common,
           },
         };

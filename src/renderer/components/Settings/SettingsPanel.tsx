@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo } from '../../../common/types';
+import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
 import { UsageSection, UsageConfigUI } from './UsageSection';
 import { CodexUsageSection, CodexUsageConfigUI } from './CodexUsageSection';
 import { CursorUsageSection, CursorUsageConfigUI } from './CursorUsageSection';
+import { CopilotUsageSection, CopilotUsageConfigUI } from './CopilotUsageSection';
 import { AntigravityUsageSection, AntigravityUsageConfigUI } from './AntigravityUsageSection';
 import { SchedulerSection, SchedulerConfigUI } from './SchedulerSection';
 import { BubbleSection } from './BubbleSection';
@@ -213,6 +214,8 @@ export const SettingsPanel: React.FC = () => {
   const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
   const [cursorUsageConfig, setCursorUsageConfig] = useState<CursorUsageConfigUI | null>(null);
   const [cursorUsageStatus, setCursorUsageStatus] = useState<CursorUsageStatus>({ state: 'unknown' });
+  const [copilotUsageConfig, setCopilotUsageConfig] = useState<CopilotUsageConfigUI | null>(null);
+  const [copilotUsageStatus, setCopilotUsageStatus] = useState<CopilotUsageStatus>({ state: 'unknown' });
   const [antigravityUsageConfig, setAntigravityUsageConfig] = useState<AntigravityUsageConfigUI | null>(null);
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfigUI | null>(null);
@@ -267,6 +270,7 @@ export const SettingsPanel: React.FC = () => {
         if (config?.usage) setUsageConfig(config.usage);
         if (config?.codexUsage) setCodexUsageConfig(config.codexUsage);
         if (config?.cursorUsage) setCursorUsageConfig(config.cursorUsage);
+        if (config?.copilotUsage) setCopilotUsageConfig(config.copilotUsage);
         if (config?.antigravityUsage) setAntigravityUsageConfig(config.antigravityUsage);
         if (config?.scheduler) setSchedulerConfig(config.scheduler);
         if (config?.bubble) setBubbleConfig(config.bubble);
@@ -281,6 +285,8 @@ export const SettingsPanel: React.FC = () => {
         if (initialCodexUsage) setCodexUsageStatus(initialCodexUsage);
         const initialCursorUsage = await window.electron.invoke('cursor-usage:get-current').catch(() => null);
         if (initialCursorUsage) setCursorUsageStatus(initialCursorUsage);
+        const initialCopilotUsage = await window.electron.invoke('copilot-usage:get-current').catch(() => null);
+        if (initialCopilotUsage) setCopilotUsageStatus(initialCopilotUsage);
         const initialAntigravityUsage = await window.electron.invoke('antigravity-usage:get-current').catch(() => null);
         if (initialAntigravityUsage) setAntigravityUsageStatus(initialAntigravityUsage);
         const initialScheduler = await window.electron.invoke('scheduler:get-current').catch(() => null);
@@ -310,6 +316,12 @@ export const SettingsPanel: React.FC = () => {
     const handler = (_event: unknown, incoming: CursorUsageStatus) => setCursorUsageStatus(incoming);
     window.electron.on('cursor-usage:updated', handler);
     return () => window.electron.off('cursor-usage:updated', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: CopilotUsageStatus) => setCopilotUsageStatus(incoming);
+    window.electron.on('copilot-usage:updated', handler);
+    return () => window.electron.off('copilot-usage:updated', handler);
   }, []);
 
   useEffect(() => {
@@ -367,6 +379,19 @@ export const SettingsPanel: React.FC = () => {
 
   const handleCursorUsageRefresh = () => {
     window.electron.send('cursor-usage:refresh-now');
+  };
+
+  const handleCopilotUsageConfigChange = async (partial: Partial<CopilotUsageConfigUI>) => {
+    try {
+      const updated = await window.electron.invoke('copilot-usage:update-config', partial);
+      setCopilotUsageConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update Copilot usage config', e);
+    }
+  };
+
+  const handleCopilotUsageRefresh = () => {
+    window.electron.send('copilot-usage:refresh-now');
   };
 
   const handleAntigravityUsageConfigChange = async (partial: Partial<AntigravityUsageConfigUI>) => {
@@ -787,6 +812,14 @@ export const SettingsPanel: React.FC = () => {
               onRefresh={handleCursorUsageRefresh}
             />
           )}
+          {copilotUsageConfig && (
+            <CopilotUsageSection
+              config={copilotUsageConfig}
+              status={copilotUsageStatus}
+              onChange={handleCopilotUsageConfigChange}
+              onRefresh={handleCopilotUsageRefresh}
+            />
+          )}
           {antigravityUsageConfig && (
             <AntigravityUsageSection
               config={antigravityUsageConfig}
@@ -813,7 +846,7 @@ export const SettingsPanel: React.FC = () => {
               onReset={handleStatusLineReset}
             />
           )}
-          {!usageConfig && !codexUsageConfig && !cursorUsageConfig && !antigravityUsageConfig && !schedulerConfig && (
+          {!usageConfig && !codexUsageConfig && !cursorUsageConfig && !copilotUsageConfig && !antigravityUsageConfig && !schedulerConfig && (
             <p className='text-slate-400 text-sm'>Usage settings are loading…</p>
           )}
         </>

@@ -167,6 +167,23 @@ describe('Cursor events', () => {
     expect(r?.toolId).toBe('cursor');
     expect(r?.state).toBe('idle-active');
   });
+
+  it('captures the model id from the base payload (only model source for Cursor)', () => {
+    const payload = {
+      hook_event_name: 'preToolUse',
+      cursor_version: '0.50.0',
+      conversation_id: 'conv-4',
+      model: 'claude-sonnet-4-20250514',
+    };
+    const r = normalizePayload(payload);
+    expect(r?.toolId).toBe('cursor');
+    expect(r?.payload.model).toBe('claude-sonnet-4-20250514');
+  });
+
+  it('omits model when the base payload has no model field', () => {
+    const r = normalizePayload(cursor('preToolUse'));
+    expect(r?.payload.model).toBeUndefined();
+  });
 });
 
 // ── VS Code Copilot ───────────────────────────────────────────────────────────

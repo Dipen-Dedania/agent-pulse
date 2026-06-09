@@ -195,6 +195,48 @@ export interface CursorUsageStatus {
   nudgeActive?: CursorUsageNudgeFlags;
 }
 
+// ─── GitHub Copilot usage ────────────────────────────────────────────────────
+// Two-tier source (see memory `copilot-usage-source`):
+//   - METADATA (always, no network/keychain): signed-in username + SKU read from
+//     VS Code's local state.vscdb (`github.copilot-github`, copilotSku keys) —
+//     same SQLite/ItemTable shape Cursor uses.
+//   - LIVE QUOTA (opt-in, off by default): GET api.github.com/copilot_internal/user
+//     with the gho_ OAuth token read from the OS keychain. Returns monthly
+//     quota_snapshots for chat / completions / premium_interactions. Undocumented
+//     ("official clients only" per GitHub) — hence the explicit opt-in.
+// Each quota maps to one monthly-cycle window: utilization = 100 − percent_remaining,
+// resetsAt = quota_reset_date_utc. We reuse the same bar/tooltip visuals as the others.
+
+export interface CopilotQuotaWindow {
+  key: 'chat' | 'completions' | 'premium_interactions';
+  label: string;            // user-facing, e.g. "Chat"
+  utilization: number;      // 0–100 (= 100 − percent_remaining)
+  remaining: number;
+  entitlement: number;      // monthly allowance
+  unlimited: boolean;
+  resetsAt: number;         // ms epoch (monthly reset)
+}
+
+export interface CopilotUsageSnapshot {
+  username?: string;
+  sku?: string;             // e.g. "free_limited_copilot"
+  quotas: CopilotQuotaWindow[];   // only windows with entitlement > 0 or unlimited
+  source: 'live' | 'metadata-only';
+}
+
+export interface CopilotUsageNudgeFlags {
+  chat: boolean;
+  completions: boolean;
+}
+
+export interface CopilotUsageStatus {
+  state: UsageState;
+  snapshot?: CopilotUsageSnapshot;
+  lastUpdated?: number;
+  message?: string;
+  nudgeActive?: CopilotUsageNudgeFlags;
+}
+
 // ─── Antigravity IDE subscription usage ──────────────────────────────────────
 // Sourced from the Antigravity IDE's local gRPC-Web endpoint
 // (https://127.0.0.1:5362/exa.language_server_pb.LanguageServerService/

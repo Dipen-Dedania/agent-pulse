@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
-import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, CursorUsageStatus, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload } from '../../../common/types';
+import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, CopilotQuotaWindow, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload } from '../../../common/types';
 import { GuardrailEvent } from '../../../common/guardrails';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
@@ -140,6 +140,26 @@ function cursorTooltipLines(status: CursorUsageStatus): string[] {
     return [`${plan} · ${detail} · resets ${formatRelativeReset(s.plan.resetsAt)}`];
   }
   return [status.message ?? `Cursor usage: ${status.state}`];
+}
+
+function copilotTooltipLines(status: CopilotUsageStatus): string[] {
+  if (status.state === 'ok' && status.snapshot) {
+    const s = status.snapshot;
+    // Completions is hidden from the bubble (kept in Settings only), matching
+    // the bars in CopilotUsageBars.
+    const quotas = s.quotas.filter((q) => q.key !== 'completions');
+    if (quotas.length > 0) {
+      return quotas.map((q) =>
+        q.unlimited
+          ? `${q.label} · unlimited`
+          : `${q.label} · ${Math.round(100 - q.utilization)}% left · resets ${formatRelativeReset(q.resetsAt)}`,
+      );
+    }
+    // metadata-only (live quota off, or nothing billable)
+    const who = s.username ? `Signed in as ${s.username}` : 'Signed in';
+    return [s.sku ? `${who} · ${s.sku}` : who];
+  }
+  return [status.message ?? `Copilot usage: ${status.state}`];
 }
 
 function antigravityTooltipLines(status: AntigravityUsageStatus, visible: AntigravityModelWindow[]): string[] {
@@ -294,6 +314,56 @@ const CursorUsageBars: React.FC<CursorUsageBarsProps> = ({ status, isDark, bar }
   );
 };
 
+interface CopilotUsageBarsProps {
+  status: CopilotUsageStatus;
+  isDark: boolean;
+  bar: BarDims;
+}
+
+// One bar per live quota window. The Completions quota is intentionally hidden
+// from the bubble (kept in Settings only). When there's nothing live to show
+// (live quota off, or signed out), we render no bars at all rather than a
+// placeholder — an empty Copilot bubble means "no live quota".
+const CopilotUsageBars: React.FC<CopilotUsageBarsProps> = ({ status, isDark, bar }) => {
+  const isOk = status.state === 'ok' && !!status.snapshot;
+  const quotas = (status.snapshot?.quotas ?? []).filter((q) => q.key !== 'completions');
+
+  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+
+  const renderBar = (window: CopilotQuotaWindow | undefined) => {
+    const remaining = isOk && window ? (window.unlimited ? 100 : 100 - window.utilization) : 0;
+    const fill = isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill;
+    const widthPct = isOk && window ? Math.max(2, Math.min(100, remaining)) : 0;
+    return (
+      <div
+        key={window?.key ?? '_'}
+        className='relative rounded-full overflow-hidden'
+        style={{ width: bar.width, height: bar.height, background: trackColor }}
+      >
+        {widthPct > 0 && (
+          <div
+            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
+            style={{ width: `${widthPct}%`, background: fill }}
+          />
+        )}
+      </div>
+    );
+  };
+
+  // No live quota → render nothing (no placeholder bar).
+  if (quotas.length === 0) return null;
+
+  return (
+    <div
+      className='flex flex-col items-center mt-1 pointer-events-auto'
+      style={{ gap: bar.gap }}
+    >
+      {quotas.map((q) => renderBar(q))}
+    </div>
+  );
+};
+
 // The Antigravity bubble surfaces exactly two models — the ones the user
 // cares about day-to-day. Matched against displayName (and modelKey as a
 // fallback) case-insensitively so format drift on either side won't drop
@@ -361,6 +431,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const [showSevenDay, setShowSevenDay] = useState(true);
   const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
   const [cursorUsageStatus, setCursorUsageStatus] = useState<CursorUsageStatus>({ state: 'unknown' });
+  const [copilotUsageStatus, setCopilotUsageStatus] = useState<CopilotUsageStatus>({ state: 'unknown' });
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
   const [bubbleSize, setBubbleSize] = useState<BubbleSize>('medium');
@@ -455,6 +526,23 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     window.electron.on('cursor-usage:updated', handler);
     return () => {
       window.electron.off('cursor-usage:updated', handler);
+    };
+  }, [toolId]);
+
+  // Copilot usage — only meaningful for the vscode-copilot bubble.
+  useEffect(() => {
+    if (toolId !== 'vscode-copilot') return;
+    window.electron
+      .invoke('copilot-usage:get-current')
+      .then((s: CopilotUsageStatus) => setCopilotUsageStatus(s))
+      .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] copilot-usage:get-current failed`, e));
+
+    const handler = (_event: unknown, incoming: CopilotUsageStatus) => {
+      setCopilotUsageStatus(incoming);
+    };
+    window.electron.on('copilot-usage:updated', handler);
+    return () => {
+      window.electron.off('copilot-usage:updated', handler);
     };
   }, [toolId]);
 
@@ -773,13 +861,15 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       lines.push(...codexTooltipLines(codexUsageStatus));
     } else if (toolId === 'cursor') {
       lines.push(...cursorTooltipLines(cursorUsageStatus));
+    } else if (toolId === 'vscode-copilot') {
+      lines.push(...copilotTooltipLines(copilotUsageStatus));
     } else if (toolId === 'antigravity-cli') {
       lines.push(...antigravityTooltipLines(antigravityUsageStatus, visibleAntigravityModels(antigravityUsageStatus)));
     }
     if (status?.currentTask) lines.unshift(status.currentTask);
 
     return { title: meta.label, subtitle: subtitle.join(' · '), lines, accent: glow };
-  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, cursorUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow]);
+  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, cursorUsageStatus, copilotUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow]);
 
   // Push fresh content to the overlay while hovering (so usage updates show
   // live); the show/position/visibility is handled by the main process.
@@ -1032,6 +1122,25 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           </div>
         )}
 
+        {/* Same use-it-or-lose-it badge for the Copilot bubble. */}
+        {toolId === 'vscode-copilot' &&
+          (copilotUsageStatus.nudgeActive?.chat || copilotUsageStatus.nudgeActive?.completions) && (
+            <div
+              className='absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center'
+              style={{
+                background: isDark ? 'rgba(20,184,166,0.95)' : 'rgba(13,148,136,0.95)',
+                boxShadow: isDark
+                  ? '0 0 8px rgba(20,184,166,0.7)'
+                  : '0 0 6px rgba(13,148,136,0.5)',
+              }}
+              title='Unused Copilot quota about to reset'
+            >
+              <svg viewBox='0 0 24 24' className='w-2.5 h-2.5' fill='white'>
+                <path d='M13 2L4.09 13.6h7.41L11 22l8.91-11.6h-7.41L13 2z' />
+              </svg>
+            </div>
+          )}
+
         {/* Antigravity nudge — active when ANY model is about to reset with
             unused quota above the threshold. */}
         {toolId === 'antigravity-cli' &&
@@ -1073,6 +1182,11 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       {/* Cursor subscription usage bar — only rendered for the Cursor bubble. */}
       {toolId === 'cursor' && (
         <CursorUsageBars status={cursorUsageStatus} isDark={isDark} bar={dims.bar} />
+      )}
+
+      {/* Copilot subscription usage bars — only rendered for the Copilot bubble. */}
+      {toolId === 'vscode-copilot' && (
+        <CopilotUsageBars status={copilotUsageStatus} isDark={isDark} bar={dims.bar} />
       )}
 
       {/* Antigravity per-model usage bars — only rendered for the Antigravity bubble. */}

@@ -40,6 +40,19 @@ export interface CursorUsageConfig {
   nudge: UsageNotificationConfig;
 }
 
+// GitHub Copilot. Metadata (username + SKU) is read from VS Code's local
+// state.vscdb every poll — no manual token entry, no network. `liveQuota` gates
+// the opt-in path that reads the gho_ OAuth token from the OS keychain and calls
+// the undocumented api.github.com/copilot_internal/user endpoint; OFF by default.
+// Hard floor 600_000 (10m); the monthly quota moves slowly.
+export interface CopilotUsageConfig {
+  enabled: boolean;
+  liveQuota: boolean;                  // opt-in: keychain read + undocumented API call
+  intervalMs: number;                  // hard floor 600_000 (10m) enforced by poller
+  capWarning: UsageNotificationConfig;
+  nudge: UsageNotificationConfig;
+}
+
 // Antigravity IDE has per-model quotas — the endpoint is local-only (queries
 // the IDE's embedded language server) so polling is cheap but only works
 // while the IDE is running. Hard floor is 60s, default 5min.
@@ -96,6 +109,7 @@ export interface UserConfig {
   usage: UsageConfig;
   codexUsage: CodexUsageConfig;
   cursorUsage: CursorUsageConfig;
+  copilotUsage: CopilotUsageConfig;
   antigravityUsage: AntigravityUsageConfig;
   guardrails: GuardrailConfig;
   autoLaunch: boolean;
@@ -143,6 +157,13 @@ const DEFAULTS: UserConfig = {
   },
   cursorUsage: {
     enabled: true,
+    intervalMs: 30 * 60 * 1000,
+    capWarning: { enabled: true, threshold: 10 },
+    nudge:      { enabled: false, threshold: 50 },
+  },
+  copilotUsage: {
+    enabled: true,
+    liveQuota: false,
     intervalMs: 30 * 60 * 1000,
     capWarning: { enabled: true, threshold: 10 },
     nudge:      { enabled: false, threshold: 50 },
@@ -457,6 +478,7 @@ export function loadConfig(): UserConfig {
       const usage = parsed.usage ?? {};
       const codexUsage = parsed.codexUsage ?? {};
       const cursorUsage = parsed.cursorUsage ?? {};
+      const copilotUsage = parsed.copilotUsage ?? {};
       const antigravityUsage = parsed.antigravityUsage ?? {};
       const guardrails = parsed.guardrails ?? {};
       const analytics = parsed.analytics ?? {};
@@ -484,6 +506,12 @@ export function loadConfig(): UserConfig {
           ...cursorUsage,
           capWarning: { ...DEFAULTS.cursorUsage.capWarning, ...(cursorUsage.capWarning ?? {}) },
           nudge:      { ...DEFAULTS.cursorUsage.nudge,      ...(cursorUsage.nudge ?? {}) },
+        },
+        copilotUsage: {
+          ...DEFAULTS.copilotUsage,
+          ...copilotUsage,
+          capWarning: { ...DEFAULTS.copilotUsage.capWarning, ...(copilotUsage.capWarning ?? {}) },
+          nudge:      { ...DEFAULTS.copilotUsage.nudge,      ...(copilotUsage.nudge ?? {}) },
         },
         antigravityUsage: {
           ...DEFAULTS.antigravityUsage,
@@ -529,6 +557,11 @@ export function loadConfig(): UserConfig {
       ...DEFAULTS.cursorUsage,
       capWarning: { ...DEFAULTS.cursorUsage.capWarning },
       nudge:      { ...DEFAULTS.cursorUsage.nudge },
+    },
+    copilotUsage: {
+      ...DEFAULTS.copilotUsage,
+      capWarning: { ...DEFAULTS.copilotUsage.capWarning },
+      nudge:      { ...DEFAULTS.copilotUsage.nudge },
     },
     antigravityUsage: {
       ...DEFAULTS.antigravityUsage,

@@ -30,6 +30,16 @@ export interface CodexUsageConfig {
   nudge: UsageNotificationConfig;
 }
 
+// Cursor exposes a single billing-cycle quota via /api/usage-summary. The
+// credential is read from Cursor's local SQLite DB on every poll, so no manual
+// token entry. Hard floor 600_000 (10m); the billing cycle moves slowly.
+export interface CursorUsageConfig {
+  enabled: boolean;
+  intervalMs: number;                  // hard floor 600_000 (10m) enforced by poller
+  capWarning: UsageNotificationConfig;
+  nudge: UsageNotificationConfig;
+}
+
 // Antigravity IDE has per-model quotas — the endpoint is local-only (queries
 // the IDE's embedded language server) so polling is cheap but only works
 // while the IDE is running. Hard floor is 60s, default 5min.
@@ -85,6 +95,7 @@ export interface UserConfig {
   attention: AttentionConfig;
   usage: UsageConfig;
   codexUsage: CodexUsageConfig;
+  cursorUsage: CursorUsageConfig;
   antigravityUsage: AntigravityUsageConfig;
   guardrails: GuardrailConfig;
   autoLaunch: boolean;
@@ -128,6 +139,12 @@ const DEFAULTS: UserConfig = {
     enabled: true,
     intervalMs: 15 * 60 * 1000,
     capWarning: { enabled: true, threshold: 20 },
+    nudge:      { enabled: false, threshold: 50 },
+  },
+  cursorUsage: {
+    enabled: true,
+    intervalMs: 30 * 60 * 1000,
+    capWarning: { enabled: true, threshold: 10 },
     nudge:      { enabled: false, threshold: 50 },
   },
   antigravityUsage: {
@@ -439,6 +456,7 @@ export function loadConfig(): UserConfig {
       const parsed = JSON.parse(raw);
       const usage = parsed.usage ?? {};
       const codexUsage = parsed.codexUsage ?? {};
+      const cursorUsage = parsed.cursorUsage ?? {};
       const antigravityUsage = parsed.antigravityUsage ?? {};
       const guardrails = parsed.guardrails ?? {};
       const analytics = parsed.analytics ?? {};
@@ -460,6 +478,12 @@ export function loadConfig(): UserConfig {
           ...codexUsage,
           capWarning: { ...DEFAULTS.codexUsage.capWarning, ...(codexUsage.capWarning ?? {}) },
           nudge:      { ...DEFAULTS.codexUsage.nudge,      ...(codexUsage.nudge ?? {}) },
+        },
+        cursorUsage: {
+          ...DEFAULTS.cursorUsage,
+          ...cursorUsage,
+          capWarning: { ...DEFAULTS.cursorUsage.capWarning, ...(cursorUsage.capWarning ?? {}) },
+          nudge:      { ...DEFAULTS.cursorUsage.nudge,      ...(cursorUsage.nudge ?? {}) },
         },
         antigravityUsage: {
           ...DEFAULTS.antigravityUsage,
@@ -500,6 +524,11 @@ export function loadConfig(): UserConfig {
       ...DEFAULTS.codexUsage,
       capWarning: { ...DEFAULTS.codexUsage.capWarning },
       nudge:      { ...DEFAULTS.codexUsage.nudge },
+    },
+    cursorUsage: {
+      ...DEFAULTS.cursorUsage,
+      capWarning: { ...DEFAULTS.cursorUsage.capWarning },
+      nudge:      { ...DEFAULTS.cursorUsage.nudge },
     },
     antigravityUsage: {
       ...DEFAULTS.antigravityUsage,

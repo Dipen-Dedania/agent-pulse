@@ -8,7 +8,7 @@ import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
-import { loadConfig, saveConfig, defaultStatusLineConfig, UserConfig, UsageConfig, CodexUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
+import { loadConfig, saveConfig, defaultStatusLineConfig, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
 import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
@@ -17,6 +17,7 @@ import { logger } from '../common/logger';
 import { installFileLogSink } from './file-log-sink';
 import { UsagePoller } from './usage/poller';
 import { CodexUsagePoller } from './codex-usage/poller';
+import { CursorUsagePoller } from './cursor-usage/poller';
 import { AntigravityUsagePoller } from './antigravity-usage/poller';
 import { LlmPricingPoller } from './llm-pricing/poller';
 import { Scheduler } from './scheduler/scheduler';
@@ -49,6 +50,7 @@ class AgentPulseApp {
   private userConfig: UserConfig;
   private usagePoller: UsagePoller;
   private codexUsagePoller: CodexUsagePoller;
+  private cursorUsagePoller: CursorUsagePoller;
   private antigravityUsagePoller: AntigravityUsagePoller;
   private llmPricingPoller: LlmPricingPoller;
   private scheduler: Scheduler;
@@ -77,6 +79,7 @@ class AgentPulseApp {
     this.writer = new ConfigWriter();
     this.usagePoller = new UsagePoller(this.userConfig.usage);
     this.codexUsagePoller = new CodexUsagePoller(this.userConfig.codexUsage);
+    this.cursorUsagePoller = new CursorUsagePoller(this.userConfig.cursorUsage);
     this.antigravityUsagePoller = new AntigravityUsagePoller(this.userConfig.antigravityUsage);
     this.llmPricingPoller = new LlmPricingPoller();
     // Scheduler consumes the usage poller (live 5-hour resetsAt), so construct
@@ -114,6 +117,8 @@ class AgentPulseApp {
       this.usagePoller.start();
       this.codexUsagePoller.init();
       this.codexUsagePoller.start();
+      this.cursorUsagePoller.init();
+      this.cursorUsagePoller.start();
       this.antigravityUsagePoller.init();
       this.antigravityUsagePoller.start();
       // Refresh model pricing from LiteLLM (cached daily; bundled fallback).
@@ -137,6 +142,7 @@ class AgentPulseApp {
         stateManager: this.stateManager,
         usagePoller: this.usagePoller,
         codexUsagePoller: this.codexUsagePoller,
+        cursorUsagePoller: this.cursorUsagePoller,
         antigravityUsagePoller: this.antigravityUsagePoller,
         redactTaskText: this.userConfig.analytics.redactTaskText,
         idleGapMinutes: this.userConfig.analytics.idleGapMinutes,
@@ -185,6 +191,7 @@ class AgentPulseApp {
       (app as unknown as { isQuitting: boolean }).isQuitting = true;
       this.usagePoller.stop();
       this.codexUsagePoller.stop();
+      this.cursorUsagePoller.stop();
       this.antigravityUsagePoller.stop();
       this.llmPricingPoller.stop();
       this.scheduler.stop();
@@ -324,6 +331,17 @@ class AgentPulseApp {
       const updated = this.userConfig.codexUsage;
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send('codex-usage:config-updated', updated);
+      }
+      return updated;
+    });
+
+    ipcMain.handle('cursor-usage:update-config', (_event, partial: Partial<CursorUsageConfig>) => {
+      this.userConfig.cursorUsage = { ...this.userConfig.cursorUsage, ...partial };
+      saveConfig(this.userConfig);
+      this.cursorUsagePoller.applyConfig(this.userConfig.cursorUsage);
+      const updated = this.userConfig.cursorUsage;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('cursor-usage:config-updated', updated);
       }
       return updated;
     });

@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
-import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload } from '../../../common/types';
+import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, CursorUsageStatus, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload } from '../../../common/types';
 import { GuardrailEvent } from '../../../common/guardrails';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
@@ -127,6 +127,21 @@ function codexTooltipLines(status: CodexUsageStatus): string[] {
   return [status.message ?? `Codex usage: ${status.state}`];
 }
 
+function cursorTooltipLines(status: CursorUsageStatus): string[] {
+  if (status.state === 'ok' && status.snapshot) {
+    const s = status.snapshot;
+    const remaining = 100 - s.plan.utilization;
+    const plan = s.membershipType ? `Cursor (${s.membershipType})` : 'Cursor';
+    // Show used/limit when a real limit exists; otherwise fall back to %.
+    const detail =
+      typeof s.limit === 'number' && s.limit > 0 && typeof s.remaining === 'number'
+        ? `${s.remaining}/${s.limit} left`
+        : `${remaining}% left`;
+    return [`${plan} · ${detail} · resets ${formatRelativeReset(s.plan.resetsAt)}`];
+  }
+  return [status.message ?? `Cursor usage: ${status.state}`];
+}
+
 function antigravityTooltipLines(status: AntigravityUsageStatus, visible: AntigravityModelWindow[]): string[] {
   if (status.state === 'ok' && visible.length > 0) {
     return visible.map((m) => `${m.displayName} · ${Math.round(100 - m.utilization)}% · resets ${formatRelativeReset(m.resetsAt)}`);
@@ -237,6 +252,48 @@ const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark, bar }) 
   );
 };
 
+interface CursorUsageBarsProps {
+  status: CursorUsageStatus;
+  isDark: boolean;
+  bar: BarDims;
+}
+
+const CursorUsageBars: React.FC<CursorUsageBarsProps> = ({ status, isDark, bar }) => {
+  const isOk = status.state === 'ok' && !!status.snapshot;
+  const plan = status.snapshot?.plan;
+
+  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
+  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+
+  const renderBar = (window: UsageWindow | undefined) => {
+    const remaining = isOk && window ? 100 - window.utilization : 0;
+    const fill = isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill;
+    const widthPct = isOk && window ? Math.max(2, Math.min(100, remaining)) : 0;
+    return (
+      <div
+        className='relative rounded-full overflow-hidden'
+        style={{ width: bar.width, height: bar.height, background: trackColor }}
+      >
+        {widthPct > 0 && (
+          <div
+            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
+            style={{ width: `${widthPct}%`, background: fill }}
+          />
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className='flex flex-col items-center mt-1 pointer-events-auto'
+      style={{ gap: bar.gap }}
+    >
+      {renderBar(plan)}
+    </div>
+  );
+};
+
 // The Antigravity bubble surfaces exactly two models — the ones the user
 // cares about day-to-day. Matched against displayName (and modelKey as a
 // fallback) case-insensitively so format drift on either side won't drop
@@ -303,6 +360,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
   const [showSevenDay, setShowSevenDay] = useState(true);
   const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
+  const [cursorUsageStatus, setCursorUsageStatus] = useState<CursorUsageStatus>({ state: 'unknown' });
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
   const [bubbleSize, setBubbleSize] = useState<BubbleSize>('medium');
@@ -380,6 +438,23 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     window.electron.on('codex-usage:updated', handler);
     return () => {
       window.electron.off('codex-usage:updated', handler);
+    };
+  }, [toolId]);
+
+  // Cursor usage — only meaningful for the cursor bubble.
+  useEffect(() => {
+    if (toolId !== 'cursor') return;
+    window.electron
+      .invoke('cursor-usage:get-current')
+      .then((s: CursorUsageStatus) => setCursorUsageStatus(s))
+      .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] cursor-usage:get-current failed`, e));
+
+    const handler = (_event: unknown, incoming: CursorUsageStatus) => {
+      setCursorUsageStatus(incoming);
+    };
+    window.electron.on('cursor-usage:updated', handler);
+    return () => {
+      window.electron.off('cursor-usage:updated', handler);
     };
   }, [toolId]);
 
@@ -696,13 +771,15 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       lines.push(...claudeTooltipLines(usageStatus, showSevenDay));
     } else if (toolId === 'openai-codex') {
       lines.push(...codexTooltipLines(codexUsageStatus));
+    } else if (toolId === 'cursor') {
+      lines.push(...cursorTooltipLines(cursorUsageStatus));
     } else if (toolId === 'antigravity-cli') {
       lines.push(...antigravityTooltipLines(antigravityUsageStatus, visibleAntigravityModels(antigravityUsageStatus)));
     }
     if (status?.currentTask) lines.unshift(status.currentTask);
 
     return { title: meta.label, subtitle: subtitle.join(' · '), lines, accent: glow };
-  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow]);
+  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, cursorUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow]);
 
   // Push fresh content to the overlay while hovering (so usage updates show
   // live); the show/position/visibility is handled by the main process.
@@ -937,6 +1014,24 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
             </div>
           )}
 
+        {/* Same use-it-or-lose-it badge for the Cursor bubble. */}
+        {toolId === 'cursor' && cursorUsageStatus.nudgeActive?.plan && (
+          <div
+            className='absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center'
+            style={{
+              background: isDark ? 'rgba(20,184,166,0.95)' : 'rgba(13,148,136,0.95)',
+              boxShadow: isDark
+                ? '0 0 8px rgba(20,184,166,0.7)'
+                : '0 0 6px rgba(13,148,136,0.5)',
+            }}
+            title='Unused Cursor credit about to reset'
+          >
+            <svg viewBox='0 0 24 24' className='w-2.5 h-2.5' fill='white'>
+              <path d='M13 2L4.09 13.6h7.41L11 22l8.91-11.6h-7.41L13 2z' />
+            </svg>
+          </div>
+        )}
+
         {/* Antigravity nudge — active when ANY model is about to reset with
             unused quota above the threshold. */}
         {toolId === 'antigravity-cli' &&
@@ -973,6 +1068,11 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       {/* Codex subscription usage bars — only rendered for the Codex bubble. */}
       {toolId === 'openai-codex' && (
         <CodexUsageBars status={codexUsageStatus} isDark={isDark} bar={dims.bar} />
+      )}
+
+      {/* Cursor subscription usage bar — only rendered for the Cursor bubble. */}
+      {toolId === 'cursor' && (
+        <CursorUsageBars status={cursorUsageStatus} isDark={isDark} bar={dims.bar} />
       )}
 
       {/* Antigravity per-model usage bars — only rendered for the Antigravity bubble. */}

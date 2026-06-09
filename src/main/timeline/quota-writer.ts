@@ -2,6 +2,7 @@ import { TimelineDb } from './db';
 import {
   UsageStatus,
   CodexUsageStatus,
+  CursorUsageStatus,
   AntigravityUsageStatus,
 } from '../../common/types';
 
@@ -50,6 +51,20 @@ export class QuotaWriter {
         sampledAt,
       });
     }
+  }
+
+  /** Persist Cursor's single billing-cycle window. */
+  public onCursorUsage(status: CursorUsageStatus) {
+    if (status.state !== 'ok' || !status.snapshot) return;
+    const sampledAt = status.lastUpdated ?? Date.now();
+    const { plan } = status.snapshot;
+    this.db.insertQuotaSample({
+      toolId: 'cursor',
+      windowKey: 'plan',
+      pctRemaining: Math.max(0, Math.min(100, 100 - plan.utilization)),
+      resetsAt: plan.resetsAt,
+      sampledAt,
+    });
   }
 
   /** Persist one row per Antigravity model that has a real quota window. */

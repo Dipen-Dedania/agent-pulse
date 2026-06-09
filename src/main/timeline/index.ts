@@ -11,12 +11,14 @@ import { PruneScheduler } from './prune';
 import { StatusStateManager } from '../bridge/state-manager';
 import { UsagePoller } from '../usage/poller';
 import { CodexUsagePoller } from '../codex-usage/poller';
+import { CursorUsagePoller } from '../cursor-usage/poller';
 import { AntigravityUsagePoller } from '../antigravity-usage/poller';
 
 export interface TimelineBootOptions {
   stateManager: StatusStateManager;
   usagePoller: UsagePoller;
   codexUsagePoller: CodexUsagePoller;
+  cursorUsagePoller: CursorUsagePoller;
   antigravityUsagePoller: AntigravityUsagePoller;
   redactTaskText: boolean;
   idleGapMinutes?: number;
@@ -75,6 +77,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
   // ── Wire usage pollers → quota writer. ────────────────────────────────
   const unsubClaude = opts.usagePoller.subscribe((status) => quotaWriter.onClaudeUsage(status));
   const unsubCodex  = opts.codexUsagePoller.subscribe((status) => quotaWriter.onCodexUsage(status));
+  const unsubCursor = opts.cursorUsagePoller.subscribe((status) => quotaWriter.onCursorUsage(status));
   const unsubAg     = opts.antigravityUsagePoller.subscribe((status) => quotaWriter.onAntigravityUsage(status));
 
   registerTimelineIpc(queries);
@@ -101,6 +104,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
       try { unsubEvents(); } catch { /* ignore */ }
       try { unsubClaude(); } catch { /* ignore */ }
       try { unsubCodex(); }  catch { /* ignore */ }
+      try { unsubCursor(); } catch { /* ignore */ }
       try { unsubAg(); }     catch { /* ignore */ }
       prune.stop();
       unregisterTimelineIpc();

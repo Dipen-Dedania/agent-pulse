@@ -165,6 +165,36 @@ export interface CodexUsageStatus {
   nudgeActive?: CodexUsageNudgeFlags;
 }
 
+// ─── Cursor subscription usage ───────────────────────────────────────────────
+// Sourced from Cursor's undocumented /api/usage-summary endpoint, authenticated
+// with the WorkosCursorSessionToken built from the access token Cursor stores in
+// its local SQLite DB (…/Cursor/User/globalStorage/state.vscdb). Unlike Claude/
+// Codex (rolling rate-limit windows), Cursor is a single BILLING-CYCLE quota:
+// `utilization` is the % of the plan consumed and `resetsAt` is the cycle end.
+// We reuse UsageWindow so the bubble bar + tooltip render the same as the others.
+
+export interface CursorUsageSnapshot {
+  plan: UsageWindow;          // utilization = totalPercentUsed, resetsAt = billingCycleEnd
+  membershipType?: string;    // "free" | "pro" | "business" | …
+  used?: number;
+  limit?: number;             // 0 / null upstream → treated as unlimited
+  remaining?: number;
+  breakdown?: { included: number; bonus: number; total: number };
+  onDemandEnabled?: boolean;
+}
+
+export interface CursorUsageNudgeFlags {
+  plan: boolean;
+}
+
+export interface CursorUsageStatus {
+  state: UsageState;
+  snapshot?: CursorUsageSnapshot;
+  lastUpdated?: number;
+  message?: string;
+  nudgeActive?: CursorUsageNudgeFlags;
+}
+
 // ─── Antigravity IDE subscription usage ──────────────────────────────────────
 // Sourced from the Antigravity IDE's local gRPC-Web endpoint
 // (https://127.0.0.1:5362/exa.language_server_pb.LanguageServerService/

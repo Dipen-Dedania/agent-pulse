@@ -57,6 +57,22 @@ export class StatusStateManager {
     });
   }
 
+  // Seed a last-known agent PID recovered from the timeline DB at startup so
+  // a bubble click can PID-target the hosting window before the first hook
+  // event of this app run (the statuses map starts empty after a restart).
+  // Never overwrites live data and doesn't broadcast — it's a focus hint,
+  // not a state change; updateStatus latches over it once real events arrive.
+  public seedAgentPid(toolId: ToolId, agentPid: number, lastUpdated: number) {
+    if (this.statuses.has(toolId)) return;
+    this.statuses.set(toolId, {
+      toolId,
+      state: 'idle',
+      lastUpdated,
+      activeAgents: 0,
+      agentPid,
+    });
+  }
+
   public onEvent(listener: EventStreamListener): () => void {
     this.eventListeners.add(listener);
     return () => { this.eventListeners.delete(listener); };

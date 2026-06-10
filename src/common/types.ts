@@ -15,6 +15,16 @@ export type BubbleSize = 'small' | 'medium' | 'large';
 // vertical center from whichever corner is chosen.
 export type BubbleStackPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 
+// Where the user last dragged the stack: the top-of-stack bubble's window
+// position in global DIP coordinates (so it lands on whichever monitor it was
+// dragged to). Overrides stackPosition while set; cleared when the user picks
+// a corner preset in Settings. If the monitor it lived on is unplugged, the
+// stack clamps onto the nearest remaining display rather than vanishing.
+export interface BubbleAnchor {
+  x: number;
+  y: number;
+}
+
 // Sound played when a bubble flips into the "waiting for input" state. 'pop'
 // is the bundled wav; the rest are synthesized in the renderer; 'none' is silent.
 export type BubbleSoundId = 'pop' | 'chime' | 'ding' | 'marimba' | 'none';
@@ -27,6 +37,7 @@ export type BubbleFillMode = 'glass' | 'solid';
 export interface BubbleConfig {
   size: BubbleSize;
   stackPosition: BubbleStackPosition;
+  anchor: BubbleAnchor | null; // drag-placed stack position; null → use stackPosition
   sound: BubbleSoundId;
   fillMode: BubbleFillMode;
   fillColor: string;          // CSS color used when fillMode === 'solid' (e.g. '#ffffff')

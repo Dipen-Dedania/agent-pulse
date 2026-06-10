@@ -30,11 +30,13 @@ const POSITION_OPTIONS: { id: BubbleStackPosition; label: string }[] = [
 ];
 
 // A small monitor mock-up with a clickable bubble dot in each corner so the
-// stack anchor reads at a glance.
+// stack anchor reads at a glance. When the user has drag-placed the stack
+// (custom anchor), no corner lights up — picking one snaps the stack back.
 const PositionPicker: React.FC<{
   value: BubbleStackPosition;
+  hasCustomAnchor: boolean;
   onChange: (next: BubbleStackPosition) => void;
-}> = ({ value, onChange }) => {
+}> = ({ value, hasCustomAnchor, onChange }) => {
   const cornerClass: Record<BubbleStackPosition, string> = {
     'top-left':     'top-2 left-2',
     'top-right':    'top-2 right-2',
@@ -45,8 +47,13 @@ const PositionPicker: React.FC<{
     <div className='relative w-full max-w-[280px] aspect-[16/10] rounded-xl bg-slate-900/60 border border-slate-700/70 overflow-hidden'>
       {/* faux taskbar */}
       <div className='absolute bottom-0 left-0 right-0 h-2 bg-slate-700/50' />
+      {hasCustomAnchor && (
+        <span className='absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-widest text-slate-400 font-semibold pointer-events-none'>
+          Custom
+        </span>
+      )}
       {POSITION_OPTIONS.map((opt) => {
-        const active = value === opt.id;
+        const active = !hasCustomAnchor && value === opt.id;
         return (
           <button
             key={opt.id}
@@ -191,15 +198,16 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
         <div className='flex flex-col sm:flex-row items-start gap-5'>
           <PositionPicker
             value={config.stackPosition}
-            onChange={(next) => onChange({ stackPosition: next })}
+            hasCustomAnchor={config.anchor != null}
+            onChange={(next) => onChange({ stackPosition: next, anchor: null })}
           />
           <div className='grid grid-cols-2 gap-2'>
             {POSITION_OPTIONS.map((opt) => {
-              const active = config.stackPosition === opt.id;
+              const active = config.anchor == null && config.stackPosition === opt.id;
               return (
                 <button
                   key={opt.id}
-                  onClick={() => onChange({ stackPosition: opt.id })}
+                  onClick={() => onChange({ stackPosition: opt.id, anchor: null })}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                     active
                       ? 'bg-blue-600 text-white'
@@ -213,7 +221,9 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           </div>
         </div>
         <p className='text-xs text-slate-500'>
-          Bubbles anchor to the {selectedPositionLabel.toLowerCase()} corner and stack toward the screen's middle.
+          {config.anchor != null
+            ? 'Bubbles stay where you dragged them — on any monitor — and stack toward that screen\'s middle. Pick a corner to snap back to a preset.'
+            : `Bubbles anchor to the ${selectedPositionLabel.toLowerCase()} corner and stack toward the screen's middle. Drag a bubble to place the stack anywhere, on any monitor.`}
         </p>
       </div>
 

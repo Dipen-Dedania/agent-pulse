@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold } from '../common/types';
+import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold } from '../common/types';
 import { GuardrailConfig } from '../common/guardrails';
 import { logger } from '../common/logger';
 
@@ -131,6 +131,7 @@ const DEFAULTS: UserConfig = {
   bubble: {
     size: 'medium',
     stackPosition: 'bottom-right',
+    anchor: null,
     sound: 'pop',
     fillMode: 'glass',
     fillColor: '#ffffff',
@@ -318,11 +319,21 @@ function migrateBubble(raw: unknown): BubbleConfig {
   // arbitrary string into the orb's inline style. Anything else → default.
   const isColor = (v: unknown): v is string =>
     typeof v === 'string' && /^(#([0-9a-f]{3}|[0-9a-f]{6})|rgba?\([\d.,\s%]+\))$/i.test(v.trim());
+  // A drag-placed anchor must be a finite point. Coordinates may legitimately
+  // be negative (monitors left of / above the primary), so no range check here
+  // — BubbleManager clamps onto a live display at placement time.
+  const anchor =
+    b.anchor && typeof b.anchor === 'object' &&
+    Number.isFinite((b.anchor as BubbleAnchor).x) &&
+    Number.isFinite((b.anchor as BubbleAnchor).y)
+      ? { x: Math.round((b.anchor as BubbleAnchor).x), y: Math.round((b.anchor as BubbleAnchor).y) }
+      : null;
   return {
     size: SIZES.includes(b.size as BubbleSize) ? (b.size as BubbleSize) : d.size,
     stackPosition: POSITIONS.includes(b.stackPosition as BubbleStackPosition)
       ? (b.stackPosition as BubbleStackPosition)
       : d.stackPosition,
+    anchor,
     sound: SOUNDS.includes(b.sound as BubbleSoundId) ? (b.sound as BubbleSoundId) : d.sound,
     fillMode: FILL_MODES.includes(b.fillMode as BubbleFillMode) ? (b.fillMode as BubbleFillMode) : d.fillMode,
     fillColor: isColor(b.fillColor) ? b.fillColor.trim() : d.fillColor,

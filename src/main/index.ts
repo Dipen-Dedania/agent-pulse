@@ -74,6 +74,20 @@ class AgentPulseApp {
       onListenError: (err, port) => this.handleBridgeListenError(err, port),
     });
     this.bubbleManager = new BubbleManager(this.userConfig.bubble);
+    // Bubble clicks resolve focus PIDs from the bridge's state, not just the
+    // renderer's mirror — covers PIDs rehydrated at boot (never broadcast).
+    this.bubbleManager.getToolStatus = (toolId) => this.stateManager.getStatus(toolId);
+    // Drag-end → persist the new stack anchor and let every renderer (open
+    // Settings included) see the updated config. applyConfig restacks, which
+    // clamps the anchor onto a live display and settles the grow direction.
+    this.bubbleManager.onAnchorChange = (anchor) => {
+      this.userConfig.bubble = { ...this.userConfig.bubble, anchor };
+      saveConfig(this.userConfig);
+      this.bubbleManager.applyConfig(this.userConfig.bubble);
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('bubble:config-updated', this.userConfig.bubble);
+      }
+    };
     this.tooltipManager = new TooltipManager();
     this.settingsWindow = new SettingsWindow();
     this.trayManager = new TrayManager();
@@ -91,6 +105,30 @@ class AgentPulseApp {
     // Attention escalation watches state transitions from the bridge's state
     // manager, so it can be built as soon as the state manager exists.
     this.attentionEngine = new AttentionEngine(this.userConfig.attention, { stateManager: this.stateManager });
+  }
+
+  // Recover each tool's last-known agent PID from the timeline DB so bubble
+  // clicks right after a restart can still PID-target the hosting window
+  // (in-memory statuses start empty). Bounded to the last 24h: older PIDs
+  // are almost certainly dead, and Windows recycles PIDs — walking a
+  // recycled one could focus an unrelated window.
+  private rehydrateAgentPids() {
+    const db = this.timeline?.db;
+    if (!db) return;
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const rows = db.query<{ toolId: ToolId; agentPid: number | null; ts: number }>(
+      `SELECT tool_id AS toolId, agent_pid AS agentPid, MAX(timestamp) AS ts
+       FROM events
+       WHERE agent_pid IS NOT NULL AND timestamp > ?
+       GROUP BY tool_id`,
+      [cutoff],
+    );
+    for (const row of rows) {
+      if (typeof row.agentPid === 'number' && row.agentPid > 0) {
+        this.stateManager.seedAgentPid(row.toolId, row.agentPid, row.ts);
+        logger.info(`[AgentPulseApp] rehydrated agentPid ${row.agentPid} for ${row.toolId}`);
+      }
+    }
   }
 
   public init() {
@@ -152,6 +190,7 @@ class AgentPulseApp {
         redactTaskText: this.userConfig.analytics.redactTaskText,
         idleGapMinutes: this.userConfig.analytics.idleGapMinutes,
       });
+      this.rehydrateAgentPids();
 
       // Sync the OS login-item state to whatever we persisted. Cheap and
       // self-healing if the user toggled it externally.
@@ -270,6 +309,11 @@ class AgentPulseApp {
     // Resizes/restacks live windows immediately, then broadcasts so every
     // bubble renderer can re-scale its orb and switch its chime without a poll.
     ipcMain.handle('bubble:update-config', (_event, partial: Partial<BubbleConfig>) => {
+      // Picking a corner preset is an explicit placement choice — it always
+      // overrides a drag-placed anchor, even if the renderer forgot to clear it.
+      if (partial.stackPosition !== undefined && partial.anchor === undefined) {
+        partial = { ...partial, anchor: null };
+      }
       this.userConfig.bubble = { ...this.userConfig.bubble, ...partial };
       saveConfig(this.userConfig);
       this.bubbleManager.applyConfig(this.userConfig.bubble);

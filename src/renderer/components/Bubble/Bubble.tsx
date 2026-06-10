@@ -761,6 +761,12 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
 
+      // Real drag → tell main to persist where the stack now sits, so the
+      // position survives restarts and restacks.
+      if (hasDragged) {
+        window.electron.send('bubble-drag-end');
+      }
+
       // No meaningful movement → treat as a click, bring the tool to front.
       // Pass the latest known agent PID + ancestor chain so the main process
       // can walk up the process tree to the specific terminal/window hosting

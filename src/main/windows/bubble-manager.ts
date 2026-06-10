@@ -1,10 +1,11 @@
-import { BrowserWindow, ipcMain, screen, app } from 'electron';
+import { BrowserWindow, ipcMain, screen, app, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { execFile } from 'child_process';
+import { promisify } from 'util';
 import open, { openApp } from 'open';
-import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition } from '../../common/types';
+import { ToolId, ToolStatus, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor } from '../../common/types';
 import { logger } from '../../common/logger';
 
 // Pixel footprint of the bubble window per size. Width hugs the orb; height is
@@ -25,26 +26,55 @@ const TOOL_APP_NAME: Record<ToolId, { mac: string; linux: string }> = {
   'vscode-copilot': { mac: 'Visual Studio Code', linux: 'code' },
   'claude-code':    { mac: 'Terminal',            linux: 'x-terminal-emulator' },
   'openai-codex':   { mac: 'Terminal',            linux: 'x-terminal-emulator' },
-  'antigravity-cli':{ mac: 'Terminal',            linux: 'x-terminal-emulator' },
+  // agy ships with the Antigravity IDE — activate/launch that, not a bare terminal.
+  'antigravity-cli':{ mac: 'Antigravity',         linux: 'antigravity' },
   'kiro':           { mac: 'Kiro',                linux: 'kiro' },
 };
 
 // ─── Windows ─────────────────────────────────────────────────────────────────
-// Process names to search for each tool, in priority order.
-// GUI tools: their own process name (Cursor, Code, Kiro).
-// Terminal tools: the CLI process first, then common terminal hosts as fallback.
-// EnumWindows returns windows front→back (Z-order), so the first match is always
-// the most-recently-active window — correct when multiple instances are open.
-const TOOL_WIN_PROCESS_NAMES: Record<ToolId, string[]> = {
+// GUI editors own their windows, so a direct window-owner search by process
+// name works. EnumWindows returns windows front→back (Z-order), so the first
+// match is the most-recently-active window — correct with multiple instances.
+const TOOL_WIN_WINDOW_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
   'cursor':         ['Cursor'],
   'vscode-copilot': ['Code'],
   'kiro':           ['Kiro'],
-  'claude-code':    ['claude', 'WindowsTerminal', 'pwsh', 'powershell', 'cmd'],
-  'openai-codex':   ['codex',  'WindowsTerminal', 'pwsh', 'powershell', 'cmd'],
-  'antigravity-cli':['agy', 'WindowsTerminal', 'pwsh', 'powershell', 'cmd'],
+  // The agy CLI ships with the Antigravity IDE — when no CLI session is
+  // found, a running IDE window is the next-best focus target.
+  'antigravity-cli': ['Antigravity'],
+  // Codex desktop app (MSIX-packaged Electron, process name `Codex`).
+  'openai-codex':    ['Codex'],
 };
 
-// Fallback launch paths for GUI tools that aren't running yet.
+// CLI agents never own a window — their terminal HOST does. To focus them
+// without a hook-captured PID, find the live CLI process by name and walk its
+// parent chain to the window (focusWindowByPid). Generic terminal-host names
+// (WindowsTerminal, pwsh, …) must NOT be searched directly: that foregrounds
+// whichever terminal is topmost, usually another tool's session.
+const TOOL_WIN_CLI_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
+  'claude-code':    ['claude'],
+  'openai-codex':   ['codex'],
+  'antigravity-cli':['agy'],
+};
+
+// URI schemes registered by GUI editors (HKCR on Windows, LaunchServices on
+// macOS, x-scheme-handler on Linux). Used only to RESOLVE/launch the app when
+// it is not running — never to focus an already-open window (a scheme can't
+// target a window, and `<scheme>://file/...` deeplinks would overwrite the
+// user's open folder; see bubble-click-research.md). claude-code has no entry
+// on purpose: it's terminal-only, nothing to launch.
+const TOOL_URI_SCHEMES: Partial<Record<ToolId, string>> = {
+  'cursor':          'cursor',
+  'vscode-copilot':  'vscode',
+  'kiro':            'kiro',        // unverified (Kiro registers no scheme on this machine); harmless if absent
+  'antigravity-cli': 'antigravity', // the agy CLI ships with the Antigravity IDE — launch that
+  'openai-codex':    'codex',       // Codex desktop app is MSIX-packaged: protocol activation only, no shell\open\command
+};
+
+const execFileAsync = promisify(execFile);
+
+// Last-resort launch paths for GUI tools, used only when the URI-scheme
+// registration (resolveWindowsExeFromScheme) yields nothing.
 const TOOL_WIN_EXE_CANDIDATES: Partial<Record<ToolId, string[]>> = {
   'cursor': [
     '%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe',
@@ -60,6 +90,34 @@ const TOOL_WIN_EXE_CANDIDATES: Partial<Record<ToolId, string[]>> = {
   ],
 };
 
+/**
+ * Resolve a tool's exe from its URI-scheme registration:
+ * `HKCR\<scheme>\shell\open\command` → `"C:\...\Cursor.exe" --open-url -- "%1"`.
+ * The OS keeps this current across installs/moves, so it beats any hard-coded
+ * path list. We extract the exe and launch it plainly rather than opening the
+ * bare scheme URL — per-fork handling of an empty deeplink is undefined.
+ */
+async function resolveWindowsExeFromScheme(toolId: ToolId): Promise<string | null> {
+  const scheme = TOOL_URI_SCHEMES[toolId];
+  if (!scheme) return null;
+  try {
+    const { stdout } = await execFileAsync('reg', [
+      'query', `HKCR\\${scheme}\\shell\\open\\command`, '/ve',
+    ]);
+    const valueMatch = stdout.match(/REG_SZ\s+(.+)/);
+    if (!valueMatch) return null;
+    const command = valueMatch[1].trim();
+    const exe = command.match(/^"([^"]+)"/)?.[1] ?? command.match(/^(\S+?\.exe)/i)?.[1];
+    if (exe && fs.existsSync(exe)) return exe;
+    logger.debug(`[BubbleManager] ${scheme}:// command exe not on disk: ${exe ?? command}`);
+    return null;
+  } catch {
+    // reg.exe exits non-zero when the key doesn't exist — scheme not registered.
+    logger.debug(`[BubbleManager] no ${scheme}:// registration in HKCR`);
+    return null;
+  }
+}
+
 function resolveWindowsExe(toolId: ToolId): string | null {
   const candidates = TOOL_WIN_EXE_CANDIDATES[toolId];
   if (!candidates) return null;
@@ -69,6 +127,48 @@ function resolveWindowsExe(toolId: ToolId): string | null {
     if (fs.existsSync(resolved)) return resolved;
   }
   return null;
+}
+
+// True when the scheme is registered at all (the `URL Protocol` marker on the
+// HKCR key). MSIX-packaged apps (e.g. the Codex desktop app) register exactly
+// this stub — protocol activation is routed by the OS with no
+// shell\open\command — so an exe can't be resolved but opening the URL works.
+// Gating on this marker also keeps shell.openExternal from popping the
+// "find an app in the Store" dialog for unregistered schemes.
+async function windowsSchemeIsRegistered(scheme: string): Promise<boolean> {
+  try {
+    await execFileAsync('reg', ['query', `HKCR\\${scheme}`, '/v', 'URL Protocol']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// PIDs of all live CLI processes matching any of `names` (exe name without
+// extension). Feeds focusWindowByPid for CLI tools whose hook PID is unknown.
+// Processes installed under WindowsApps are excluded: those are MSIX GUI apps
+// that can share a CLI's name (the Codex desktop app's processes are
+// `Codex.exe`), and walking a GUI process's ancestors escapes the app into
+// whatever launched it (e.g. the browser that handled its URI scheme).
+async function getWindowsPidsByName(names: string[]): Promise<number[]> {
+  const parsePids = (stdout: string): number[] => stdout
+    .split(/\r?\n/)
+    .map((line) => parseInt(line.trim(), 10))
+    .filter((pid) => Number.isFinite(pid) && pid > 0);
+  try {
+    const nameList = names.map((n) => `'${n}'`).join(',');
+    // `exit 0`: Get-Process records a non-terminating error for each name with
+    // no matching process (even under SilentlyContinue), which makes
+    // powershell.exe exit 1 although matches for OTHER names were printed fine.
+    const { stdout } = await execFileAsync('powershell', [
+      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
+      `Get-Process -Name ${nameList} -ErrorAction SilentlyContinue | Where-Object { $_.Path -notlike '*\\WindowsApps\\*' } | ForEach-Object { $_.Id }; exit 0`,
+    ]);
+    return parsePids(stdout);
+  } catch (err: any) {
+    // Belt-and-braces: salvage whatever was printed before a non-zero exit.
+    return typeof err?.stdout === 'string' ? parsePids(err.stdout) : [];
+  }
 }
 
 /**
@@ -221,32 +321,94 @@ async function focusTool(
         focused = await focusWindowByPid(candidates);
       }
 
-      // Fall back to a process-name search — covers cases where no hook has
-      // fired yet (no PID known), or every PID in the chain is dead.
-      if (!focused) {
-        const processNames = TOOL_WIN_PROCESS_NAMES[toolId];
-        focused = await focusWindowsByProcessNames(processNames);
+      // Fall back when no hook has fired yet (no PID known) or every PID in
+      // the chain is dead. CLI session first: find the live CLI process by
+      // name and reuse the parent walk to reach its hosting terminal's
+      // window — never search terminal hosts directly (would foreground an
+      // unrelated tool's terminal). Then GUI/IDE windows by owner process
+      // name (for antigravity-cli that's the IDE the CLI ships with).
+      const cliNames = TOOL_WIN_CLI_PROCESS_NAMES[toolId];
+      if (!focused && cliNames) {
+        const cliPids = await getWindowsPidsByName(cliNames);
+        logger.debug(`[BubbleManager] cli process search ${JSON.stringify(cliNames)} → pids=${cliPids.join(',') || 'none'}`);
+        if (cliPids.length > 0) {
+          focused = await focusWindowByPid(cliPids);
+        }
+      }
+      const windowNames = TOOL_WIN_WINDOW_PROCESS_NAMES[toolId];
+      if (!focused && windowNames) {
+        focused = await focusWindowsByProcessNames(windowNames);
       }
 
       if (!focused) {
-        // Nothing matched — try launching only if we know the GUI exe path.
-        // (Terminal tools have no exe path → we just give up rather than
-        // spawning a stray terminal.)
-        const exePath = resolveWindowsExe(toolId);
+        // Nothing matched — launch the GUI app if we can locate it. Prefer
+        // the exe recorded in the URI-scheme registration (OS-maintained, no
+        // path rot), then the hard-coded candidates, then protocol activation
+        // for apps that registered the scheme without a command line (MSIX-
+        // packaged apps like the Codex desktop app — opening the URL is their
+        // only launch route). claude-code has none of these → give up rather
+        // than spawning a stray terminal.
+        const registryExe = await resolveWindowsExeFromScheme(toolId);
+        const exePath = registryExe ?? resolveWindowsExe(toolId);
+        const scheme = TOOL_URI_SCHEMES[toolId];
         if (exePath) {
-          logger.debug(`[BubbleManager] not running, launching: ${exePath}`);
+          logger.info(`[BubbleManager] ${registryExe ? 'launch-registry' : 'launch-hardcoded'}: ${exePath}`);
           await open(exePath);
+        } else if (scheme && await windowsSchemeIsRegistered(scheme)) {
+          logger.info(`[BubbleManager] launch-scheme: ${scheme}://`);
+          await shell.openExternal(`${scheme}://`);
         } else {
           logger.warn(`[BubbleManager] no window found and no launch path for ${toolId}`);
         }
       }
-    } else {
-      const appName = platform === 'darwin'
-        ? TOOL_APP_NAME[toolId]?.mac
-        : TOOL_APP_NAME[toolId]?.linux;
+    } else if (platform === 'darwin') {
+      const appName = TOOL_APP_NAME[toolId]?.mac;
       if (!appName) return;
-      logger.debug(`[BubbleManager] openApp("${appName}")`);
-      await openApp(appName);
+      const scheme = TOOL_URI_SCHEMES[toolId];
+      try {
+        // `open -a` returns immediately: 0 once LaunchServices accepts the
+        // activate/launch request, non-zero when no app matches the name.
+        // (openApp() would swallow that failure.)
+        await execFileAsync('open', ['-a', appName]);
+        logger.debug(`[BubbleManager] launch-app: open -a "${appName}"`);
+      } catch {
+        if (!scheme) {
+          logger.warn(`[BubbleManager] ${toolId}: app "${appName}" not found`);
+          return;
+        }
+        // App-name guess failed — let LaunchServices route by scheme instead.
+        logger.info(`[BubbleManager] launch-scheme: open ${scheme}://`);
+        await execFileAsync('open', [`${scheme}://`]);
+      }
+    } else {
+      const appName = TOOL_APP_NAME[toolId]?.linux;
+      if (!appName) return;
+      const scheme = TOOL_URI_SCHEMES[toolId];
+      const onPath = await execFileAsync('which', [appName]).then(() => true, () => false);
+      if (onPath) {
+        // Electron editors are single-instance: this forwards to a running
+        // instance or launches a fresh one.
+        logger.debug(`[BubbleManager] launch-binary: ${appName}`);
+        await openApp(appName);
+        return;
+      }
+      if (!scheme) {
+        logger.warn(`[BubbleManager] ${toolId}: "${appName}" not on PATH`);
+        return;
+      }
+      // Probe for a registered handler first — xdg-open on an unregistered
+      // scheme fails silently or pops a chooser, neither of which we want.
+      let handler = '';
+      try {
+        const { stdout } = await execFileAsync('xdg-mime', ['query', 'default', `x-scheme-handler/${scheme}`]);
+        handler = stdout.trim();
+      } catch { /* xdg-mime missing or errored — treat as no handler */ }
+      if (handler) {
+        logger.info(`[BubbleManager] launch-scheme: xdg-open ${scheme}:// (handler: ${handler})`);
+        await execFileAsync('xdg-open', [`${scheme}://`]);
+      } else {
+        logger.warn(`[BubbleManager] ${toolId}: "${appName}" not on PATH and no ${scheme}:// handler registered`);
+      }
     }
     logger.debug(`[BubbleManager] focus-tool done for ${toolId}`);
   } catch (err) {
@@ -324,20 +486,33 @@ public class APFocusPid {
   $hwnd = [IntPtr]::Zero
   $walked = New-Object System.Collections.ArrayList
   $matchedPid = 0
+  # Pass 1: a window owned directly by ANY start PID. GUI process groups
+  # (Electron apps like Codex) include the window owner as a SIBLING of the
+  # other start PIDs — walking one PID's ancestors first can escape the app
+  # into whatever launched it (e.g. a browser that handled the app's URI
+  # scheme) and foreground that instead.
   foreach ($startPid in $startPids) {
-    $current = [int]$startPid
-    for ($i = 0; $i -lt 10; $i++) {
-      if ($current -le 0) { break }
-      [void]$walked.Add($current)
-      $hwnd = [APFocusPid]::FindForPid($current)
-      if ($hwnd -ne [IntPtr]::Zero) { $matchedPid = $current; break }
-      try {
-        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$current" -ErrorAction Stop
-        if (-not $proc) { break }
-        $current = [int]$proc.ParentProcessId
-      } catch { break }
+    $hwnd = [APFocusPid]::FindForPid([int]$startPid)
+    if ($hwnd -ne [IntPtr]::Zero) { $matchedPid = [int]$startPid; break }
+  }
+  # Pass 2: no start PID owns a window (CLI processes never do) — walk each
+  # one's parent chain to the window-owning host (e.g. the terminal).
+  if ($hwnd -eq [IntPtr]::Zero) {
+    foreach ($startPid in $startPids) {
+      $current = [int]$startPid
+      for ($i = 0; $i -lt 10; $i++) {
+        if ($current -le 0) { break }
+        [void]$walked.Add($current)
+        $hwnd = [APFocusPid]::FindForPid($current)
+        if ($hwnd -ne [IntPtr]::Zero) { $matchedPid = $current; break }
+        try {
+          $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$current" -ErrorAction Stop
+          if (-not $proc) { break }
+          $current = [int]$proc.ParentProcessId
+        } catch { break }
+      }
+      if ($hwnd -ne [IntPtr]::Zero) { break }
     }
-    if ($hwnd -ne [IntPtr]::Zero) { break }
   }
   if ($hwnd -eq [IntPtr]::Zero) {
     Write-Output ("0:no_window:walked=" + ($walked -join ','))
@@ -394,6 +569,17 @@ export class BubbleManager {
   private height = BUBBLE_DIMENSIONS.medium.height;
   private tooltipHeight = BUBBLE_DIMENSIONS.medium.tooltip;
   private stackPosition: BubbleStackPosition = 'bottom-right';
+  private anchor: BubbleAnchor | null = null;
+
+  // Set by the app shell so a drag-end can persist the new anchor into
+  // user-config without BubbleManager owning config I/O.
+  public onAnchorChange: ((anchor: BubbleAnchor) => void) | null = null;
+
+  // Set by the app shell to expose the bridge's authoritative tool status.
+  // The renderer's copy is a downstream mirror fed by status-update pushes,
+  // so it can miss PIDs (e.g. ones rehydrated at boot before any broadcast);
+  // focus-tool consults this first.
+  public getToolStatus: ((toolId: ToolId) => ToolStatus | undefined) | null = null;
 
   constructor(config?: BubbleConfig) {
     if (config) this.applyDims(config);
@@ -405,6 +591,7 @@ export class BubbleManager {
     this.height = d.height;
     this.tooltipHeight = d.tooltip;
     this.stackPosition = config.stackPosition;
+    this.anchor = config.anchor ?? null;
   }
 
   // Re-apply size/position prefs to every live bubble. Called when the user
@@ -431,6 +618,25 @@ export class BubbleManager {
   }
 
   private getStackPosition(index: number) {
+    const offset = index * (this.height + BubbleManager.STACK_GAP);
+
+    if (this.anchor) {
+      // Drag-placed anchor: global DIP point, so it addresses any monitor.
+      // getDisplayNearestPoint resolves the display it lives on; if that
+      // monitor was unplugged it returns the closest remaining one, and the
+      // clamp below pulls the stack fully into its work area instead of
+      // stranding bubbles off-screen.
+      const { workArea } = screen.getDisplayNearestPoint(this.anchor);
+      const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), Math.max(min, max));
+      const x = clamp(this.anchor.x, workArea.x, workArea.x + workArea.width - this.width);
+      const baseY = clamp(this.anchor.y, workArea.y, workArea.y + workArea.height - this.height);
+      // Grow toward the vertical center (mirrors the corner presets): anchors
+      // in the top half stack downward, bottom half stack upward.
+      const growDown = baseY < workArea.y + workArea.height / 2;
+      const y = growDown ? baseY + offset : baseY - offset;
+      return { x, y };
+    }
+
     const { workArea } = screen.getPrimaryDisplay();
     const onLeft = this.stackPosition === 'bottom-left' || this.stackPosition === 'top-left';
     const onTop = this.stackPosition === 'top-left' || this.stackPosition === 'top-right';
@@ -439,7 +645,6 @@ export class BubbleManager {
       ? workArea.x + BubbleManager.EDGE_PADDING
       : workArea.x + workArea.width - this.width - BubbleManager.EDGE_PADDING;
 
-    const offset = index * (this.height + BubbleManager.STACK_GAP);
     const y = onTop
       ? workArea.y + BubbleManager.EDGE_PADDING + offset
       : workArea.y + workArea.height - this.height - BubbleManager.EDGE_PADDING - offset;
@@ -529,16 +734,54 @@ export class BubbleManager {
       (event, { dx, dy }: { dx: number; dy: number }) => {
         const win = BrowserWindow.fromWebContents(event.sender);
         if (!win) return;
-        const bounds = win.getBounds();
-        // Use setBounds to enforce size on every move — prevents Windows WM resize
-        win.setBounds({
-          x: bounds.x + dx,
-          y: bounds.y + dy,
-          width: this.width,
-          height: this.height,
-        });
+        // The stack moves as one unit: dragging any bubble shifts every bubble
+        // by the same delta, so the column the user placed is what gets
+        // remembered on drag-end (individual offsets were never persisted and
+        // restack would snap them back into a column anyway).
+        for (const window of this.bubbles.values()) {
+          if (!this.isUsableBubble(window)) continue;
+          const bounds = window.getBounds();
+          // Use setBounds to enforce size on every move — prevents Windows WM resize
+          window.setBounds({
+            x: bounds.x + dx,
+            y: bounds.y + dy,
+            width: this.width,
+            height: this.height,
+          });
+        }
       },
     );
+
+    // Fired once on mouse-up after a real drag. The stack moved rigidly, so
+    // the top-of-stack (insertion-order first) bubble's position IS the new
+    // anchor. Persisting goes through the app shell → user-config → back into
+    // applyConfig, whose restack clamps the anchor onto a live display and
+    // re-derives the grow direction.
+    ipcMain.on('bubble-drag-end', () => {
+      this.pruneDeadBubbles('drag-end');
+      const first = this.bubbles.values().next().value as BrowserWindow | undefined;
+      if (!first || !this.isUsableBubble(first)) return;
+      const { x, y } = first.getBounds();
+      this.anchor = { x, y };
+      logger.info(`[BubbleManager] drag-end → anchor (${x}, ${y})`);
+      this.onAnchorChange?.(this.anchor);
+    });
+
+    // Monitor hotplug / resolution / taskbar changes: restack so a drag-placed
+    // anchor on a vanished display clamps onto the nearest remaining one and
+    // corner presets track the new work area. metrics-changed fires in bursts
+    // while Windows settles a DPI/resolution switch, hence the debounce.
+    let displayDebounce: NodeJS.Timeout | null = null;
+    const onDisplayChange = (event: string) => {
+      if (displayDebounce) clearTimeout(displayDebounce);
+      displayDebounce = setTimeout(() => {
+        displayDebounce = null;
+        this.restackBubbles(`display:${event}`);
+      }, 300);
+    };
+    screen.on('display-added', () => onDisplayChange('added'));
+    screen.on('display-removed', () => onDisplayChange('removed'));
+    screen.on('display-metrics-changed', () => onDisplayChange('metrics-changed'));
 
     ipcMain.on(
       'focus-tool',
@@ -550,7 +793,13 @@ export class BubbleManager {
           agentPidChain,
         }: { toolId: ToolId; agentPid?: number; agentPidChain?: number[] },
       ) => {
-        focusTool(toolId, agentPid, agentPidChain).catch((err) =>
+        // Prefer the main-process state manager over the renderer payload:
+        // it's the source the renderer mirrors, and it also holds PIDs
+        // rehydrated from the timeline DB that were never broadcast.
+        const latched = this.getToolStatus?.(toolId);
+        const pid = latched?.agentPid ?? agentPid;
+        const chain = latched?.agentPidChain?.length ? latched.agentPidChain : agentPidChain;
+        focusTool(toolId, pid, chain).catch((err) =>
           logger.warn('[BubbleManager] focus-tool error:', err),
         );
       },

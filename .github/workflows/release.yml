@@ -119,7 +119,7 @@ jobs:
           name: agent-pulse-${{ matrix.os }}
           path: ${{ matrix.artifact_path }}
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 5
 
       # ── Firebase Storage upload (the real update feed) ──────────────────
       # Only runs on actual release events; main-branch verification builds

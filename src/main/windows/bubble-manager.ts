@@ -42,7 +42,7 @@ const TOOL_APP_NAME: Record<ToolId, { mac: string | null; linux: string | null }
 // land the user somewhere meaningful than to do nothing or open an empty
 // terminal.
 const TOOL_WEB_URLS: Record<ToolId, string> = {
-  'claude-code':     'https://www.claude.com/product/claude-code',
+  'claude-code':     'https://claude.ai',
   'cursor':          'https://cursor.com',
   'vscode-copilot':  'https://code.visualstudio.com',
   'openai-codex':    'https://openai.com/codex',

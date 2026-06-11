@@ -885,6 +885,19 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     error: 'Error',
   };
 
+  // The tooltip's time strings ("resets in 2h 13m", "seen 3m ago") are
+  // relative to Date.now() at memo time — without a tick they freeze at
+  // whenever data last arrived, which with long polling intervals can be
+  // many minutes ago. Bump immediately on hover start (so the card never
+  // opens with stale times) and every 30s while hovering.
+  const [tooltipClock, setTooltipClock] = useState(0);
+  useEffect(() => {
+    if (!hovered) return;
+    setTooltipClock((c) => c + 1);
+    const tick = window.setInterval(() => setTooltipClock((c) => c + 1), 30_000);
+    return () => window.clearInterval(tick);
+  }, [hovered]);
+
   // Assemble the consolidated tooltip card content for this tool.
   const tooltipPayload = useMemo<BubbleTooltipPayload>(() => {
     const subtitle: string[] = [stateLabel[state]];
@@ -908,7 +921,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     if (status?.currentTask) lines.unshift(status.currentTask);
 
     return { title: meta.label, subtitle: subtitle.join(' · '), lines, accent: glow };
-  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, cursorUsageStatus, copilotUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow]);
+  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, cursorUsageStatus, copilotUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow, tooltipClock]);
 
   // Push fresh content to the overlay while hovering (so usage updates show
   // live); the show/position/visibility is handled by the main process.

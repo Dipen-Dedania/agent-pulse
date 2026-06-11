@@ -305,4 +305,4 @@ All hook files can be uninstalled from the Settings panel with one click.
 
 ## License
 
-ISC
+Agent Pulse is open source under AGPLv3. For commercial use without AGPL obligations, a paid license is available. Contact dipen27891@gmail.com for details.

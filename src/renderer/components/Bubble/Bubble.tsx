@@ -420,6 +420,17 @@ const AntigravityUsageBars: React.FC<AntigravityUsageBarsProps> = ({ status, isD
   );
 };
 
+// Fire-and-forget channel that makes a tool's usage poller poll immediately
+// (the poller broadcasts `<tool>-usage:updated` when done, which the bubble
+// already listens to). Tools without a poller get no refresh affordance.
+const USAGE_REFRESH_CHANNELS: Partial<Record<ToolId, string>> = {
+  'claude-code':     'usage:refresh-now',
+  'openai-codex':    'codex-usage:refresh-now',
+  'cursor':          'cursor-usage:refresh-now',
+  'vscode-copilot':  'copilot-usage:refresh-now',
+  'antigravity-cli': 'antigravity-usage:refresh-now',
+};
+
 export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const status = useStatusStore((state) => state.statuses[toolId]);
   const updateStatus = useStatusStore((state) => state.updateStatus);
@@ -438,6 +449,28 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const [bubbleSound, setBubbleSound] = useState<BubbleSoundId>('pop');
   const [fillMode, setFillMode] = useState<BubbleFillMode>('glass');
   const [fillColor, setFillColor] = useState<string>('#ffffff');
+  const [refreshingUsage, setRefreshingUsage] = useState(false);
+
+  const usageRefreshChannel = USAGE_REFRESH_CHANNELS[toolId];
+
+  const refreshUsageNow = () => {
+    if (!usageRefreshChannel || refreshingUsage) return;
+    setRefreshingUsage(true);
+    window.electron.send(usageRefreshChannel);
+  };
+
+  // Stop the spinner once fresh data lands. Each bubble only ever updates its
+  // own tool's status state (the others keep their initial reference), so
+  // watching all five is equivalent to watching "mine". The timeout is a
+  // backstop for a poll that dies without broadcasting.
+  useEffect(() => {
+    setRefreshingUsage(false);
+  }, [usageStatus, codexUsageStatus, cursorUsageStatus, copilotUsageStatus, antigravityUsageStatus]);
+  useEffect(() => {
+    if (!refreshingUsage) return;
+    const timer = setTimeout(() => setRefreshingUsage(false), 15000);
+    return () => clearTimeout(timer);
+  }, [refreshingUsage]);
 
   // Pull bubble appearance/behavior prefs on mount and stay in sync with live
   // edits from Settings. Every bubble listens so size/sound/fill changes apply
@@ -1167,6 +1200,32 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
               </svg>
             </div>
           )}
+
+        {/* Usage refresh — hover-only escape hatch from the polling interval.
+            Top-LEFT: the right corner belongs to the status badges above.
+            stopPropagation on mousedown too, or the orb's drag/focus handler
+            would treat the click as a bubble click. */}
+        {usageRefreshChannel && (hovered || refreshingUsage) && (
+          <button
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); refreshUsageNow(); }}
+            className='absolute -top-1 -left-1 w-4 h-4 rounded-full flex items-center justify-center cursor-pointer transition-transform hover:scale-110'
+            style={{
+              background: isDark ? 'rgba(71,85,105,0.95)' : 'rgba(100,116,139,0.95)',
+              boxShadow: isDark ? '0 0 6px rgba(0,0,0,0.5)' : '0 0 4px rgba(0,0,0,0.3)',
+            }}
+            title={refreshingUsage ? 'Refreshing usage…' : 'Refresh usage now'}
+            aria-label='Refresh usage now'
+          >
+            <svg
+              viewBox='0 0 24 24'
+              className={`w-2.5 h-2.5 ${refreshingUsage ? 'animate-spin' : ''}`}
+              fill='white'
+            >
+              <path d='M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z' />
+            </svg>
+          </button>
+        )}
       </motion.div>
 
       {/* Claude subscription usage bars — only rendered for the Claude bubble.

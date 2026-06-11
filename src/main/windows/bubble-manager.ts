@@ -21,14 +21,33 @@ const BUBBLE_DIMENSIONS: Record<BubbleSize, { width: number; height: number; too
 // ─── macOS / Linux ────────────────────────────────────────────────────────────
 // macOS: `open -a <name>` activates the existing window (or launches if not running)
 // Linux: binary name executed directly
-const TOOL_APP_NAME: Record<ToolId, { mac: string; linux: string }> = {
+// null: no app to launch by name. claude-code is terminal-only — launching a
+// bare terminal lands the user in an EMPTY shell, not their session (the
+// PID-chain walk in focusTool finds the real hosting app instead). The codex
+// CLI on Linux is headless, so launching it by name would just spawn a stray
+// background process.
+const TOOL_APP_NAME: Record<ToolId, { mac: string | null; linux: string | null }> = {
   'cursor':         { mac: 'Cursor',             linux: 'cursor' },
   'vscode-copilot': { mac: 'Visual Studio Code', linux: 'code' },
-  'claude-code':    { mac: 'Terminal',            linux: 'x-terminal-emulator' },
-  'openai-codex':   { mac: 'Terminal',            linux: 'x-terminal-emulator' },
+  'claude-code':    { mac: null,                  linux: null },
+  // Codex desktop app — activate/launch that, never a bare terminal.
+  'openai-codex':   { mac: 'Codex',               linux: null },
   // agy ships with the Antigravity IDE — activate/launch that, not a bare terminal.
   'antigravity-cli':{ mac: 'Antigravity',         linux: 'antigravity' },
   'kiro':           { mac: 'Kiro',                linux: 'kiro' },
+};
+
+// Last-resort click target: the tool's product page. Used only after every
+// focus/launch route failed (no live session, app not installed) — better to
+// land the user somewhere meaningful than to do nothing or open an empty
+// terminal.
+const TOOL_WEB_URLS: Record<ToolId, string> = {
+  'claude-code':     'https://www.claude.com/product/claude-code',
+  'cursor':          'https://cursor.com',
+  'vscode-copilot':  'https://code.visualstudio.com',
+  'openai-codex':    'https://openai.com/codex',
+  'kiro':            'https://kiro.dev',
+  'antigravity-cli': 'https://antigravity.google',
 };
 
 // ─── Windows ─────────────────────────────────────────────────────────────────
@@ -48,10 +67,13 @@ const TOOL_WIN_WINDOW_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
 
 // CLI agents never own a window — their terminal HOST does. To focus them
 // without a hook-captured PID, find the live CLI process by name and walk its
-// parent chain to the window (focusWindowByPid). Generic terminal-host names
-// (WindowsTerminal, pwsh, …) must NOT be searched directly: that foregrounds
-// whichever terminal is topmost, usually another tool's session.
-const TOOL_WIN_CLI_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
+// parent chain to the window (focusWindowByPid on Windows,
+// focusMacAppByPidChain on macOS). Generic terminal-host names
+// (WindowsTerminal, pwsh, Terminal, …) must NOT be searched directly: that
+// foregrounds whichever terminal is topmost, usually another tool's session.
+// Names are the bare executable name (no extension) on both platforms; the
+// exact-match lookups keep e.g. the Claude desktop app ("Claude") out.
+const TOOL_CLI_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
   'claude-code':    ['claude'],
   'openai-codex':   ['codex'],
   'antigravity-cli':['agy'],
@@ -289,6 +311,92 @@ public class APFocus {
   });
 }
 
+async function openToolWebPage(toolId: ToolId): Promise<void> {
+  const url = TOOL_WEB_URLS[toolId];
+  logger.info(`[BubbleManager] no app to focus/launch for ${toolId} — opening ${url}`);
+  await shell.openExternal(url);
+}
+
+// Merge the hook-captured ancestor chain and the agent PID into one deduped
+// candidate list. The chain includes short-lived shims (often dead by click
+// time) plus the long-lived agent/terminal further up — try them all.
+function collectPidCandidates(agentPid?: number, agentPidChain?: number[]): number[] {
+  const candidates: number[] = [];
+  if (Array.isArray(agentPidChain)) {
+    for (const pid of agentPidChain) {
+      if (typeof pid === 'number' && pid > 0 && !candidates.includes(pid)) {
+        candidates.push(pid);
+      }
+    }
+  }
+  if (typeof agentPid === 'number' && agentPid > 0 && !candidates.includes(agentPid)) {
+    candidates.push(agentPid);
+  }
+  return candidates;
+}
+
+// PIDs of live CLI processes matching any of `names`, by exact executable
+// name (`pgrep -x`). Exact + case-sensitive on purpose: 'claude' must not
+// match the Claude desktop app's 'Claude' processes — walking a GUI app's
+// ancestors escapes into whatever launched it.
+async function getMacPidsByName(names: string[]): Promise<number[]> {
+  const pids: number[] = [];
+  for (const name of names) {
+    try {
+      const { stdout } = await execFileAsync('pgrep', ['-x', name]);
+      for (const line of stdout.split('\n')) {
+        const pid = parseInt(line.trim(), 10);
+        if (Number.isFinite(pid) && pid > 0 && !pids.includes(pid)) pids.push(pid);
+      }
+    } catch {
+      // pgrep exits 1 when nothing matches — not an error.
+    }
+  }
+  return pids;
+}
+
+/**
+ * macOS: activate the .app actually hosting the agent by walking each start
+ * PID's parent chain (`ps -o ppid=,comm=`; comm is the full executable path
+ * on macOS). The nearest ancestor living inside a bundle — iTerm, Terminal,
+ * VS Code, Cursor — is the session's host; `open <bundle>` activates that
+ * running app without launching anything new and needs no Accessibility or
+ * Automation permission. The non-greedy match takes the OUTERMOST .app, so
+ * nested helper bundles (e.g. "Code Helper.app") resolve to the editor itself.
+ */
+async function focusMacAppByPidChain(startPids: number[]): Promise<boolean> {
+  const seen = new Set<number>();
+  for (const start of startPids) {
+    let current = Math.floor(start);
+    for (let depth = 0; depth < 15 && current > 1 && !seen.has(current); depth++) {
+      seen.add(current);
+      let ppid: number;
+      let command: string;
+      try {
+        const { stdout } = await execFileAsync('ps', ['-o', 'ppid=,comm=', '-p', String(current)]);
+        const match = stdout.trim().match(/^(\d+)\s+(.*)$/);
+        if (!match) break;
+        ppid = parseInt(match[1], 10);
+        command = match[2];
+      } catch {
+        break; // PID already dead — try the next chain entry
+      }
+      const bundle = command.match(/^(.*?\.app)\//)?.[1];
+      if (bundle) {
+        try {
+          await execFileAsync('open', [bundle]);
+          logger.info(`[BubbleManager] focus-by-pid: activated ${bundle} (pid ${current})`);
+          return true;
+        } catch {
+          logger.debug(`[BubbleManager] open ${bundle} failed; walking on`);
+        }
+      }
+      current = ppid;
+    }
+  }
+  return false;
+}
+
 async function focusTool(
   toolId: ToolId,
   agentPid?: number,
@@ -299,22 +407,9 @@ async function focusTool(
 
   try {
     if (platform === 'win32') {
-      // Build a candidate PID list. The chain is captured at hook time so
-      // it includes both short-lived shims (which may be dead by now) and
-      // the long-lived agent / terminal further up. We try every entry and
-      // walk parents from each — as long as ONE PID is still alive, we'll
-      // reach a window-owning ancestor.
-      const candidates: number[] = [];
-      if (Array.isArray(agentPidChain)) {
-        for (const pid of agentPidChain) {
-          if (typeof pid === 'number' && pid > 0 && !candidates.includes(pid)) {
-            candidates.push(pid);
-          }
-        }
-      }
-      if (typeof agentPid === 'number' && agentPid > 0 && !candidates.includes(agentPid)) {
-        candidates.push(agentPid);
-      }
+      // Try every hook-captured PID and walk parents from each — as long as
+      // ONE PID is still alive, we'll reach a window-owning ancestor.
+      const candidates = collectPidCandidates(agentPid, agentPidChain);
 
       let focused = false;
       if (candidates.length > 0) {
@@ -327,7 +422,7 @@ async function focusTool(
       // window — never search terminal hosts directly (would foreground an
       // unrelated tool's terminal). Then GUI/IDE windows by owner process
       // name (for antigravity-cli that's the IDE the CLI ships with).
-      const cliNames = TOOL_WIN_CLI_PROCESS_NAMES[toolId];
+      const cliNames = TOOL_CLI_PROCESS_NAMES[toolId];
       if (!focused && cliNames) {
         const cliPids = await getWindowsPidsByName(cliNames);
         logger.debug(`[BubbleManager] cli process search ${JSON.stringify(cliNames)} → pids=${cliPids.join(',') || 'none'}`);
@@ -346,8 +441,8 @@ async function focusTool(
         // path rot), then the hard-coded candidates, then protocol activation
         // for apps that registered the scheme without a command line (MSIX-
         // packaged apps like the Codex desktop app — opening the URL is their
-        // only launch route). claude-code has none of these → give up rather
-        // than spawning a stray terminal.
+        // only launch route). Last resort: the tool's web page — never a
+        // stray empty terminal.
         const registryExe = await resolveWindowsExeFromScheme(toolId);
         const exePath = registryExe ?? resolveWindowsExe(toolId);
         const scheme = TOOL_URI_SCHEMES[toolId];
@@ -358,57 +453,88 @@ async function focusTool(
           logger.info(`[BubbleManager] launch-scheme: ${scheme}://`);
           await shell.openExternal(`${scheme}://`);
         } else {
-          logger.warn(`[BubbleManager] no window found and no launch path for ${toolId}`);
+          await openToolWebPage(toolId);
         }
       }
     } else if (platform === 'darwin') {
-      const appName = TOOL_APP_NAME[toolId]?.mac;
-      if (!appName) return;
-      const scheme = TOOL_URI_SCHEMES[toolId];
-      try {
-        // `open -a` returns immediately: 0 once LaunchServices accepts the
-        // activate/launch request, non-zero when no app matches the name.
-        // (openApp() would swallow that failure.)
-        await execFileAsync('open', ['-a', appName]);
-        logger.debug(`[BubbleManager] launch-app: open -a "${appName}"`);
-      } catch {
-        if (!scheme) {
-          logger.warn(`[BubbleManager] ${toolId}: app "${appName}" not found`);
+      // Activate the app actually hosting the agent first — for CLI tools
+      // that's the user's terminal or editor (iTerm, VS Code, Cursor), the
+      // session they want back, not a fresh app instance.
+      const candidates = collectPidCandidates(agentPid, agentPidChain);
+      if (candidates.length > 0 && (await focusMacAppByPidChain(candidates))) {
+        logger.debug(`[BubbleManager] focus-tool done for ${toolId}`);
+        return;
+      }
+
+      // No hook-captured PID (session predates Agent Pulse, hooks not
+      // installed) or every chain entry is dead — find the live CLI process
+      // by name and walk to its host instead, mirroring the Windows fallback.
+      const cliNames = TOOL_CLI_PROCESS_NAMES[toolId];
+      if (cliNames) {
+        const cliPids = await getMacPidsByName(cliNames);
+        logger.debug(`[BubbleManager] cli process search ${JSON.stringify(cliNames)} → pids=${cliPids.join(',') || 'none'}`);
+        if (cliPids.length > 0 && (await focusMacAppByPidChain(cliPids))) {
+          logger.debug(`[BubbleManager] focus-tool done for ${toolId}`);
           return;
         }
-        // App-name guess failed — let LaunchServices route by scheme instead.
-        logger.info(`[BubbleManager] launch-scheme: open ${scheme}://`);
-        await execFileAsync('open', [`${scheme}://`]);
       }
+
+      const appName = TOOL_APP_NAME[toolId]?.mac;
+      const scheme = TOOL_URI_SCHEMES[toolId];
+      if (appName) {
+        try {
+          // `open -a` returns immediately: 0 once LaunchServices accepts the
+          // activate/launch request, non-zero when no app matches the name.
+          // (openApp() would swallow that failure.)
+          await execFileAsync('open', ['-a', appName]);
+          logger.debug(`[BubbleManager] launch-app: open -a "${appName}"`);
+          return;
+        } catch {
+          logger.debug(`[BubbleManager] ${toolId}: app "${appName}" not found`);
+        }
+      }
+      if (scheme) {
+        try {
+          // App-name route failed — let LaunchServices route by scheme instead.
+          logger.info(`[BubbleManager] launch-scheme: open ${scheme}://`);
+          await execFileAsync('open', [`${scheme}://`]);
+          return;
+        } catch {
+          logger.debug(`[BubbleManager] ${toolId}: no handler for ${scheme}://`);
+        }
+      }
+      // No live session, no installed app, no scheme handler → product page.
+      await openToolWebPage(toolId);
     } else {
       const appName = TOOL_APP_NAME[toolId]?.linux;
-      if (!appName) return;
       const scheme = TOOL_URI_SCHEMES[toolId];
-      const onPath = await execFileAsync('which', [appName]).then(() => true, () => false);
-      if (onPath) {
-        // Electron editors are single-instance: this forwards to a running
-        // instance or launches a fresh one.
-        logger.debug(`[BubbleManager] launch-binary: ${appName}`);
-        await openApp(appName);
-        return;
+      if (appName) {
+        const onPath = await execFileAsync('which', [appName]).then(() => true, () => false);
+        if (onPath) {
+          // Electron editors are single-instance: this forwards to a running
+          // instance or launches a fresh one.
+          logger.debug(`[BubbleManager] launch-binary: ${appName}`);
+          await openApp(appName);
+          return;
+        }
+        logger.debug(`[BubbleManager] ${toolId}: "${appName}" not on PATH`);
       }
-      if (!scheme) {
-        logger.warn(`[BubbleManager] ${toolId}: "${appName}" not on PATH`);
-        return;
+      if (scheme) {
+        // Probe for a registered handler first — xdg-open on an unregistered
+        // scheme fails silently or pops a chooser, neither of which we want.
+        let handler = '';
+        try {
+          const { stdout } = await execFileAsync('xdg-mime', ['query', 'default', `x-scheme-handler/${scheme}`]);
+          handler = stdout.trim();
+        } catch { /* xdg-mime missing or errored — treat as no handler */ }
+        if (handler) {
+          logger.info(`[BubbleManager] launch-scheme: xdg-open ${scheme}:// (handler: ${handler})`);
+          await execFileAsync('xdg-open', [`${scheme}://`]);
+          return;
+        }
       }
-      // Probe for a registered handler first — xdg-open on an unregistered
-      // scheme fails silently or pops a chooser, neither of which we want.
-      let handler = '';
-      try {
-        const { stdout } = await execFileAsync('xdg-mime', ['query', 'default', `x-scheme-handler/${scheme}`]);
-        handler = stdout.trim();
-      } catch { /* xdg-mime missing or errored — treat as no handler */ }
-      if (handler) {
-        logger.info(`[BubbleManager] launch-scheme: xdg-open ${scheme}:// (handler: ${handler})`);
-        await execFileAsync('xdg-open', [`${scheme}://`]);
-      } else {
-        logger.warn(`[BubbleManager] ${toolId}: "${appName}" not on PATH and no ${scheme}:// handler registered`);
-      }
+      // Not on PATH and no scheme handler → product page.
+      await openToolWebPage(toolId);
     }
     logger.debug(`[BubbleManager] focus-tool done for ${toolId}`);
   } catch (err) {
@@ -570,6 +696,7 @@ export class BubbleManager {
   private tooltipHeight = BUBBLE_DIMENSIONS.medium.tooltip;
   private stackPosition: BubbleStackPosition = 'bottom-right';
   private anchor: BubbleAnchor | null = null;
+  private displayId: number | null = null;
 
   // Set by the app shell so a drag-end can persist the new anchor into
   // user-config without BubbleManager owning config I/O.
@@ -592,6 +719,7 @@ export class BubbleManager {
     this.tooltipHeight = d.tooltip;
     this.stackPosition = config.stackPosition;
     this.anchor = config.anchor ?? null;
+    this.displayId = config.displayId ?? null;
   }
 
   // Re-apply size/position prefs to every live bubble. Called when the user
@@ -637,7 +765,15 @@ export class BubbleManager {
       return { x, y };
     }
 
-    const { workArea } = screen.getPrimaryDisplay();
+    // Corner preset: honor the user's chosen monitor. If that monitor is
+    // gone (unplugged, sleeping dock), fall back to the primary display —
+    // the display-removed listener restacks, so bubbles hop back as soon as
+    // it disappears and return when it's re-added.
+    const preferred =
+      this.displayId != null
+        ? screen.getAllDisplays().find((d) => d.id === this.displayId)
+        : undefined;
+    const { workArea } = preferred ?? screen.getPrimaryDisplay();
     const onLeft = this.stackPosition === 'bottom-left' || this.stackPosition === 'top-left';
     const onTop = this.stackPosition === 'top-left' || this.stackPosition === 'top-right';
 

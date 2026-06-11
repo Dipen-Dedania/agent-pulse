@@ -75,6 +75,11 @@ module.exports = {
     ],
     icon: 'public/assets/favicon/android-chrome-512x512.png',
     category: 'public.app-category.developer-tools',
+    // Agent (tray-only) app: keeps the Dock icon from ever appearing, even
+    // for the instant before app.dock.hide() runs at startup.
+    extendInfo: {
+      LSUIElement: true,
+    },
   },
   linux: {
     target: ['AppImage'],

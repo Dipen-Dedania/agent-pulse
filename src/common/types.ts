@@ -38,9 +38,19 @@ export interface BubbleConfig {
   size: BubbleSize;
   stackPosition: BubbleStackPosition;
   anchor: BubbleAnchor | null; // drag-placed stack position; null → use stackPosition
+  displayId: number | null;   // monitor for corner presets; null → primary. Ignored while anchor is set (the anchor point already encodes its monitor). If the display is unplugged, falls back to primary.
   sound: BubbleSoundId;
   fillMode: BubbleFillMode;
   fillColor: string;          // CSS color used when fillMode === 'solid' (e.g. '#ffffff')
+}
+
+// Snapshot of a connected monitor, sent main → renderer for the Settings
+// display picker (Electron's Display object isn't structured-clonable as-is).
+export interface DisplayInfo {
+  id: number;
+  label: string;       // OS-provided name, e.g. "DELL U2720Q"; may be empty
+  bounds: { x: number; y: number; width: number; height: number };
+  primary: boolean;
 }
 
 // ─── "Needs you" attention escalation ────────────────────────────────────────

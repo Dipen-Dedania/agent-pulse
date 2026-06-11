@@ -23,6 +23,10 @@ export class SettingsWindow {
       if (!this.window.isVisible()) this.window.show();
       if (this.window.isMinimized()) this.window.restore();
       this.window.focus();
+      // Dock-less (accessory) apps don't get foreground rights on macOS just
+      // by showing a window — claim them explicitly or the window can surface
+      // behind the current app.
+      if (process.platform === 'darwin') app.focus({ steal: true });
       return;
     }
 
@@ -58,6 +62,14 @@ export class SettingsWindow {
         this.window?.hide();
       }
     });
+
+    // macOS runs Dock-less (tray-only), so a minimized window would have no
+    // Dock tile to live in — treat minimize as close-to-tray instead.
+    if (process.platform === 'darwin') {
+      this.window.on('minimize', () => {
+        this.window?.hide();
+      });
+    }
 
     this.window.on('closed', () => {
       this.window = null;

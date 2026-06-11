@@ -132,6 +132,7 @@ const DEFAULTS: UserConfig = {
     size: 'medium',
     stackPosition: 'bottom-right',
     anchor: null,
+    displayId: null,
     sound: 'pop',
     fillMode: 'glass',
     fillColor: '#ffffff',
@@ -328,12 +329,17 @@ function migrateBubble(raw: unknown): BubbleConfig {
     Number.isFinite((b.anchor as BubbleAnchor).y)
       ? { x: Math.round((b.anchor as BubbleAnchor).x), y: Math.round((b.anchor as BubbleAnchor).y) }
       : null;
+  // Electron display ids are opaque integers. No liveness check here — the
+  // chosen monitor may simply be unplugged right now; BubbleManager falls back
+  // to the primary display at placement time and recovers on hotplug.
+  const displayId = Number.isFinite(b.displayId) ? Math.round(b.displayId as number) : null;
   return {
     size: SIZES.includes(b.size as BubbleSize) ? (b.size as BubbleSize) : d.size,
     stackPosition: POSITIONS.includes(b.stackPosition as BubbleStackPosition)
       ? (b.stackPosition as BubbleStackPosition)
       : d.stackPosition,
     anchor,
+    displayId,
     sound: SOUNDS.includes(b.sound as BubbleSoundId) ? (b.sound as BubbleSoundId) : d.sound,
     fillMode: FILL_MODES.includes(b.fillMode as BubbleFillMode) ? (b.fillMode as BubbleFillMode) : d.fillMode,
     fillColor: isColor(b.fillColor) ? b.fillColor.trim() : d.fillColor,

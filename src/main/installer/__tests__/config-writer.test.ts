@@ -208,7 +208,7 @@ describe('ConfigWriter — vscode-copilot', () => {
 // ── OpenAI Codex ──────────────────────────────────────────────────────────────
 
 describe('ConfigWriter — openai-codex', () => {
-  it('creates hooks.json and enables codex_hooks in config.toml', async () => {
+  it('creates hooks.json and enables the hooks flag in config.toml', async () => {
     await withFakeHome(async (writer) => {
       const result = await writer.installHook('openai-codex');
       expect(result.success).toBe(true);
@@ -220,7 +220,57 @@ describe('ConfigWriter — openai-codex', () => {
       expect(config.hooks.PreToolUse).toBeDefined();
 
       const toml = fs.readFileSync(path.join(tmpDir, '.codex', 'config.toml'), 'utf8');
-      expect(toml).toContain('codex_hooks = true');
+      expect(toml).toContain('[features]');
+      expect(toml).toMatch(/^hooks = true$/m);
+      expect(toml).not.toContain('codex_hooks');
+    });
+  });
+
+  it('migrates deprecated codex_hooks key to hooks on install', async () => {
+    await withFakeHome(async (writer) => {
+      const codexDir = path.join(tmpDir, '.codex');
+      fs.mkdirSync(codexDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(codexDir, 'config.toml'),
+        'model = "gpt-5"\n\n[features]\ncodex_hooks = false\n',
+      );
+
+      await writer.installHook('openai-codex');
+
+      const toml = fs.readFileSync(path.join(codexDir, 'config.toml'), 'utf8');
+      expect(toml).toMatch(/^hooks = true$/m);
+      expect(toml).not.toContain('codex_hooks');
+      expect(toml).toContain('model = "gpt-5"');
+      // Only one [features] table — duplicates are invalid TOML
+      expect(toml.match(/^\[features\]$/gm)).toHaveLength(1);
+    });
+  });
+
+  it('adds hooks flag to an existing [features] section without duplicating it', async () => {
+    await withFakeHome(async (writer) => {
+      const codexDir = path.join(tmpDir, '.codex');
+      fs.mkdirSync(codexDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(codexDir, 'config.toml'),
+        '[features]\nweb_search = true\n',
+      );
+
+      await writer.installHook('openai-codex');
+
+      const toml = fs.readFileSync(path.join(codexDir, 'config.toml'), 'utf8');
+      expect(toml).toMatch(/^hooks = true$/m);
+      expect(toml).toContain('web_search = true');
+      expect(toml.match(/^\[features\]$/gm)).toHaveLength(1);
+    });
+  });
+
+  it('detects install with legacy codex_hooks flag still present', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('openai-codex');
+      // Simulate a config written by an older Agent Pulse version
+      const tomlPath = path.join(tmpDir, '.codex', 'config.toml');
+      fs.writeFileSync(tomlPath, '[features]\ncodex_hooks = true\n');
+      expect(writer.isHookInstalled('openai-codex')).toBe(true);
     });
   });
 

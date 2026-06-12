@@ -6,26 +6,41 @@
 
 <p align="center"><em>Ambient, glanceable awareness of AI coding agents.</em></p>
 
+<p align="center">
+  <a href="https://github.com/Dipen-Dedania/agent-pulse/actions/workflows/ci.yml"><img src="https://github.com/Dipen-Dedania/agent-pulse/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/Dipen-Dedania/agent-pulse/releases/latest"><img src="https://img.shields.io/github/v/release/Dipen-Dedania/agent-pulse" alt="Latest release" /></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platforms" />
+</p>
+
 Agent Pulse is a cross-platform Electron desktop app that surfaces the state of every AI coding agent on your machine through floating, always-on-top status bubbles. Instead of tab-hopping between Claude Code, Cursor, Codex, Copilot, Kiro, and Antigravity to check whether an agent is still working, idle, or has crashed, you see it at a glance in a frosted-glass bubble — anywhere on your desktop.
 
 It also bundles a unified status bridge, subscription usage meters for Claude / Codex / Cursor / Antigravity, a local Pulse Timeline with estimated-cost analytics, a configurable Claude Code status line, Discord/Slack attention webhooks, a cowork session scheduler, and a configurable shell-command guardrail engine.
+
+<p align="center">
+  <img src="github-pages/public/screenshots/bubbles.png" alt="Agent Pulse status bubbles" width="720" />
+</p>
+
+<p align="center">
+  <a href="https://dipen-dedania.github.io/agent-pulse/">Website</a> ·
+  <a href="https://github.com/Dipen-Dedania/agent-pulse/releases/latest">Download</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="SECURITY.md">Security</a>
+</p>
 
 ---
 
 ## Download
 
-Grab the latest signed installer from the **[Releases page](https://github.com/Dipen-Dedania/agent-pulse/releases/latest)**:
+Grab the latest installer from the **[Releases page](https://github.com/Dipen-Dedania/agent-pulse/releases/latest)**:
 
 | Platform | File |
 | --- | --- |
 | Windows | `Agent-Pulse-Setup-<version>.exe` (NSIS) |
 | macOS   | `Agent-Pulse-<version>.dmg` (arm64 + x64) |
+| Linux   | `Agent-Pulse-<version>.AppImage` |
 
-Stable per-version URLs follow the GitHub pattern, e.g.:
-```
-https://github.com/Dipen-Dedania/agent-pulse/releases/latest/download/Agent-Pulse-Setup.exe
-```
-*The repo is private, so downloads require sign-in with access. In-progress builds for any commit on `main` are also available as workflow artifacts on the [Actions tab](https://github.com/Dipen-Dedania/agent-pulse/actions/workflows/release.yml) (30-day retention).*
+In-progress builds for any commit on `main` are also available as workflow artifacts on the [Actions tab](https://github.com/Dipen-Dedania/agent-pulse/actions/workflows/release.yml).
 
 ---
 
@@ -54,6 +69,8 @@ https://github.com/Dipen-Dedania/agent-pulse/releases/latest/download/Agent-Puls
 | OpenAI Codex | CLI | Shell hook (`~/.codex/hooks.json`) |
 | Kiro | IDE | Shell hook (`.kiro/hooks/agent-pulse.kiro.hook`) |
 | Antigravity | **CLI + IDE** | Shell hook (`~/.gemini/config/hooks.json`) — one install covers both surfaces |
+
+Want a tool that isn't listed? Open a [tool support request](https://github.com/Dipen-Dedania/agent-pulse/issues/new?template=tool_support_request.yml) — or better, [add it yourself](CONTRIBUTING.md#adding-support-for-a-new-tool).
 
 ### Subscription usage tracking
 - **Claude Code** — polls Anthropic's OAuth usage endpoint for the 5-hour and 7-day windows.
@@ -105,7 +122,7 @@ https://github.com/Dipen-Dedania/agent-pulse/releases/latest/download/Agent-Puls
 ## Quick start
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) v18+
+- [Node.js](https://nodejs.org/) v22+ (required by `@electron/rebuild` and for `better-sqlite3` prebuilt binaries)
 - npm (ships with Node.js)
 
 ### Install & run in dev
@@ -113,6 +130,7 @@ https://github.com/Dipen-Dedania/agent-pulse/releases/latest/download/Agent-Puls
 git clone https://github.com/Dipen-Dedania/agent-pulse.git
 cd agent-pulse
 npm install
+npm run rebuild:native   # rebuild better-sqlite3 for Electron (needed by Pulse Timeline)
 npm start
 ```
 This launches the Vite renderer and the Electron main process together.
@@ -126,57 +144,15 @@ npm run dist:all     # All three (use sparingly — slow)
 ```
 Output lands in `release/`.
 
-### Cutting a release
-The `Build Distribution` workflow publishes a GitHub Release whenever a `v*` tag is pushed:
-```bash
-# bump version in package.json first
-git tag v1.0.1
-git push origin v1.0.1
-```
-The workflow builds Windows and macOS installers, attaches them (plus `latest.yml` / `latest-mac.yml` for auto-update), and generates release notes from commits since the previous tag.
+Maintainers: see [docs/RELEASING.md](docs/RELEASING.md) for the release process and update-feed operations.
 
 ---
 
 ## Auto-updates
 
-Agent Pulse ships with an in-app updater that quietly keeps every installed copy on the latest signed build.
+Agent Pulse ships with an in-app updater that quietly keeps every installed copy on the latest build. It checks shortly after launch and every 6 hours after that; downloads are **never automatic** — you click **Download**, then **Restart & install** when ready. Windows auto-updates end-to-end; macOS currently shows a manual-install banner (code signing isn't wired yet).
 
-### How it works
-- **Engine**: `electron-updater` runs inside the main process (`src/main/updater/manager.ts`). The renderer's *Settings → Updates* tab is purely a view onto that state, broadcast via IPC.
-- **Feed**: Each installer is permanently tied to one update feed, baked into `app-update.yml` at build time. The default — and what production ships — is **Firebase Storage** (a GCS-backed bucket). The `electron-builder.config.cjs` `publish` block points at `https://storage.googleapis.com/bitsy-cc3f6.firebasestorage.app/agent-pulse/releases/`. Flipping `UPDATE_PROVIDER` to `'github'` is supported for emergency fallback but isn't the default.
-- **Check cadence**: One jittered check **30–120 s after launch** (so a corporate-NAT fleet doesn't stampede the feed), then every **6 hours** while the app stays open. The "Check now" button is throttled to once per 10 min.
-- **User control**: downloads are *never* automatic — the user clicks **Download**, then **Restart & install** when ready. Auto-install-on-quit is disabled because the tray keeps the app alive past window-close, and silently swapping the binary under the user wouldn't be clean UX.
-- **Platforms**: Windows (NSIS) auto-updates end-to-end. macOS surfaces an `unsupported` status with a manual-install banner — code signing + notarization aren't wired yet. Dev / unpackaged runs report `disabled` instead of silently failing.
-- **Soft failures**: `403` / `429` responses are treated as soft failures (no user-visible error); the next periodic check retries.
-
-### Releasing a new build
-
-The CI workflow (`.github/workflows/release.yml`) handles building, signing-free packaging, and uploading. You just bump and tag.
-
-1. **Bump `package.json`** to the new version (e.g. `1.1.5`) and commit it on `main`.
-2. **Tag and push** — this is the trigger:
-   ```bash
-   git tag v1.1.5
-   git push origin v1.1.5
-   ```
-   Alternatively, use **Actions → Build Distribution → Run workflow** and type the version. The workflow refuses to run if the typed version doesn't match `package.json` — cheap insurance against typos.
-3. **The workflow then** (matrix: `windows-latest` and `macos-latest`):
-   - Installs deps with `npm ci`, runs `npm test`.
-   - Builds installers via `npm run dist:win` / `npm run dist:mac`.
-   - Authenticates to GCP using the `GCP_SA_KEY` service-account credential.
-   - **Uploads installers first**, then `latest.yml` / `latest-mac.yml` last with `Cache-Control: no-cache`. Ordering matters: if clients see `latest.yml` before the binary lands, they'll 404 on download. The no-cache header bypasses the default 1 h GCS edge cache so users see the new release immediately.
-   - Publishes a GitHub Release with the same artifacts for changelog visibility (auto-update *does not* read from GitHub — the Firebase feed is canonical).
-4. **What landing in Firebase looks like**: under `gs://bitsy-cc3f6.firebasestorage.app/agent-pulse/releases/` you'll see `Agent-Pulse-Setup-<version>.exe`, its `.blockmap`, `Agent-Pulse-<version>.dmg` (arm64 + x64), and the manifest files. Installed clients poll `latest.yml` from there.
-
-### Required secrets / setup (one-time)
-- **`GCP_SA_KEY`** — repo secret. JSON key for a GCP service account with `roles/storage.objectAdmin` on the `bitsy-cc3f6.firebasestorage.app` bucket (or at least on the `agent-pulse/releases/` prefix).
-- **Bucket read access** — the `agent-pulse/releases/` prefix must grant `roles/storage.objectViewer` to `allUsers` so `electron-updater` can fetch `latest.yml` and binaries without auth. Without this, installed clients silently fail every check.
-- **`GITHUB_TOKEN`** — provided automatically by GitHub Actions for the parallel GitHub Release publish.
-
-### Verifying / debugging an update
-- Local check: install a stale build, launch it, watch the `[UpdaterManager]` and `[electron-updater]` lines in the main-process log. The launch check fires 30–120 s in.
-- Force a check from the UI: *Settings → Updates → Check now* (respects the 10-min throttle).
-- Confirm what feed a given build is using: open `<install-dir>/resources/app-update.yml` — it shows the baked-in provider URL.
+How the feed works, how releases are cut, and how to debug an update check live in [docs/RELEASING.md](docs/RELEASING.md).
 
 ---
 
@@ -294,7 +270,7 @@ npm run test:bridge
 | `~/.cursor/.../state.vscdb` *(read-only)* | Source of the Cursor session token used for usage polling. |
 | `~/.cursor/hooks.json` (+ script) | Cursor shell hooks. |
 | `.github/hooks/agent-pulse-hooks.json` (+ script) | GitHub Copilot per-workspace hooks. |
-| `~/.codex/hooks.json` + `~/.codex/config.toml` | Codex hooks + `codex_hooks` feature flag. |
+| `~/.codex/hooks.json` + `~/.codex/config.toml` | Codex hooks + `[features].hooks` feature flag. |
 | `.kiro/hooks/agent-pulse.kiro.hook` (+ script) | Kiro hooks. |
 | `~/.gemini/config/hooks.json` (+ script) | Antigravity CLI **and** IDE hooks. |
 | `~/.config/autostart/agent-pulse.desktop` *(Linux only)* | Launch-on-startup entry. |
@@ -303,6 +279,22 @@ All hook files can be uninstalled from the Settings panel with one click.
 
 ---
 
+## Contributing
+
+Contributions are welcome — especially new tool integrations, macOS/Linux testing, and bug fixes.
+
+- Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for dev setup, architecture orientation, and PR guidelines.
+- Browse [`good first issue`](https://github.com/Dipen-Dedania/agent-pulse/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for a place to start.
+- First-time contributors sign a one-time [CLA](CLA.md) (automated via a bot comment on your PR).
+
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Found a vulnerability? **Please don't open a public issue** — report it privately via [GitHub security advisories](https://github.com/Dipen-Dedania/agent-pulse/security/advisories/new). See [SECURITY.md](SECURITY.md) for scope and process.
+
 ## License
 
-Agent Pulse is open source under AGPLv3. For commercial use without AGPL obligations, a paid license is available. Contact dipen27891@gmail.com for details.
+Agent Pulse is open source under **AGPLv3** — see [LICENSE.md](LICENSE.md). For commercial use without AGPL obligations, a paid license is available: contact dipen27891@gmail.com.
+
+External contributions are accepted under the project [CLA](CLA.md), which keeps the dual-licensing model possible while contributors retain ownership of their work.

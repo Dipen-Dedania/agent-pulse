@@ -1,0 +1,43 @@
+name: New tool support request
+description: Request integration with an AI coding agent that Agent Pulse doesn't support yet
+title: "[Tool]: "
+labels: ["enhancement", "new-tool-request"]
+body:
+  - type: input
+    id: tool-name
+    attributes:
+      label: Tool name
+      placeholder: "e.g. Windsurf, Aider, Cline"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - CLI
+        - IDE / editor extension
+        - Both
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: hooks
+    attributes:
+      label: Does the tool expose hooks or lifecycle events?
+      description: |
+        Agent Pulse needs a way to know when the agent starts working, finishes, waits for input, or errors.
+        Does this tool have a hooks system, plugin API, log file, or config-based event mechanism? Links to docs are gold.
+    validations:
+      required: true
+  - type: textarea
+    id: extras
+    attributes:
+      label: Anything else?
+      description: Usage/quota APIs, config file locations, model/token visibility — anything that would help scope the integration.
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to implement this myself with some guidance (see CONTRIBUTING.md → "Adding support for a new tool")

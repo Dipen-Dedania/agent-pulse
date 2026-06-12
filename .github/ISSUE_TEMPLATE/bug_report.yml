@@ -1,0 +1,85 @@
+name: Bug report
+description: Something in Agent Pulse isn't working as expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Agent Pulse version
+      description: Shown in Settings, or the installer filename (e.g. 1.1.7). For dev builds, the commit hash.
+      placeholder: "1.1.7"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: "Windows 11 23H2 / macOS 15.2 / Ubuntu 24.04"
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Affected tool integration
+      description: Which agent integration does this involve, if any?
+      options:
+        - Not tool-specific (app itself)
+        - Claude Code
+        - Cursor
+        - GitHub Copilot (VS Code)
+        - OpenAI Codex
+        - Kiro
+        - Antigravity
+        - Multiple tools
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Status bubbles / UI
+        - Hook install / uninstall
+        - Status bridge (events not arriving / wrong state)
+        - Usage tracking / quota meters
+        - Pulse Timeline / analytics
+        - Guardrails
+        - Status line
+        - Webhooks / notifications
+        - Cowork scheduler
+        - Auto-updater
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Install the Claude Code hook from Settings
+        2. Start a Claude Code session
+        3. ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Main-process log excerpt if available (run with `npm run start:debug` in dev, or check the app logs).
+        **Please redact tokens, cookies, and personal paths before pasting.**
+      render: shell

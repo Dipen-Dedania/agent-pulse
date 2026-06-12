@@ -1,0 +1,51 @@
+name: CI
+
+# Pull-request checks only. Pushes to main are already covered by the
+# Build Distribution workflow (release.yml), which runs the same tests
+# plus full installer builds on every main push.
+#
+# This workflow is intentionally secret-free so it runs safely on PRs
+# from forks. Anything needing credentials stays in release.yml.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Node 22 is required: @electron/rebuild needs >=22.12.0, and
+          # better-sqlite3 only ships prebuilt win32-x64 binaries from
+          # Node 22 onward (older Nodes fall back to node-gyp).
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check main process
+        run: npm run build:main
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Run tests
+        run: npm test

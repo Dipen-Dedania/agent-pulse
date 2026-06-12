@@ -199,7 +199,9 @@ export class ConfigWriter {
     if (!scriptsExist) return false;
 
     const tomlPath = path.join(codexDir, 'config.toml');
-    const hooksFlagEnabled = fs.existsSync(tomlPath) && fs.readFileSync(tomlPath, 'utf8').includes('codex_hooks = true');
+    // Accept the current `hooks` key and the deprecated `codex_hooks` key
+    const hooksFlagEnabled = fs.existsSync(tomlPath)
+      && /^\s*(?:codex_)?hooks\s*=\s*true\b/m.test(fs.readFileSync(tomlPath, 'utf8'));
     if (!hooksFlagEnabled) return false;
 
     return ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'PermissionRequest'].every((event) =>
@@ -489,7 +491,7 @@ exit 0
 
     fs.writeFileSync(hooksConfigPath, JSON.stringify(existing, null, 2));
 
-    // Enable the codex_hooks feature flag in config.toml
+    // Enable the hooks feature flag in config.toml
     this.enableCodexHooksFlag(codexDir);
 
     return { success: true, path: hooksConfigPath };
@@ -564,7 +566,12 @@ exit 0
 `;
   }
 
-  /** Ensures `[features]\ncodex_hooks = true` is present in ~/.codex/config.toml. */
+  /**
+   * Ensures `[features]\nhooks = true` is present in ~/.codex/config.toml.
+   * Codex deprecated `[features].codex_hooks` in favor of `[features].hooks`;
+   * a lingering `codex_hooks` key triggers a deprecation warning, so existing
+   * configs are migrated to the new key in place.
+   */
   private enableCodexHooksFlag(codexDir: string) {
     const tomlPath = path.join(codexDir, 'config.toml');
     let content = '';
@@ -572,15 +579,27 @@ exit 0
       content = fs.readFileSync(tomlPath, 'utf8');
     }
 
-    // Already enabled — nothing to do
-    if (content.includes('codex_hooks')) return;
+    const original = content;
 
-    // Append (or create) the [features] block
-    const addition = content.length > 0 && !content.endsWith('\n')
-      ? '\n\n[features]\ncodex_hooks = true\n'
-      : '\n[features]\ncodex_hooks = true\n';
+    // Migrate the deprecated key name, then flip a disabled flag to enabled
+    content = content.replace(/^(\s*)codex_hooks(\s*=)/m, '$1hooks$2');
+    content = content.replace(/^(\s*hooks\s*=\s*)false\b/m, '$1true');
 
-    fs.writeFileSync(tomlPath, content + addition);
+    if (!/^\s*hooks\s*=\s*true\b/m.test(content)) {
+      if (/^\[features\]\s*$/m.test(content)) {
+        // [features] section exists without the flag — insert under the header
+        // (appending a second [features] table would be invalid TOML)
+        content = content.replace(/^\[features\]\s*$/m, '[features]\nhooks = true');
+      } else {
+        content += content.length > 0 && !content.endsWith('\n')
+          ? '\n\n[features]\nhooks = true\n'
+          : '\n[features]\nhooks = true\n';
+      }
+    }
+
+    if (content !== original) {
+      fs.writeFileSync(tomlPath, content);
+    }
   }
 
   private writeKiroHook(projectPath?: string) {

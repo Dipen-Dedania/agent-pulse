@@ -5,7 +5,7 @@ import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import open, { openApp } from 'open';
-import { ToolId, ToolStatus, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor } from '../../common/types';
+import { ToolId, ToolStatus, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleDisplayMatch } from '../../common/types';
 import { logger } from '../../common/logger';
 
 // Pixel footprint of the bubble window per size. Width hugs the orb; height is
@@ -697,10 +697,17 @@ export class BubbleManager {
   private stackPosition: BubbleStackPosition = 'bottom-right';
   private anchor: BubbleAnchor | null = null;
   private displayId: number | null = null;
+  private displayMatch: BubbleDisplayMatch | null = null;
 
   // Set by the app shell so a drag-end can persist the new anchor into
   // user-config without BubbleManager owning config I/O.
   public onAnchorChange: ((anchor: BubbleAnchor) => void) | null = null;
+
+  // Fired when the saved display id went stale (ids regenerate across
+  // reboots) but the same physical monitor was re-found by label/bounds —
+  // the app shell persists the fresh id so Settings highlights correctly
+  // and the next lookup is exact again.
+  public onDisplayRehome: ((displayId: number, match: BubbleDisplayMatch) => void) | null = null;
 
   // Set by the app shell to expose the bridge's authoritative tool status.
   // The renderer's copy is a downstream mirror fed by status-update pushes,
@@ -720,6 +727,45 @@ export class BubbleManager {
     this.stackPosition = config.stackPosition;
     this.anchor = config.anchor ?? null;
     this.displayId = config.displayId ?? null;
+    this.displayMatch = config.displayMatch ?? null;
+  }
+
+  // The user's chosen monitor, or undefined when unset/currently unplugged
+  // (caller falls back to primary). Display ids are not reboot-stable, so a
+  // failed id lookup retries by the persisted label, tie-breaking duplicate
+  // models by bounds origin, then by the full bounds rect (covers monitors
+  // that report no label). A label/bounds hit heals the in-memory id and
+  // notifies the shell to persist it.
+  private resolvePreferredDisplay(): Electron.Display | undefined {
+    if (this.displayId == null && !this.displayMatch) return undefined;
+    const displays = screen.getAllDisplays();
+    const byId = displays.find((d) => d.id === this.displayId);
+    if (byId) return byId;
+
+    const m = this.displayMatch;
+    if (!m) return undefined;
+    const labeled = m.label ? displays.filter((d) => d.label === m.label) : [];
+    const match =
+      labeled.find((d) => d.bounds.x === m.bounds.x && d.bounds.y === m.bounds.y) ??
+      labeled[0] ??
+      displays.find(
+        (d) =>
+          d.bounds.x === m.bounds.x &&
+          d.bounds.y === m.bounds.y &&
+          d.bounds.width === m.bounds.width &&
+          d.bounds.height === m.bounds.height,
+      );
+    if (!match) return undefined;
+
+    logger.info(
+      `[BubbleManager] display id ${this.displayId} stale; re-found "${m.label || 'unlabeled'}" as id ${match.id}`,
+    );
+    this.displayId = match.id;
+    this.onDisplayRehome?.(match.id, {
+      label: match.label ?? '',
+      bounds: { x: match.bounds.x, y: match.bounds.y, width: match.bounds.width, height: match.bounds.height },
+    });
+    return match;
   }
 
   // Re-apply size/position prefs to every live bubble. Called when the user
@@ -769,11 +815,7 @@ export class BubbleManager {
     // gone (unplugged, sleeping dock), fall back to the primary display —
     // the display-removed listener restacks, so bubbles hop back as soon as
     // it disappears and return when it's re-added.
-    const preferred =
-      this.displayId != null
-        ? screen.getAllDisplays().find((d) => d.id === this.displayId)
-        : undefined;
-    const { workArea } = preferred ?? screen.getPrimaryDisplay();
+    const { workArea } = this.resolvePreferredDisplay() ?? screen.getPrimaryDisplay();
     const onLeft = this.stackPosition === 'bottom-left' || this.stackPosition === 'top-left';
     const onTop = this.stackPosition === 'top-left' || this.stackPosition === 'top-right';
 

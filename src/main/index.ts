@@ -88,6 +88,17 @@ class AgentPulseApp {
         if (!win.isDestroyed()) win.webContents.send('bubble:config-updated', this.userConfig.bubble);
       }
     };
+    // Saved display id went stale (ids regenerate across reboots) but the
+    // monitor was re-found by label/bounds — persist the fresh id. No
+    // applyConfig here: the manager already healed its own state mid-restack,
+    // and re-applying from inside that restack would recurse.
+    this.bubbleManager.onDisplayRehome = (displayId, displayMatch) => {
+      this.userConfig.bubble = { ...this.userConfig.bubble, displayId, displayMatch };
+      saveConfig(this.userConfig);
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('bubble:config-updated', this.userConfig.bubble);
+      }
+    };
     this.tooltipManager = new TooltipManager();
     this.settingsWindow = new SettingsWindow();
     this.trayManager = new TrayManager();
@@ -322,6 +333,20 @@ class AgentPulseApp {
       // whatever monitor it was last dragged to).
       if ((partial.stackPosition !== undefined || partial.displayId !== undefined) && partial.anchor === undefined) {
         partial = { ...partial, anchor: null };
+      }
+      // Stamp the reboot-stable identity for the chosen monitor (ids
+      // regenerate across restarts; label+bounds let us re-find it). The
+      // renderer only ever sends displayId — the match is main's concern.
+      if (partial.displayId !== undefined && partial.displayMatch === undefined) {
+        const d = partial.displayId != null
+          ? screen.getAllDisplays().find((dd) => dd.id === partial.displayId)
+          : undefined;
+        partial = {
+          ...partial,
+          displayMatch: d
+            ? { label: d.label ?? '', bounds: { x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height } }
+            : null,
+        };
       }
       this.userConfig.bubble = { ...this.userConfig.bubble, ...partial };
       saveConfig(this.userConfig);

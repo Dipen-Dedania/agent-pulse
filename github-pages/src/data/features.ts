@@ -1,4 +1,4 @@
-export type BubbleState = 'working' | 'waiting' | 'idle' | 'error';
+export type BubbleState = 'working' | 'waiting' | 'idle-active' | 'idle' | 'error';
 
 export interface FeatureBullet {
   state: BubbleState;
@@ -26,27 +26,32 @@ export const featureSections: FeatureSectionData[] = [
     id: 'ambient-bubbles',
     eyebrow: 'AMBIENT STATUS',
     title: 'Stop tab-hopping to check on your agents',
-    body: "Each agent gets its own always-on-top, draggable bubble with a frosted-glass look. A soft pulsing glow means it's working. A badge means it's waiting on you. A red shake means something died. Park them anywhere — the layout survives restarts.",
+    body: "Each agent gets its own always-on-top, draggable bubble with a frosted-glass look. A green pulsing glow means it's working. A blue ring and a badge mean it's waiting on you. A red shake means something died. Park them anywhere — the layout survives restarts.",
     bullets: [
       {
         state: 'working',
         title: 'Working',
-        description: 'pulsing glow with orbiting particles',
+        description: 'actively using tools, reading files, running commands — green glow with orbiting particles',
       },
       {
         state: 'waiting',
         title: 'Waiting',
-        description: 'your agent needs input; the bubble tells you before Slack does',
+        description: 'needs permission or a response to continue; the bubble tells you before Slack does',
+      },
+      {
+        state: 'idle-active',
+        title: 'Idle (active)',
+        description: 'last turn finished — ready for your next prompt',
       },
       {
         state: 'idle',
         title: 'Idle',
-        description: 'calm breathing effect',
+        description: 'no activity yet; calm breathing effect',
       },
       {
         state: 'error',
         title: 'Error / Dead',
-        description: "red glow and a shake you can't miss",
+        description: "agent stopped unexpectedly or a tool call failed — a red shake you can't miss",
       },
     ],
     screenshot: screenshot('bubbles.png'),

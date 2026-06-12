@@ -8,23 +8,16 @@ interface FeatureSectionProps {
 
 // ─── State dot colors ────────────────────────────────────────────────────────
 // Each bubble state maps to a small colored indicator dot.
+// Colors mirror the app palette in src/common/stateColors.ts.
 const STATE_DOT_CLASSES: Record<BubbleState, string> = {
-  working: 'bg-signal-blue animate-pulse-glow',
-  waiting: 'bg-amber-spark',
-  idle: 'bg-steel-blue',
-  error: '', // handled with inline style (custom red #e5484d)
+  working: 'bg-state-working animate-pulse-glow',
+  waiting: 'bg-state-waiting',
+  'idle-active': 'bg-state-idle-active',
+  idle: 'bg-state-idle',
+  error: 'bg-state-error',
 };
 
 function StateDot({ state }: { state: BubbleState }) {
-  if (state === 'error') {
-    return (
-      <span
-        aria-hidden
-        className="inline-block shrink-0 w-3 h-3 rounded-full mt-[3px]"
-        style={{ backgroundColor: '#e5484d' }}
-      />
-    );
-  }
   return (
     <span
       aria-hidden

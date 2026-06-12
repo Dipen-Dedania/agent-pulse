@@ -4,19 +4,35 @@ import { tools } from '../data/tools';
 
 interface BubbleRowProps {
   tool: { name: string; logo: string };
-  state: 'working' | 'waiting' | 'idle';
+  state: 'working' | 'waiting' | 'idle-active';
 }
 
-/** Status dot + label config per state */
+/**
+ * Status dot, label, and bubble fill per state — mirrors the light-mode
+ * palette in src/common/stateColors.ts (the app renders the bubble as a
+ * radial gradient of the state color).
+ */
 const STATE_META = {
-  working: { label: 'Working', dotColor: '#006bff' },
-  waiting: { label: 'Waiting', dotColor: '#ffa600' },
-  idle:    { label: 'Idle',    dotColor: '#a6bbd1' },
+  working: {
+    label: 'Working',
+    dotColor: '#16a34a',
+    fill: 'radial-gradient(circle, rgba(22,163,74,0.45) 0%, rgba(128,128,128,0.06) 100%)',
+  },
+  waiting: {
+    label: 'Waiting',
+    dotColor: '#2563eb',
+    fill: 'radial-gradient(circle, rgba(37,99,235,0.45) 0%, rgba(128,128,128,0.06) 100%)',
+  },
+  'idle-active': {
+    label: 'Idle (active)',
+    dotColor: '#d97706',
+    fill: 'radial-gradient(circle, rgba(217,119,6,0.4) 0%, rgba(128,128,128,0.06) 100%)',
+  },
 } as const;
 
 /** Single bubble row inside the mockup card */
 function BubbleRow({ tool, state }: BubbleRowProps) {
-  const { label, dotColor } = STATE_META[state];
+  const { label, dotColor, fill } = STATE_META[state];
 
   return (
     <div className="flex items-center gap-4">
@@ -30,13 +46,13 @@ function BubbleRow({ tool, state }: BubbleRowProps) {
         <div
           className={[
             'absolute inset-0 rounded-full',
-            'bg-paper/80 border border-mist-border',
+            'border border-mist-border',
             'flex items-center justify-center',
             // State-specific animation
-            state === 'working' ? 'animate-pulse-glow' : '',
-            state === 'idle'    ? 'animate-breathe'    : '',
+            state === 'working'     ? 'animate-pulse-glow' : '',
+            state === 'idle-active' ? 'animate-breathe'    : '',
           ].join(' ')}
-          style={{ backdropFilter: 'blur(12px)' }}
+          style={{ backdropFilter: 'blur(12px)', background: fill }}
         >
           <img
             src={tool.logo}
@@ -48,7 +64,7 @@ function BubbleRow({ tool, state }: BubbleRowProps) {
           />
         </div>
 
-        {/* Amber notification badge for Waiting state */}
+        {/* Orange notification badge for Waiting state */}
         {state === 'waiting' && (
           <span
             className="absolute -top-0.5 -right-0.5 flex items-center justify-center
@@ -56,8 +72,8 @@ function BubbleRow({ tool, state }: BubbleRowProps) {
             style={{
               fontSize: 10,
               lineHeight: 1,
-              background: '#ffa600',
-              boxShadow: '0 1px 4px rgba(255,166,0,0.5)',
+              background: '#ea580c',
+              boxShadow: '0 1px 4px rgba(234,88,12,0.5)',
             }}
             aria-label="Waiting for input"
           >
@@ -79,7 +95,7 @@ function BubbleRow({ tool, state }: BubbleRowProps) {
                 aria-hidden
               >
                 <span
-                  className="block rounded-full bg-signal-blue"
+                  className="block rounded-full bg-state-working"
                   style={{
                     width: i === 1 ? 5 : 4,
                     height: i === 1 ? 5 : 4,
@@ -149,7 +165,7 @@ export default function BubbleMockup() {
 
         <BubbleRow tool={tools[0]} state="working" />
         <BubbleRow tool={tools[1]} state="waiting" />
-        <BubbleRow tool={tools[3]} state="idle" />
+        <BubbleRow tool={tools[3]} state="idle-active" />
 
         {/* Thin divider + footer hint */}
         <div className="border-t border-mist-border pt-3">

@@ -1,4 +1,4 @@
-import { app, ipcMain, shell, BrowserWindow, Menu, dialog } from 'electron';
+import { app, ipcMain, shell, BrowserWindow, Menu, dialog, screen } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
 import { TooltipManager } from './windows/tooltip-window';
 import { SettingsWindow } from './windows/settings-window';
@@ -9,7 +9,7 @@ import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
 import { loadConfig, saveConfig, defaultStatusLineConfig, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, CopilotUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
-import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo } from '../common/types';
+import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, DisplayInfo } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
 import { isPatternSafe } from './guardrails/engine';
@@ -88,6 +88,17 @@ class AgentPulseApp {
         if (!win.isDestroyed()) win.webContents.send('bubble:config-updated', this.userConfig.bubble);
       }
     };
+    // Saved display id went stale (ids regenerate across reboots) but the
+    // monitor was re-found by label/bounds — persist the fresh id. No
+    // applyConfig here: the manager already healed its own state mid-restack,
+    // and re-applying from inside that restack would recurse.
+    this.bubbleManager.onDisplayRehome = (displayId, displayMatch) => {
+      this.userConfig.bubble = { ...this.userConfig.bubble, displayId, displayMatch };
+      saveConfig(this.userConfig);
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('bubble:config-updated', this.userConfig.bubble);
+      }
+    };
     this.tooltipManager = new TooltipManager();
     this.settingsWindow = new SettingsWindow();
     this.trayManager = new TrayManager();
@@ -144,6 +155,13 @@ class AgentPulseApp {
 
     app.on('ready', () => {
       logger.info('[AgentPulseApp] app ready');
+      // Tray-only app on macOS: no Dock icon, no Cmd+Tab entry — the status
+      // bar item is the app's home. Windows (settings, bubbles) still open
+      // and focus normally. Packaged builds also set LSUIElement so the icon
+      // never flashes in the Dock at launch; this covers dev runs.
+      if (process.platform === 'darwin') {
+        app.dock?.hide();
+      }
       if (!ENABLE_APP_MENU) {
         Menu.setApplicationMenu(null);
       }
@@ -309,10 +327,26 @@ class AgentPulseApp {
     // Resizes/restacks live windows immediately, then broadcasts so every
     // bubble renderer can re-scale its orb and switch its chime without a poll.
     ipcMain.handle('bubble:update-config', (_event, partial: Partial<BubbleConfig>) => {
-      // Picking a corner preset is an explicit placement choice — it always
-      // overrides a drag-placed anchor, even if the renderer forgot to clear it.
-      if (partial.stackPosition !== undefined && partial.anchor === undefined) {
+      // Picking a corner preset or a monitor is an explicit placement choice —
+      // either always overrides a drag-placed anchor, even if the renderer
+      // forgot to clear it (a stale anchor would keep the stack pinned to
+      // whatever monitor it was last dragged to).
+      if ((partial.stackPosition !== undefined || partial.displayId !== undefined) && partial.anchor === undefined) {
         partial = { ...partial, anchor: null };
+      }
+      // Stamp the reboot-stable identity for the chosen monitor (ids
+      // regenerate across restarts; label+bounds let us re-find it). The
+      // renderer only ever sends displayId — the match is main's concern.
+      if (partial.displayId !== undefined && partial.displayMatch === undefined) {
+        const d = partial.displayId != null
+          ? screen.getAllDisplays().find((dd) => dd.id === partial.displayId)
+          : undefined;
+        partial = {
+          ...partial,
+          displayMatch: d
+            ? { label: d.label ?? '', bounds: { x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height } }
+            : null,
+        };
       }
       this.userConfig.bubble = { ...this.userConfig.bubble, ...partial };
       saveConfig(this.userConfig);
@@ -323,6 +357,28 @@ class AgentPulseApp {
       }
       return updated;
     });
+
+    // Connected monitors for the Settings display picker. Snapshotted into
+    // plain objects (Electron Display instances don't survive IPC cloning).
+    const snapshotDisplays = (): DisplayInfo[] => {
+      const primaryId = screen.getPrimaryDisplay().id;
+      return screen.getAllDisplays().map((d) => ({
+        id: d.id,
+        label: d.label ?? '',
+        bounds: { x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height },
+        primary: d.id === primaryId,
+      }));
+    };
+    ipcMain.handle('screen:get-displays', () => snapshotDisplays());
+    // Hotplug while Settings is open: push the fresh list so the picker
+    // doesn't offer a monitor that's gone (or miss one just plugged in).
+    const broadcastDisplays = () => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('screen:displays-changed', snapshotDisplays());
+      }
+    };
+    screen.on('display-added', broadcastDisplays);
+    screen.on('display-removed', broadcastDisplays);
 
     // Attention escalation config (threshold, channels, webhooks). Merges the
     // partial, persists, applies to the live engine, and broadcasts so any open

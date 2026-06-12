@@ -1,5 +1,5 @@
-import React from 'react';
-import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode } from '../../../common/types';
+import React, { useEffect, useState } from 'react';
+import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, DisplayInfo } from '../../../common/types';
 import { BUBBLE_SOUNDS, playBubbleSound } from '../../sound';
 
 interface Props {
@@ -72,9 +72,90 @@ const PositionPicker: React.FC<{
   );
 };
 
+// Friendly monitor name: the OS label when it has one, else a stable
+// left-to-right ordinal ("Display 2").
+const displayName = (d: DisplayInfo, index: number) =>
+  d.label && d.label.trim().length > 0 ? d.label : `Display ${index + 1}`;
+
+// A to-scale map of the user's monitor arrangement (same coordinate space the
+// OS display settings show), each screen a clickable tile. Mirrors the
+// PositionPicker look so the two placement controls read as one family.
+const DisplayPicker: React.FC<{
+  displays: DisplayInfo[];
+  selectedId: number | null;
+  hasCustomAnchor: boolean;
+  onChange: (id: number) => void;
+}> = ({ displays, selectedId, hasCustomAnchor, onChange }) => {
+  const minX = Math.min(...displays.map((d) => d.bounds.x));
+  const minY = Math.min(...displays.map((d) => d.bounds.y));
+  const spanX = Math.max(...displays.map((d) => d.bounds.x + d.bounds.width)) - minX;
+  const spanY = Math.max(...displays.map((d) => d.bounds.y + d.bounds.height)) - minY;
+  const scale = Math.min(280 / spanX, 150 / spanY);
+
+  // A saved display that's currently unplugged highlights nothing; the
+  // primary tile lights up instead, matching where bubbles actually are.
+  const activeId = displays.some((d) => d.id === selectedId)
+    ? selectedId
+    : displays.find((d) => d.primary)?.id;
+
+  return (
+    <div
+      className='relative'
+      style={{ width: Math.round(spanX * scale), height: Math.round(spanY * scale) }}
+    >
+      {displays.map((d, i) => {
+        const active = !hasCustomAnchor && d.id === activeId;
+        return (
+          <button
+            key={d.id}
+            onClick={() => onChange(d.id)}
+            title={`${displayName(d, i)} — ${d.bounds.width}×${d.bounds.height}${d.primary ? ' (primary)' : ''}`}
+            className={`absolute rounded-lg border flex items-center justify-center transition-colors cursor-pointer ${
+              active
+                ? 'bg-blue-500/25 border-blue-400/80 text-white'
+                : 'bg-slate-900/60 border-slate-600/80 text-slate-400 hover:border-slate-400 hover:text-slate-200'
+            }`}
+            style={{
+              left: Math.round((d.bounds.x - minX) * scale),
+              top: Math.round((d.bounds.y - minY) * scale),
+              width: Math.round(d.bounds.width * scale) - 2,
+              height: Math.round(d.bounds.height * scale) - 2,
+            }}
+          >
+            <span className='text-sm font-semibold'>{i + 1}</span>
+            {d.primary && (
+              <span className='absolute bottom-1 text-[9px] uppercase tracking-wider text-slate-500'>
+                Primary
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
 export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
   const selectedPositionLabel =
     POSITION_OPTIONS.find((p) => p.id === config.stackPosition)?.label ?? config.stackPosition;
+
+  // Connected monitors, kept live across hotplug while Settings is open.
+  // Sorted left-to-right so the "Display N" ordinals stay stable on re-push.
+  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
+  useEffect(() => {
+    const sort = (list: DisplayInfo[]) =>
+      [...list].sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y);
+    window.electron.invoke('screen:get-displays').then((list: DisplayInfo[]) => setDisplays(sort(list)));
+    const onDisplaysChanged = (_event: unknown, list: DisplayInfo[]) => setDisplays(sort(list));
+    window.electron.on('screen:displays-changed', onDisplaysChanged);
+    return () => window.electron.off('screen:displays-changed', onDisplaysChanged);
+  }, []);
+
+  const selectedDisplayIndex = displays.findIndex(
+    (d) => (config.displayId != null && d.id === config.displayId) ||
+           (config.displayId == null && d.primary),
+  );
+  const selectedDisplay = displays[selectedDisplayIndex] ?? displays.find((d) => d.primary);
 
   return (
     <section className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl flex flex-col gap-7'>
@@ -191,6 +272,29 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           </div>
         )}
       </div>
+
+      {/* ── Monitor ──────────────────────────────────────────────────────── */}
+      {displays.length > 1 && (
+        <div className='flex flex-col gap-3'>
+          <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Monitor</p>
+          <p className='text-xs text-slate-400 -mt-1'>
+            Choose which screen the bubble stack lives on. The layout mirrors your OS display arrangement.
+          </p>
+          <DisplayPicker
+            displays={displays}
+            selectedId={config.displayId}
+            hasCustomAnchor={config.anchor != null}
+            onChange={(id) => onChange({ displayId: id, anchor: null })}
+          />
+          <p className='text-xs text-slate-500'>
+            {config.anchor != null
+              ? 'Bubbles follow where you dragged them. Pick a monitor to snap the stack back to its corner on that screen.'
+              : selectedDisplay
+                ? `Bubbles appear on ${displayName(selectedDisplay, displays.indexOf(selectedDisplay))}${selectedDisplay.primary ? ' (primary)' : ''}. If it's unplugged, they move to the primary display until it returns.`
+                : ''}
+          </p>
+        </div>
+      )}
 
       {/* ── Stack position ───────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>

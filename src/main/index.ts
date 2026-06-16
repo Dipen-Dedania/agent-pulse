@@ -13,6 +13,10 @@ import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDete
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
 import { isPatternSafe } from './guardrails/engine';
+import { SecretProtectionConfig, SecretRule, SecretAccessEvent } from '../common/secretProtection';
+import { CORE_SECRET_RULES } from './secretProtection/rules.core';
+import { isGlobSafe, effectiveSecretRules } from './secretProtection/engine';
+import { writeSecretFilesForTool, removeSecretFilesForTool, writeAiIgnore, removeAiIgnore } from './installer/secret-files';
 import { logger } from '../common/logger';
 import { installFileLogSink } from './file-log-sink';
 import { UsagePoller } from './usage/poller';
@@ -65,12 +69,23 @@ class AgentPulseApp {
   private guardrailLog: import('../common/guardrails').GuardrailEvent[] = [];
   private static readonly GUARDRAIL_LOG_SIZE = 50;
 
+  // Same ring-buffer treatment for Secret Protection read events.
+  private secretAccessLog: SecretAccessEvent[] = [];
+  private static readonly SECRET_LOG_SIZE = 50;
+  // Alert-fatigue guard: collapse identical (tool+file+decision) read events
+  // that fire within this window — agents often retry/re-read the same path.
+  private lastSecretEventKey: string | null = null;
+  private lastSecretEventTs = 0;
+  private static readonly SECRET_DEDUP_MS = 10_000;
+
   constructor() {
     this.stateManager = new StatusStateManager();
     this.userConfig = loadConfig();
     this.bridgeServer = new StatusBridgeServer(this.stateManager, {
       getGuardrailConfig: () => this.userConfig.guardrails,
       onGuardrailEvent: (event) => this.handleGuardrailEvent(event),
+      getSecretProtectionConfig: () => this.userConfig.secretProtection,
+      onSecretAccessEvent: (event) => this.handleSecretAccessEvent(event),
       onListenError: (err, port) => this.handleBridgeListenError(err, port),
     });
     this.bubbleManager = new BubbleManager(this.userConfig.bubble);
@@ -239,6 +254,10 @@ class AgentPulseApp {
       // Restore bubbles from last saved state (seeds from detection on first run).
       this.restoreBubbles();
 
+      // Refresh Layer-1 ignore files for installed tools so a list edited while
+      // the app was closed (or a newly-installed agent) picks up the current set.
+      void this.syncSecretFiles();
+
       this.settingsWindow.show();
     });
 
@@ -406,10 +425,19 @@ class AgentPulseApp {
     });
 
     ipcMain.handle('install-hook', async (_event, { toolId, projectPath }) => {
-      return await this.writer.installHook(toolId, projectPath);
+      const result = await this.writer.installHook(toolId, projectPath);
+      // A freshly-hooked tool should also receive the current secret-glob list.
+      this.writeSecretFilesForToolSafe(toolId, projectPath);
+      return result;
     });
 
     ipcMain.handle('uninstall-hook', async (_event, { toolId, projectPath }) => {
+      // Strip our managed secret-protection block when the hook is removed.
+      try {
+        removeSecretFilesForTool(toolId, { projectPath });
+      } catch (e) {
+        logger.warn(`[AgentPulseApp] removeSecretFiles failed for ${toolId}`, e);
+      }
       return await this.writer.uninstallHook(toolId, projectPath);
     });
 
@@ -592,6 +620,43 @@ class AgentPulseApp {
 
     ipcMain.handle('guardrails:get-recent-events', () => this.guardrailLog);
 
+    // ── Secret Protection IPC ─────────────────────────────────────────────
+    // Mirrors the guardrails channels. Globs are plain strings, so no RegExp
+    // serialization concerns as with command rules.
+    ipcMain.handle('secret-protection:list-core-rules', () => CORE_SECRET_RULES);
+
+    ipcMain.handle('secret-protection:get-config', () => this.userConfig.secretProtection);
+
+    ipcMain.handle('secret-protection:update-config', (_event, partial: Partial<SecretProtectionConfig>) => {
+      this.userConfig.secretProtection = { ...this.userConfig.secretProtection, ...partial };
+      saveConfig(this.userConfig);
+      // Re-run the Layer-1 fan-out so ignore files track the edited list.
+      void this.syncSecretFiles();
+      return this.userConfig.secretProtection;
+    });
+
+    ipcMain.handle('secret-protection:validate-glob', (_event, glob: string) => isGlobSafe(glob));
+
+    ipcMain.handle('secret-protection:add-custom-rule', (_event, rule: SecretRule) => {
+      const check = isGlobSafe(rule.glob);
+      if (!check.ok) throw new Error(`Invalid glob: ${check.reason}`);
+      const next = [...this.userConfig.secretProtection.customRules, { ...rule, source: 'user' as const }];
+      this.userConfig.secretProtection = { ...this.userConfig.secretProtection, customRules: next };
+      saveConfig(this.userConfig);
+      void this.syncSecretFiles();
+      return this.userConfig.secretProtection;
+    });
+
+    ipcMain.handle('secret-protection:remove-custom-rule', (_event, ruleId: string) => {
+      const next = this.userConfig.secretProtection.customRules.filter((r) => r.id !== ruleId);
+      this.userConfig.secretProtection = { ...this.userConfig.secretProtection, customRules: next };
+      saveConfig(this.userConfig);
+      void this.syncSecretFiles();
+      return this.userConfig.secretProtection;
+    });
+
+    ipcMain.handle('secret-protection:get-recent-events', () => this.secretAccessLog);
+
     // ── Analytics IPC ─────────────────────────────────────────────────────
     ipcMain.handle('analytics:update-config', (_event, partial: Partial<AnalyticsConfig>) => {
       const next = { ...this.userConfig.analytics, ...partial };
@@ -688,6 +753,113 @@ class AgentPulseApp {
         event.matched.map(m => ({ ruleId: m.ruleId, message: m.message })),
       ),
     });
+  }
+
+  // Push a Secret Protection event to every renderer (bubble alert + Settings
+  // log) and append to the in-memory ring so a Settings window opened after the
+  // fact still sees it. Mirrors handleGuardrailEvent's broadcast path.
+  private handleSecretAccessEvent(event: SecretAccessEvent) {
+    // Suppress a duplicate of the immediately-preceding event within the dedup
+    // window so a retrying agent doesn't spam the bubble + log.
+    const key = `${event.toolId}|${event.filePath}|${event.decision}`;
+    if (key === this.lastSecretEventKey && event.ts - this.lastSecretEventTs < AgentPulseApp.SECRET_DEDUP_MS) {
+      return;
+    }
+    this.lastSecretEventKey = key;
+    this.lastSecretEventTs = event.ts;
+
+    this.secretAccessLog = [event, ...this.secretAccessLog].slice(0, AgentPulseApp.SECRET_LOG_SIZE);
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('secret-access:event', event);
+    }
+  }
+
+  // Layer 1 fan-out: write the current secret-glob list into every installed
+  // tool's ignore/deny artifact (or strip it when protection / ignore-file
+  // writing is off). Global scope only in Phase 1. Best-effort and idempotent —
+  // safe to call on config change, hook install, and app start.
+  private async syncSecretFiles() {
+    const cfg = this.userConfig.secretProtection;
+    const globs = (cfg.enabled && cfg.writeIgnoreFiles)
+      ? effectiveSecretRules(cfg).map((r) => r.glob)
+      : [];
+    let detected: Awaited<ReturnType<ToolDetector['detectAll']>>;
+    try {
+      detected = await this.detector.detectAll();
+    } catch (e) {
+      logger.warn('[AgentPulseApp] syncSecretFiles detection failed', e);
+      return;
+    }
+    // Only touch tools we've actually hooked — avoids creating ignore files in
+    // home/project dirs for agents the user never installed.
+    const installed = (Object.keys(detected) as ToolId[]).filter((id) => this.writer.isHookInstalled(id));
+
+    // Project scope (analysis §3): write into each recently-active project
+    // directory rather than the home dir. Global scope writes once per tool.
+    const targets: (string | undefined)[] =
+      cfg.scope === 'project' ? this.recentProjectPaths() : [undefined];
+    if (cfg.scope === 'project' && targets.length === 0) {
+      logger.info('[AgentPulseApp] secret-protection project scope: no recent project paths to write');
+      return;
+    }
+
+    for (const projectPath of targets) {
+      for (const toolId of installed) {
+        try {
+          if (globs.length === 0) removeSecretFilesForTool(toolId, { projectPath });
+          else writeSecretFilesForTool(toolId, globs, { projectPath });
+        } catch (e) {
+          logger.warn(`[AgentPulseApp] syncSecretFiles failed for ${toolId}`, e);
+        }
+      }
+      // Phase 4 — emerging .aiignore standard, written alongside the per-tool files.
+      try {
+        if (globs.length === 0) removeAiIgnore({ projectPath });
+        else writeAiIgnore(globs, { projectPath });
+      } catch (e) {
+        logger.warn('[AgentPulseApp] writeAiIgnore failed', e);
+      }
+    }
+  }
+
+  // Distinct project directories an agent worked in over the last 7 days, from
+  // the timeline DB. Used for project-scope secret-file writes. Empty when the
+  // timeline is unavailable or no project paths were recorded.
+  private recentProjectPaths(): string[] {
+    const db = this.timeline?.db;
+    if (!db) return [];
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    try {
+      const rows = db.query<{ projectPath: string | null }>(
+        `SELECT DISTINCT project_path AS projectPath
+         FROM events
+         WHERE project_path IS NOT NULL AND timestamp > ?
+         LIMIT 50`,
+        [cutoff],
+      );
+      return rows
+        .map((r) => r.projectPath)
+        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
+    } catch (e) {
+      logger.warn('[AgentPulseApp] recentProjectPaths query failed', e);
+      return [];
+    }
+  }
+
+  // Write the current secret-glob list for a single tool, honouring the master
+  // + ignore-file toggles. Used right after a hook install (projectPath is the
+  // install target when the user scoped the hook to a project).
+  private writeSecretFilesForToolSafe(toolId: ToolId, projectPath?: string) {
+    const cfg = this.userConfig.secretProtection;
+    try {
+      if (cfg.enabled && cfg.writeIgnoreFiles) {
+        const globs = effectiveSecretRules(cfg).map((r) => r.glob);
+        writeSecretFilesForTool(toolId, globs, { projectPath });
+        writeAiIgnore(globs, { projectPath });
+      }
+    } catch (e) {
+      logger.warn(`[AgentPulseApp] writeSecretFiles failed for ${toolId}`, e);
+    }
   }
 }
 

@@ -13,6 +13,7 @@ import { BubbleSection } from './BubbleSection';
 import { AttentionSection } from './AttentionSection';
 import { StatusLineSection } from './StatusLineSection';
 import { GuardrailsTab } from './GuardrailsTab';
+import { SecretProtectionTab } from './SecretProtectionTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
 import { UpdatesTab } from './UpdatesTab';
 import { usePricingSync } from '../../pricing-sync';
@@ -189,6 +190,42 @@ const HookInfoModal: React.FC<{
   );
 };
 
+// ── Guardrails parent (two sub-tabs) ────────────────────────────────────────────
+// One "Guardrails" parent tab holding two clearly-distinct families: Command
+// Guardrails (gate what an agent runs) and Secret Protection (gate what it
+// reads). They share a visual language but never a merged rule list.
+const GuardrailsParent: React.FC = () => {
+  const [sub, setSub] = useState<'commands' | 'secrets'>('commands');
+  return (
+    <div className='mt-8'>
+      <div className='inline-flex gap-1 p-1 rounded-xl bg-slate-800/60 border border-slate-700/60 mb-6'>
+        <SubTabPill active={sub === 'commands'} onClick={() => setSub('commands')}>
+          Command Guardrails
+        </SubTabPill>
+        <SubTabPill active={sub === 'secrets'} onClick={() => setSub('secrets')}>
+          Secret Protection
+        </SubTabPill>
+      </div>
+      {sub === 'commands' ? <GuardrailsTab /> : <SecretProtectionTab />}
+    </div>
+  );
+};
+
+const SubTabPill: React.FC<{ active: boolean; onClick: () => void; children: React.ReactNode }> = ({
+  active,
+  onClick,
+  children,
+}) => (
+  <button
+    onClick={onClick}
+    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+      active ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+    }`}
+  >
+    {children}
+  </button>
+);
+
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
 type TabId = 'hooks' | 'bubble' | 'usage' | 'analytics' | 'guardrails' | 'updates';
@@ -198,7 +235,7 @@ const TABS: { id: TabId; label: string; description: string }[] = [
   { id: 'bubble',     label: 'Bubble',     description: 'Size, screen position, and inactivity sound for the bubbles.' },
   { id: 'usage',      label: 'Usage',      description: 'Monitor plan usage and configure Claude Code’s scheduler & status line.' },
   { id: 'analytics',  label: 'Analytics',  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
-  { id: 'guardrails', label: 'Guardrails', description: 'Block or warn on risky shell commands.' },
+  { id: 'guardrails', label: 'Guardrails', description: 'Block risky shell commands and protect secret files from agents.' },
   { id: 'updates',    label: 'Updates',    description: 'Check for and install new versions of Agent Pulse.' },
 ];
 
@@ -854,7 +891,7 @@ export const SettingsPanel: React.FC = () => {
 
       {activeTab === 'analytics' && <AnalyticsTabContainer />}
 
-      {activeTab === 'guardrails' && <GuardrailsTab />}
+      {activeTab === 'guardrails' && <GuardrailsParent />}
 
       {activeTab === 'updates' && <UpdatesTab />}
 

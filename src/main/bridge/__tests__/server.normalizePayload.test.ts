@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { normalizePayload } from '../server';
+import { normalizePayload, buildSecretBlockResponse } from '../server';
+import { evaluateSecretAccess } from '../../secretProtection/engine';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -422,5 +423,23 @@ describe('Unrecognized payloads', () => {
 
   it('random fields → null', () => {
     expect(normalizePayload({ foo: 'bar', baz: 42 })).toBeNull();
+  });
+});
+
+// ── Secret Protection deny payload ──────────────────────────────────────────────
+
+describe('buildSecretBlockResponse', () => {
+  it('emits the Claude deny shape + Antigravity decision field for a blocked read', () => {
+    const evaluation = evaluateSecretAccess('/proj/.env', { toolId: 'claude-code' });
+    expect(evaluation.decision).toBe('block');
+    const resp = buildSecretBlockResponse('claude-code', evaluation, '/proj/.env');
+    // Antigravity / generic shape
+    expect(resp.decision).toBe('block');
+    expect(resp.continue).toBe(false);
+    expect(resp.reason).toContain('/proj/.env');
+    // Claude Code PreToolUse shape
+    expect(resp.hookSpecificOutput.hookEventName).toBe('PreToolUse');
+    expect(resp.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(resp.matchedRules).toContain('env');
   });
 });

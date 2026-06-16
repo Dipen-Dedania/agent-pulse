@@ -1,6 +1,7 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, CopilotQuotaWindow, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload } from '../../../common/types';
 import { GuardrailEvent } from '../../../common/guardrails';
+import { SecretAccessEvent } from '../../../common/secretProtection';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
 import { logger } from '../../../common/logger';
@@ -752,6 +753,27 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     window.electron.send('open-settings');
   }, []);
 
+  // Secret Protection signal — same amber(warn)/red(block) language as the
+  // guardrail ring, but for a protected-file read. Filtered by toolId.
+  const [secretSignal, setSecretSignal] = useState<SecretAccessEvent | null>(null);
+  useEffect(() => {
+    const handler = (_e: unknown, evt: SecretAccessEvent) => {
+      if (evt.toolId !== toolId) return;
+      setSecretSignal(evt);
+      if (evt.decision === 'warn') {
+        const t = window.setTimeout(() => setSecretSignal((cur) => (cur === evt ? null : cur)), 6000);
+        return () => window.clearTimeout(t);
+      }
+    };
+    window.electron.on('secret-access:event', handler);
+    return () => window.electron.off('secret-access:event', handler);
+  }, [toolId]);
+
+  const dismissSecretSignal = useCallback(() => {
+    setSecretSignal(null);
+    window.electron.send('open-settings');
+  }, []);
+
   const dragOrigin = useRef<{ x: number; y: number } | null>(null);
 
   // Pixels of movement required before a mousedown is treated as a drag.
@@ -1112,6 +1134,57 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
             title={`${guardrailSignal.decision === 'block' ? 'Blocked' : 'Warning'}: ${guardrailSignal.matched.map(m => m.message).join(' | ')}`}
           >
             <span className='text-white text-[9px] font-bold leading-none'>!</span>
+          </button>
+        )}
+
+        {/* Secret Protection ring + badge — shown when no command-guardrail
+            signal is competing for the same corner. Key icon distinguishes it. */}
+        {secretSignal && !guardrailSignal && (
+          <motion.div
+            animate={
+              secretSignal.decision === 'block'
+                ? { opacity: 1 }
+                : {
+                  opacity: [0.4, 1, 0.4],
+                  boxShadow: [
+                    '0 0 0px rgba(245,158,11,0.0)',
+                    '0 0 10px rgba(245,158,11,0.6)',
+                    '0 0 0px rgba(245,158,11,0.0)',
+                  ],
+                }
+            }
+            transition={
+              secretSignal.decision === 'block'
+                ? { duration: 0.2 }
+                : { duration: 1.2, repeat: Infinity, ease: 'easeInOut' }
+            }
+            className='absolute rounded-full pointer-events-none'
+            style={{
+              width: dims.ring + 2,
+              height: dims.ring + 2,
+              border: `2px solid ${secretSignal.decision === 'block'
+                ? (isDark ? 'rgba(239,68,68,0.95)' : 'rgba(220,38,38,0.95)')
+                : (isDark ? 'rgba(245,158,11,0.85)' : 'rgba(217,119,6,0.85)')
+                }`,
+            }}
+          />
+        )}
+
+        {secretSignal && !guardrailSignal && (
+          <button
+            onClick={(e) => { e.stopPropagation(); dismissSecretSignal(); }}
+            className='absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center cursor-pointer'
+            style={{
+              background: secretSignal.decision === 'block'
+                ? (isDark ? 'rgba(239,68,68,0.95)' : 'rgba(220,38,38,0.95)')
+                : (isDark ? 'rgba(245,158,11,0.95)' : 'rgba(217,119,6,0.95)'),
+              boxShadow: secretSignal.decision === 'block'
+                ? '0 0 6px rgba(239,68,68,0.8)'
+                : '0 0 6px rgba(245,158,11,0.7)',
+            }}
+            title={`${secretSignal.decision === 'block' ? 'Blocked read' : 'Observed read'} of ${secretSignal.filePath}${secretSignal.viaShell ? ' (shell, best-effort)' : ''}`}
+          >
+            <span className='text-white text-[9px] font-bold leading-none'>🔑</span>
           </button>
         )}
 

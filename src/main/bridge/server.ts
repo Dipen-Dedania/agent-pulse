@@ -3,8 +3,15 @@ import { StatusStateManager } from './state-manager';
 import { BRIDGE_PORT } from './config';
 import { ToolId, AgentState } from '../../common/types';
 import { GuardrailConfig, GuardrailEvent, GuardrailEvaluation } from '../../common/guardrails';
+import {
+  SecretProtectionConfig,
+  SecretAccessEvent,
+  SecretAccessEvaluation,
+} from '../../common/secretProtection';
 import { evaluateCommand, detectOs } from '../guardrails/engine';
 import { extractCommand } from '../guardrails/extractCommand';
+import { evaluateSecretAccess, effectiveSecretRules } from '../secretProtection/engine';
+import { extractReadPath } from '../secretProtection/extractReadPath';
 import { logger } from '../../common/logger';
 import {
   clampPidChain,
@@ -16,6 +23,9 @@ import {
 export interface BridgeOptions {
   getGuardrailConfig?: () => GuardrailConfig;
   onGuardrailEvent?: (event: GuardrailEvent) => void;
+  // Secret Protection (separate guardrail family — gates file *reads*).
+  getSecretProtectionConfig?: () => SecretProtectionConfig;
+  onSecretAccessEvent?: (event: SecretAccessEvent) => void;
   // Called when the bridge cannot bind its port after exhausting retries.
   // Lets the main process surface a clean notification instead of letting the
   // listen error escape as a fatal uncaught exception ("A JavaScript error
@@ -190,6 +200,18 @@ export class StatusBridgeServer {
           return;
         }
 
+        // Secret Protection — same pipeline shape, gating file *reads* instead
+        // of commands. extractReadPath returns null for non-read tool calls, so
+        // ordinary events fall straight through to the status broadcast.
+        const secret = this.evaluateSecretAccess(toolId, data);
+        if (secret && secret.eval.decision === 'block' && secret.enforce) {
+          // Audit-only mode (hookBlocking off) skips the deny but still emits
+          // the event above, so the read is observed/logged without refusal.
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(buildSecretBlockResponse(toolId, secret.eval, secret.filePath)));
+          return;
+        }
+
         this.stateManager.updateStatus(toolId, state, payload);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok' }));
@@ -304,6 +326,52 @@ export class StatusBridgeServer {
     return { command, eval: evaluation };
   }
 
+  // Run a read-class tool call (if any) through the Secret Protection engine and
+  // emit a SecretAccessEvent when the decision isn't allow. Returns the
+  // evaluation + the extracted path so the handler can respond with a deny.
+  // Mirrors evaluateGuardrails.
+  private evaluateSecretAccess(toolId: ToolId, raw: any):
+    { filePath: string; viaShell: boolean; enforce: boolean; eval: SecretAccessEvaluation } | null {
+    const config = this.options.getSecretProtectionConfig?.();
+    if (config && !config.enabled) return null;
+    // hookBlocking off → audit-only: observe + emit, but never deny.
+    const enforce = config ? config.hookBlocking !== false : true;
+
+    // Conservative shell-read scan: only treat a shell token as a read of a
+    // protected path when the engine would actually flag it.
+    const rules = effectiveSecretRules(config);
+    const isProtected = (candidate: string) =>
+      evaluateSecretAccess(candidate, { toolId, config }).matched.length > 0;
+
+    const read = extractReadPath(toolId, raw, rules.length ? { isProtected } : undefined);
+    if (!read) return null;
+
+    const evaluation = evaluateSecretAccess(read.path, { toolId, config });
+    if (evaluation.decision === 'allow') {
+      return { filePath: read.path, viaShell: read.viaShell, enforce, eval: evaluation };
+    }
+
+    const event: SecretAccessEvent = {
+      ts: Date.now(),
+      toolId,
+      filePath: read.path,
+      decision: evaluation.decision,
+      matched: evaluation.matched,
+      blockable: evaluation.blockable,
+      viaShell: read.viaShell,
+    };
+    try {
+      this.options.onSecretAccessEvent?.(event);
+    } catch (e) {
+      logger.warn('[Bridge] onSecretAccessEvent threw', e);
+    }
+    logger.info(
+      `[Bridge/Secret] ${evaluation.decision.toUpperCase()} toolId=${toolId}${read.viaShell ? ' (shell)' : ''} ` +
+      `rules=${evaluation.matched.map(m => m.ruleId).join(',')} path=${JSON.stringify(read.path)}`,
+    );
+    return { filePath: read.path, viaShell: read.viaShell, enforce, eval: evaluation };
+  }
+
   /**
    * Accepts seven formats (detection order matters — more specific markers first):
    *
@@ -351,15 +419,31 @@ export function buildBlockResponse(toolId: ToolId, evaluation: GuardrailEvaluati
     .join(' | ') || 'guardrail tripped';
   const ruleIds = evaluation.matched.map(m => m.ruleId).join(',');
   const reason = `[Agent Pulse] Blocked by ${ruleIds || 'guardrail'}: ${detail}`;
+  return buildDenyResponse(reason, ruleIds);
+}
 
-  // Lowest common denominator: top-level `decision`/`reason` covers Antigravity
-  // and any other tool that reads the obvious field. `hookSpecificOutput` is
-  // Claude Code's documented shape for PreToolUse permission gating.
+// Secret Protection deny — same wire shape as buildBlockResponse, with a
+// file-oriented reason. Reuses buildDenyResponse so the two families never
+// drift in how they signal a deny to each tool.
+export function buildSecretBlockResponse(
+  toolId: ToolId,
+  evaluation: SecretAccessEvaluation,
+  filePath: string,
+): any {
+  const ruleIds = evaluation.matched.map(m => m.ruleId).join(',');
+  const reason = `[Agent Pulse] Blocked read of protected file ${filePath}`;
+  return buildDenyResponse(reason, ruleIds);
+}
+
+// The shared deny payload. Lowest common denominator: top-level
+// `decision`/`reason` covers Antigravity and any tool that reads the obvious
+// field; `hookSpecificOutput` is Claude Code's documented PreToolUse shape.
+function buildDenyResponse(reason: string, matchedRules: string): any {
   return {
     status: 'blocked',
     decision: 'block',
     reason,
-    matchedRules: ruleIds,
+    matchedRules,
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',

@@ -91,7 +91,7 @@ export const GuardrailsTab: React.FC = () => {
   }
 
   return (
-    <div className='mt-10'>
+    <div>
       <div className='flex items-center justify-between mb-5'>
         <div>
           <h2 className='text-xl font-bold tracking-tight'>Command Guardrails</h2>

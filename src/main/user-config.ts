@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold } from '../common/types';
 import { GuardrailConfig } from '../common/guardrails';
+import { SecretProtectionConfig, SecretRule } from '../common/secretProtection';
 import { logger } from '../common/logger';
 
 // Cap warning fires when REMAINING credit ≤ threshold (i.e. you're about
@@ -112,6 +113,7 @@ export interface UserConfig {
   copilotUsage: CopilotUsageConfig;
   antigravityUsage: AntigravityUsageConfig;
   guardrails: GuardrailConfig;
+  secretProtection: SecretProtectionConfig;
   autoLaunch: boolean;
   analytics: AnalyticsConfig;
   updates: UpdaterConfig;
@@ -181,6 +183,14 @@ const DEFAULTS: UserConfig = {
     enabled: true,
     disabledRuleIds: [],
     customRules: [],
+  },
+  secretProtection: {
+    enabled: true,
+    disabledRuleIds: [],
+    customRules: [],
+    scope: 'global',
+    writeIgnoreFiles: true,
+    hookBlocking: true,
   },
   autoLaunch: false,
   analytics: {
@@ -305,6 +315,35 @@ function migrateScheduler(raw: unknown): SchedulerConfig {
       : d.maxOpenersPerDay;
 
   return { mode, fixed, adaptive, tokenNudge, maxOpenersPerDay };
+}
+
+// Validate a persisted Secret Protection block. Falls back to defaults for any
+// missing/garbage field and filters custom rules to well-formed {id, glob} rows
+// so a hand-edited config can't strand the engine or the fan-out writer.
+function migrateSecretProtection(raw: unknown): SecretProtectionConfig {
+  const d = DEFAULTS.secretProtection;
+  const s = (raw && typeof raw === 'object' ? raw : {}) as Partial<SecretProtectionConfig>;
+  const customRules: SecretRule[] = Array.isArray(s.customRules)
+    ? s.customRules
+        .filter((r: any): r is SecretRule =>
+          !!r && typeof r.id === 'string' && r.id.length > 0 && typeof r.glob === 'string' && r.glob.length > 0)
+        .map((r: any) => ({
+          id: r.id,
+          glob: r.glob,
+          source: 'user' as const,
+          message: typeof r.message === 'string' ? r.message : undefined,
+        }))
+    : [];
+  return {
+    enabled: typeof s.enabled === 'boolean' ? s.enabled : d.enabled,
+    disabledRuleIds: Array.isArray(s.disabledRuleIds)
+      ? s.disabledRuleIds.filter((x: unknown): x is string => typeof x === 'string')
+      : [],
+    customRules,
+    scope: s.scope === 'project' || s.scope === 'global' ? s.scope : d.scope,
+    writeIgnoreFiles: typeof s.writeIgnoreFiles === 'boolean' ? s.writeIgnoreFiles : d.writeIgnoreFiles,
+    hookBlocking: typeof s.hookBlocking === 'boolean' ? s.hookBlocking : d.hookBlocking,
+  };
 }
 
 // Validate a persisted bubble block against the known string unions, falling
@@ -560,6 +599,7 @@ export function loadConfig(): UserConfig {
           disabledRuleIds: Array.isArray(guardrails.disabledRuleIds) ? guardrails.disabledRuleIds : [],
           customRules:     Array.isArray(guardrails.customRules)     ? guardrails.customRules     : [],
         },
+        secretProtection: migrateSecretProtection(parsed.secretProtection),
         analytics: {
           redactTaskText: typeof analytics.redactTaskText === 'boolean' ? analytics.redactTaskText : DEFAULTS.analytics.redactTaskText,
           idleGapMinutes: typeof analytics.idleGapMinutes === 'number' && analytics.idleGapMinutes >= 1 ? analytics.idleGapMinutes : DEFAULTS.analytics.idleGapMinutes,
@@ -609,6 +649,7 @@ export function loadConfig(): UserConfig {
       disabledRuleIds: [...DEFAULTS.guardrails.disabledRuleIds],
       customRules:     [...DEFAULTS.guardrails.customRules],
     },
+    secretProtection: migrateSecretProtection(undefined),
     analytics: { ...DEFAULTS.analytics },
     updates: { ...DEFAULTS.updates },
     scheduler: migrateScheduler(undefined),

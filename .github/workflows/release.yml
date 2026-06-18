@@ -114,7 +114,7 @@ jobs:
       # plain main-branch pushes that never publish — can be downloaded and
       # smoke-tested on a real machine. This does NOT touch the update feed.
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-pulse-${{ matrix.os }}
           path: ${{ matrix.artifact_path }}

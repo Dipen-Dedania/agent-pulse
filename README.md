@@ -11,6 +11,8 @@
   <a href="https://github.com/Dipen-Dedania/agent-pulse/releases/latest"><img src="https://img.shields.io/github/v/release/Dipen-Dedania/agent-pulse" alt="Latest release" /></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platforms" />
+  
+![GitHub Downloads (all releases)](https://img.shields.io/github/downloads/Dipen-Dedania/agent-pulse/total)
 </p>
 
 Agent Pulse is a cross-platform Electron desktop app that surfaces the state of every AI coding agent on your machine through floating, always-on-top status bubbles. Instead of tab-hopping between Claude Code, Cursor, Codex, Copilot, Kiro, and Antigravity to check whether an agent is still working, idle, or has crashed, you see it at a glance in a frosted-glass bubble — anywhere on your desktop.
@@ -20,6 +22,12 @@ It also bundles a unified status bridge, subscription usage meters for Claude / 
 <p align="center">
   <img src="github-pages/public/screenshots/bubbles.png" alt="Agent Pulse status bubbles" width="720" />
 </p>
+
+<p align="center">
+  <video src="https://github.com/Dipen-Dedania/agent-pulse/raw/main/brag-output/brag.mp4" controls width="720" muted></video>
+</p>
+
+<p align="center"><sub>▶️ <a href="https://github.com/Dipen-Dedania/agent-pulse/raw/main/brag-output/brag.mp4">Watch the demo</a> if the video doesn't play inline.</sub></p>
 
 <p align="center">
   <a href="https://dipen-dedania.github.io/agent-pulse/">Website</a> ·

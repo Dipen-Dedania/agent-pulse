@@ -99,6 +99,12 @@ describe('Non-blockable tools', () => {
     const r = evaluateCommand('rm -rf /', { os: 'linux', toolId: 'antigravity-cli', config: cfg() });
     expect(r.blockable).toBe(true);
   });
+
+  it('Tier 1 rule against Codex blocks (not downgraded)', () => {
+    const r = evaluateCommand('rm -rf /', { os: 'linux', toolId: 'openai-codex', config: cfg() });
+    expect(r.decision).toBe('block');
+    expect(r.blockable).toBe(true);
+  });
 });
 
 // ── Safe commands: no false positives ────────────────────────────────────────

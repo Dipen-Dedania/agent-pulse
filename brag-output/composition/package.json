@@ -1,0 +1,11 @@
+{
+  "name": "hf-scaffold",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.7.10 preview",
+    "check": "npx --yes hyperframes@0.7.10 lint && npx --yes hyperframes@0.7.10 validate && npx --yes hyperframes@0.7.10 inspect",
+    "render": "npx --yes hyperframes@0.7.10 render",
+    "publish": "npx --yes hyperframes@0.7.10 publish"
+  }
+}

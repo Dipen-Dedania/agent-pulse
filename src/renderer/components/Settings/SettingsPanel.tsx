@@ -264,6 +264,10 @@ export const SettingsPanel: React.FC = () => {
     mode: 'off', nextFireAt: null, nextEventKind: null, lastRun: null, openersToday: 0, windowResetsAt: null,
   });
   const [activeTab, setActiveTab] = useState<TabId>('hooks');
+  // Which provider sub-tab is open within the Usage tab. Claude Code groups its
+  // usage, scheduler, and status-line settings together since they're all
+  // Claude Code features.
+  const [usageSubTab, setUsageSubTab] = useState<ToolId>('claude-code');
   const activeTabMeta = TABS.find((t) => t.id === activeTab)!;
 
   // Install live LiteLLM rates; re-renders this panel (and its cost-showing
@@ -823,71 +827,117 @@ export const SettingsPanel: React.FC = () => {
         )
       )}
 
-      {activeTab === 'usage' && (
-        <>
-          {usageConfig && (
-            <UsageSection
-              config={usageConfig}
-              status={usageStatus}
-              onChange={handleUsageConfigChange}
-              onRefresh={handleUsageRefresh}
-            />
-          )}
-          {codexUsageConfig && (
-            <CodexUsageSection
-              config={codexUsageConfig}
-              status={codexUsageStatus}
-              onChange={handleCodexUsageConfigChange}
-              onRefresh={handleCodexUsageRefresh}
-            />
-          )}
-          {cursorUsageConfig && (
-            <CursorUsageSection
-              config={cursorUsageConfig}
-              status={cursorUsageStatus}
-              onChange={handleCursorUsageConfigChange}
-              onRefresh={handleCursorUsageRefresh}
-            />
-          )}
-          {copilotUsageConfig && (
-            <CopilotUsageSection
-              config={copilotUsageConfig}
-              status={copilotUsageStatus}
-              onChange={handleCopilotUsageConfigChange}
-              onRefresh={handleCopilotUsageRefresh}
-            />
-          )}
-          {antigravityUsageConfig && (
-            <AntigravityUsageSection
-              config={antigravityUsageConfig}
-              status={antigravityUsageStatus}
-              onChange={handleAntigravityUsageConfigChange}
-              onRefresh={handleAntigravityUsageRefresh}
-            />
-          )}
-          {schedulerConfig && (
-            <SchedulerSection
-              config={schedulerConfig}
-              status={schedulerStatus}
-              onChange={handleSchedulerConfigChange}
-              onTestOpener={handleSchedulerTestOpener}
-            />
-          )}
-          {statusLineConfig && statusLineDetect && (
-            <StatusLineSection
-              config={statusLineConfig}
-              detect={statusLineDetect}
-              onChange={handleStatusLineConfigChange}
-              onInstall={handleStatusLineInstall}
-              onRemove={handleStatusLineRemove}
-              onReset={handleStatusLineReset}
-            />
-          )}
-          {!usageConfig && !codexUsageConfig && !cursorUsageConfig && !copilotUsageConfig && !antigravityUsageConfig && !schedulerConfig && (
-            <p className='text-slate-400 text-sm'>Usage settings are loading…</p>
-          )}
-        </>
-      )}
+      {activeTab === 'usage' && (() => {
+        // One sub-tab per provider; Claude Code's pill also hosts the scheduler
+        // and status-line settings. A pill only appears once its config has
+        // loaded, so it always maps to renderable content.
+        const providers: { toolId: ToolId; hasConfig: boolean }[] = [
+          { toolId: 'claude-code', hasConfig: !!usageConfig },
+          { toolId: 'openai-codex', hasConfig: !!codexUsageConfig },
+          { toolId: 'cursor', hasConfig: !!cursorUsageConfig },
+          { toolId: 'vscode-copilot', hasConfig: !!copilotUsageConfig },
+          { toolId: 'antigravity-cli', hasConfig: !!antigravityUsageConfig },
+        ];
+        const available = providers.filter((p) => p.hasConfig);
+        if (available.length === 0) {
+          return <p className='text-slate-400 text-sm'>Usage settings are loading…</p>;
+        }
+        // Fall back to the first available provider if the remembered one isn't
+        // (yet) loaded, so the view is never empty.
+        const active = available.some((p) => p.toolId === usageSubTab)
+          ? usageSubTab
+          : available[0].toolId;
+
+        return (
+          <div>
+            <div className='inline-flex flex-wrap gap-1 p-1 rounded-xl bg-slate-800/60 border border-slate-700/60 mb-2'>
+              {available.map((p) => (
+                <SubTabPill
+                  key={p.toolId}
+                  active={active === p.toolId}
+                  onClick={() => setUsageSubTab(p.toolId)}
+                >
+                  <span className='flex items-center gap-2'>
+                    <img
+                      src={TOOL_META[p.toolId].icon}
+                      alt=''
+                      className='w-4 h-4 object-contain'
+                    />
+                    {TOOL_META[p.toolId].label}
+                  </span>
+                </SubTabPill>
+              ))}
+            </div>
+
+            {active === 'claude-code' && (
+              <>
+                {usageConfig && (
+                  <UsageSection
+                    config={usageConfig}
+                    status={usageStatus}
+                    onChange={handleUsageConfigChange}
+                    onRefresh={handleUsageRefresh}
+                  />
+                )}
+                {schedulerConfig && (
+                  <SchedulerSection
+                    config={schedulerConfig}
+                    status={schedulerStatus}
+                    onChange={handleSchedulerConfigChange}
+                    onTestOpener={handleSchedulerTestOpener}
+                  />
+                )}
+                {statusLineConfig && statusLineDetect && (
+                  <StatusLineSection
+                    config={statusLineConfig}
+                    detect={statusLineDetect}
+                    onChange={handleStatusLineConfigChange}
+                    onInstall={handleStatusLineInstall}
+                    onRemove={handleStatusLineRemove}
+                    onReset={handleStatusLineReset}
+                  />
+                )}
+              </>
+            )}
+
+            {active === 'openai-codex' && codexUsageConfig && (
+              <CodexUsageSection
+                config={codexUsageConfig}
+                status={codexUsageStatus}
+                onChange={handleCodexUsageConfigChange}
+                onRefresh={handleCodexUsageRefresh}
+              />
+            )}
+
+            {active === 'cursor' && cursorUsageConfig && (
+              <CursorUsageSection
+                config={cursorUsageConfig}
+                status={cursorUsageStatus}
+                onChange={handleCursorUsageConfigChange}
+                onRefresh={handleCursorUsageRefresh}
+              />
+            )}
+
+            {active === 'vscode-copilot' && copilotUsageConfig && (
+              <CopilotUsageSection
+                config={copilotUsageConfig}
+                status={copilotUsageStatus}
+                onChange={handleCopilotUsageConfigChange}
+                onRefresh={handleCopilotUsageRefresh}
+              />
+            )}
+
+            {active === 'antigravity-cli' && antigravityUsageConfig && (
+              <AntigravityUsageSection
+                config={antigravityUsageConfig}
+                status={antigravityUsageStatus}
+                onChange={handleAntigravityUsageConfigChange}
+                onRefresh={handleAntigravityUsageRefresh}
+              />
+            )}
+          </div>
+        );
+      })()}
 
       {activeTab === 'analytics' && <AnalyticsTabContainer />}
 

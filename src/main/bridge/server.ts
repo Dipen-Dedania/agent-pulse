@@ -406,20 +406,15 @@ export class StatusBridgeServer {
 }
 
 // Build a hook-response body that asks the originating tool to deny the
-// pending tool call. Each tool documents a different shape; we emit all the
-// fields each one cares about so a single payload works everywhere.
-//
-// - Claude Code: `hookSpecificOutput.permissionDecision = "deny"` (CC PreToolUse).
-// - Antigravity: `{ decision: "deny", reason: "..." }` (our hook script checks this).
-// - Tools that don't honour these fields ignore them; the response still
-//   returns 200 OK so the hook script doesn't error out.
+// pending tool call. The exact shape is tool-specific — see buildDenyResponse.
+// The response always returns 200 OK so the hook script doesn't error out.
 export function buildBlockResponse(toolId: ToolId, evaluation: GuardrailEvaluation): any {
   const detail = evaluation.matched
     .map(m => m.message + (m.suggestedFix ? ` ${m.suggestedFix}` : ''))
     .join(' | ') || 'guardrail tripped';
   const ruleIds = evaluation.matched.map(m => m.ruleId).join(',');
   const reason = `[Agent Pulse] Blocked by ${ruleIds || 'guardrail'}: ${detail}`;
-  return buildDenyResponse(reason, ruleIds);
+  return buildDenyResponse(toolId, reason, ruleIds);
 }
 
 // Secret Protection deny — same wire shape as buildBlockResponse, with a
@@ -432,16 +427,26 @@ export function buildSecretBlockResponse(
 ): any {
   const ruleIds = evaluation.matched.map(m => m.ruleId).join(',');
   const reason = `[Agent Pulse] Blocked read of protected file ${filePath}`;
-  return buildDenyResponse(reason, ruleIds);
+  return buildDenyResponse(toolId, reason, ruleIds);
 }
 
-// The shared deny payload. Lowest common denominator: top-level
-// `decision`/`reason` covers Antigravity and any tool that reads the obvious
-// field; `hookSpecificOutput` is Claude Code's documented PreToolUse shape.
-function buildDenyResponse(reason: string, matchedRules: string): any {
+// The shared deny payload. The wire shape differs per tool because each one
+// reads a different field:
+//   - Antigravity: top-level `decision` must be the literal "deny" (its hook
+//     protocol is allow/deny). Our hook script forwards this body to stdout.
+//   - Codex: prefers `hookSpecificOutput.permissionDecision = "deny"`; its
+//     legacy `decision` field only accepts "block" (it rejects "deny"/"allow"),
+//     so we must NOT send "deny" at the top level for Codex.
+//   - Claude Code: native http hook reads `hookSpecificOutput.permissionDecision`.
+// `status: "blocked"` + `continue: false` are stable markers every block body
+// carries so the shell hook scripts can detect a block without a JSON parser.
+function buildDenyResponse(toolId: ToolId, reason: string, matchedRules: string): any {
+  // Antigravity's allow/deny protocol uses "deny"; Codex/Claude Code use the
+  // legacy "block" plus hookSpecificOutput.
+  const decision = toolId === 'antigravity-cli' ? 'deny' : 'block';
   return {
     status: 'blocked',
-    decision: 'block',
+    decision,
     reason,
     matchedRules,
     hookSpecificOutput: {

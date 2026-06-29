@@ -66,11 +66,17 @@ export interface GuardrailConfig {
 
 // Which tools we can actually block. Non-blockable tools still get warnings
 // (downgraded from Tier 1) so the user has visibility, but execution proceeds.
+// Codex, Claude Code and Antigravity expose a synchronous PreToolUse hook that
+// reads a deny verdict and cancels the command (Codex: stdout
+// hookSpecificOutput.permissionDecision="deny" or exit 2; Antigravity: stdout
+// {"decision":"deny"}; Claude Code: native http hook response). Cursor (MCP
+// ping only), Copilot and Kiro have no confirmed synchronous deny path, so they
+// stay warn-only.
 export const BLOCKABLE_TOOLS: Record<ToolId, boolean> = {
   'claude-code': true,
   'antigravity-cli': true,
+  'openai-codex': true,
   'cursor': false,
-  'openai-codex': false,
   'vscode-copilot': false,
   'kiro': false,
 };

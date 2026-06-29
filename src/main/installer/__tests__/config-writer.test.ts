@@ -289,6 +289,27 @@ describe('ConfigWriter — openai-codex', () => {
       expect(writer.isHookInstalled('openai-codex')).toBe(false);
     });
   });
+
+  it('hook scripts capture the response and relay a guardrail deny (fail-open)', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('openai-codex');
+      const sh = fs.readFileSync(path.join(tmpDir, '.codex', 'hooks', 'agent-pulse.sh'), 'utf8');
+      const ps1 = fs.readFileSync(path.join(tmpDir, '.codex', 'hooks', 'agent-pulse.ps1'), 'utf8');
+
+      // bash: response is captured (not discarded) with a timeout, and the
+      // block marker is relayed to stdout.
+      expect(sh).not.toContain('-o /dev/null');
+      expect(sh).toContain('RESP=$(curl');
+      expect(sh).toContain('--max-time 3');
+      expect(sh).toContain('"status":"blocked"');
+      expect(sh).toContain('printf \'%s\' "$RESP"');
+
+      // PowerShell: timeout + marker check + writes the deny body to stdout.
+      expect(ps1).toContain('-TimeoutSec 3');
+      expect(ps1).toContain('"status":"blocked"');
+      expect(ps1).toContain('[Console]::Out.Write($resp.Content)');
+    });
+  });
 });
 
 // ── Kiro ──────────────────────────────────────────────────────────────────────
@@ -457,6 +478,22 @@ describe('ConfigWriter — antigravity-cli', () => {
       expect(shContent).toContain('exit 0');
       const ps1Content = fs.readFileSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.ps1'), 'utf8');
       expect(ps1Content).toContain('exit 0');
+    });
+  });
+
+  it('hook scripts capture the response and relay a guardrail deny over allow', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('antigravity-cli');
+      const shContent = fs.readFileSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.sh'), 'utf8');
+      // Response is captured (not discarded) and a block is relayed verbatim.
+      expect(shContent).not.toContain('-o /dev/null');
+      expect(shContent).toContain('RESP=$(curl');
+      expect(shContent).toContain('"status":"blocked"');
+      expect(shContent).toContain('printf \'%s\' "$RESP"');
+
+      const ps1Content = fs.readFileSync(path.join(tmpDir, scriptRelDir, 'agent-pulse.ps1'), 'utf8');
+      expect(ps1Content).toContain('"status":"blocked"');
+      expect(ps1Content).toContain('[Console]::Out.Write($verdict)');
     });
   });
 

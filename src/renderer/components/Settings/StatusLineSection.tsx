@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   StatusLineConfig,
   StatusLineRow,
@@ -105,8 +105,6 @@ const ColorSelect: React.FC<{ value: StatusLineColor; onChange: (c: StatusLineCo
 );
 
 export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, onInstall, onRemove, onReset }) => {
-  const [expanded, setExpanded] = useState(false);
-
   // Each entry in config.lines is one rendered row. The editor manages all of
   // them; guard against an empty config so there's always one row to edit.
   const lines = config.lines.length ? config.lines : [{ segments: [] }];
@@ -184,20 +182,8 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
 
   return (
     <section className='mt-6 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl'>
-      {/* Header (always visible) */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className='w-full flex items-center gap-3 text-left cursor-pointer'
-        aria-expanded={expanded}
-      >
-        <svg
-          xmlns='http://www.w3.org/2000/svg'
-          viewBox='0 0 20 20'
-          fill='currentColor'
-          className={`w-4 h-4 text-slate-400 transition-transform ${expanded ? 'rotate-90' : ''}`}
-        >
-          <path fillRule='evenodd' d='M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z' clipRule='evenodd' />
-        </svg>
+      {/* Header */}
+      <div className='flex items-center gap-3'>
         <div className='flex-1 min-w-0'>
           <p className='font-semibold text-white leading-tight'>Status Line</p>
           <p className='text-xs text-slate-400 mt-0.5'>Show context, cost & more in Claude Code&apos;s terminal bar.</p>
@@ -206,10 +192,9 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
           {runtimeBadge}
           {stateBadge}
         </div>
-      </button>
+      </div>
 
-      {expanded && (
-        <div className='mt-5 flex flex-col gap-5'>
+      <div className='mt-5 flex flex-col gap-5'>
           {/* Live preview — each config line on its own row; long rows scroll
               horizontally so they never break the panel layout. */}
           <div className='bg-slate-900/70 border border-slate-700/60 rounded-xl px-4 py-3'>
@@ -465,7 +450,6 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
             </div>
           </div>
         </div>
-      )}
     </section>
   );
 };

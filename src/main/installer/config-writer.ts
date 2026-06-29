@@ -504,7 +504,9 @@ exit 0
   private buildCodexShellScript(): string {
     return `#!/usr/bin/env bash
 # Agent Pulse — Codex hook script (bash)
-# Reads event JSON from stdin, injects identifier + cwd + agent_pid, and forwards to bridge.
+# Reads event JSON from stdin, injects identifier + cwd + agent_pid, forwards to
+# the bridge, and relays a guardrail deny verdict back to Codex via stdout.
+# Fail-open: any bridge error/timeout leaves the command allowed.
 BODY=$(cat)
 CWD_ESCAPED=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
 CHAIN_PIDS="$PPID"
@@ -518,10 +520,17 @@ done
 INJECT='"_ap_tool":"openai-codex","cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"',"agent_pid_chain":['"$CHAIN_PIDS"'],'
 # '|' delimiter: see buildShellScript for the / vs | rationale.
 BODY=$(printf '%s' "$BODY" | sed "s|^{|{$INJECT|")
-curl -s -o /dev/null -X POST \\
+RESP=$(curl -s --max-time 3 -X POST \\
   -H "Content-Type: application/json" \\
   -d "$BODY" \\
-  "${this.bridgeUrl}" || true
+  "${this.bridgeUrl}" 2>/dev/null || true)
+# Relay a deny verdict to Codex. The bridge's block body carries
+# hookSpecificOutput.permissionDecision:"deny" (Codex's documented PreToolUse
+# deny shape). Only act on an explicit block marker so a down/slow bridge
+# fails open and the command is allowed.
+case "$RESP" in
+  *'"status":"blocked"'*) printf '%s' "$RESP" ;;
+esac
 exit 0
 `;
   }
@@ -532,7 +541,12 @@ exit 0
    */
   private buildCodexPowerShellScript(): string {
     return `# Agent Pulse — Codex hook script (PowerShell)
-# Reads event JSON from stdin, injects identifier + cwd + agent_pid, and forwards to bridge.
+# Reads event JSON from stdin, injects identifier + cwd + agent_pid, forwards to
+# the bridge, and relays a guardrail deny verdict back to Codex via stdout.
+# Fail-open: any bridge error/timeout leaves the command allowed.
+$ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
 $body = $reader.ReadToEnd()
 $reader.Close()
@@ -556,11 +570,16 @@ $agentPid = if ($chainPids.Count -ge 2) { $chainPids[1] } else { $PID }
 $inject = '"_ap_tool":"openai-codex","cwd":' + $cwdJson + ',"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
 $body = $body -replace '^\\{', ('{' + $inject)
 try {
-  Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
+  $resp = Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
     -Method POST \`
     -ContentType "application/json" \`
     -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
-    -UseBasicParsing | Out-Null
+    -UseBasicParsing -TimeoutSec 3
+  # Relay a deny verdict to Codex (stdout JSON with permissionDecision:"deny").
+  # Only act on an explicit block marker so a down/slow bridge fails open.
+  if ($resp.Content -like '*"status":"blocked"*') {
+    [Console]::Out.Write($resp.Content)
+  }
 } catch { }
 exit 0
 `;
@@ -731,13 +750,21 @@ done
 INJECT='"_ap_tool":"antigravity-cli","hook_event_name":"'"$EVENT"'","cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"',"agent_pid_chain":['"$CHAIN_PIDS"'],'
 # '|' delimiter: see buildShellScript for the / vs | rationale.
 BODY=$(printf '%s' "$BODY" | sed "s|^{|{$INJECT|")
-curl -s --max-time 3 -o /dev/null -X POST \\
+RESP=$(curl -s --max-time 3 -X POST \\
   -H "Content-Type: application/json" \\
   -d "$BODY" \\
-  "${this.bridgeUrl}" 2>/dev/null || true
-case "$EVENT" in
-  PreToolUse|Stop) printf '{"decision":"allow"}' ;;
-  *)               printf '{}' ;;
+  "${this.bridgeUrl}" 2>/dev/null || true)
+# A guardrail block returns {"decision":"deny",...}; relay it to Antigravity.
+# Otherwise emit the required allow/empty decision. Fail-open: a down/slow
+# bridge yields no block marker, so the command is allowed.
+case "$RESP" in
+  *'"status":"blocked"'*) printf '%s' "$RESP" ;;
+  *)
+    case "$EVENT" in
+      PreToolUse|Stop) printf '{"decision":"allow"}' ;;
+      *)               printf '{}' ;;
+    esac
+    ;;
 esac
 exit 0
 `;
@@ -784,15 +811,20 @@ $chainJson = '[' + ($chainPids -join ',') + ']'
 $agentPid = if ($chainPids.Count -ge 2) { $chainPids[1] } else { $PID }
 $inject = '"_ap_tool":"antigravity-cli","hook_event_name":"' + $Event + '","cwd":' + $cwdJson + ',"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
 $body = $body -replace '^\\{', ('{' + $inject)
+$verdict = $null
 try {
-  Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
+  $resp = Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
     -Method POST \`
     -ContentType "application/json" \`
     -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
-    -UseBasicParsing -TimeoutSec 3 | Out-Null
+    -UseBasicParsing -TimeoutSec 3
+  if ($resp.Content -like '*"status":"blocked"*') { $verdict = $resp.Content }
 } catch { }
 
-if ($Event -eq 'PreToolUse' -or $Event -eq 'Stop') {
+if ($verdict) {
+  # Relay the guardrail deny ({"decision":"deny",...}) to Antigravity.
+  [Console]::Out.Write($verdict)
+} elseif ($Event -eq 'PreToolUse' -or $Event -eq 'Stop') {
   [Console]::Out.Write('{"decision":"allow"}')
 } else {
   [Console]::Out.Write('{}')

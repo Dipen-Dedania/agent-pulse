@@ -698,6 +698,11 @@ export class BubbleManager {
   private anchor: BubbleAnchor | null = null;
   private displayId: number | null = null;
   private displayMatch: BubbleDisplayMatch | null = null;
+  // Master visibility switch. When true, every bubble window is hidden via
+  // win.hide() — but the windows (and their renderers) stay alive, so the
+  // bridge, hooks, pollers, and guardrails keep running untouched. restack and
+  // create both gate visibility on this so a hidden bubble is never re-shown.
+  private hidden = false;
 
   // Set by the app shell so a drag-end can persist the new anchor into
   // user-config without BubbleManager owning config I/O.
@@ -728,6 +733,7 @@ export class BubbleManager {
     this.anchor = config.anchor ?? null;
     this.displayId = config.displayId ?? null;
     this.displayMatch = config.displayMatch ?? null;
+    this.hidden = config.hidden ?? false;
   }
 
   // The user's chosen monitor, or undefined when unset/currently unplugged
@@ -857,7 +863,12 @@ export class BubbleManager {
         this.applyBounds(window, x, y, this.width, this.height);
       }
 
-      if (!window.isVisible()) {
+      if (this.hidden) {
+        if (window.isVisible()) {
+          logger.debug(`[BubbleManager] hiding bubble for ${toolId} during ${reason} (master hide on)`);
+          window.hide();
+        }
+      } else if (!window.isVisible()) {
         logger.debug(`[BubbleManager] showing hidden bubble for ${toolId} during ${reason}`);
         window.showInactive();
       }
@@ -1006,7 +1017,7 @@ export class BubbleManager {
 
     const existing = this.bubbles.get(toolId);
     if (existing) {
-      if (!existing.isVisible()) {
+      if (!existing.isVisible() && !this.hidden) {
         logger.debug(`[BubbleManager] createBubble found hidden existing bubble for ${toolId}; showing it`);
         existing.showInactive();
       }
@@ -1035,6 +1046,9 @@ export class BubbleManager {
       minHeight: this.height,
       maxWidth: this.width,
       maxHeight: this.height,
+      // When master hide is on, start hidden so a new bubble never flashes
+      // on-screen before the restack below reconciles visibility.
+      show: !this.hidden,
       frame: false,
       transparent: true,
       alwaysOnTop: true,
@@ -1165,7 +1179,10 @@ export class BubbleManager {
 
     const states: Partial<Record<ToolId, boolean>> = {};
     for (const [toolId, window] of this.bubbles.entries()) {
-      states[toolId] = this.isUsableBubble(window) && window.isVisible();
+      // While master hide is on, every window is intentionally hidden — report
+      // it as enabled anyway so the per-tool toggles in Settings keep showing
+      // the tool's tracking state instead of all flipping off.
+      states[toolId] = this.isUsableBubble(window) && (this.hidden || window.isVisible());
     }
 
     logger.debug('[BubbleManager] getBubbleStates:', JSON.stringify(states));

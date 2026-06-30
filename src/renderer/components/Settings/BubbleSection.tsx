@@ -166,6 +166,30 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
         </p>
       </div>
 
+      {/* ── Show bubbles (master visibility) ─────────────────────────────── */}
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+        <div className='min-w-0'>
+          <p className='text-sm font-medium text-white'>Show bubbles</p>
+          <p className='text-xs text-slate-400 mt-0.5'>
+            Hide every bubble from your screen while keeping tracking, usage, and guardrails fully active.
+            The hooks keep running — only the floating bubbles disappear.
+          </p>
+        </div>
+        <button
+          onClick={() => onChange({ hidden: !config.hidden })}
+          aria-pressed={!config.hidden}
+          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
+            config.hidden ? 'bg-slate-600' : 'bg-blue-500'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+              config.hidden ? 'translate-x-0' : 'translate-x-5'
+            }`}
+          />
+        </button>
+      </div>
+
       {/* ── Size ──────────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
         <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Size</p>

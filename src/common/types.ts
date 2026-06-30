@@ -52,6 +52,7 @@ export interface BubbleConfig {
   sound: BubbleSoundId;
   fillMode: BubbleFillMode;
   fillColor: string;          // CSS color used when fillMode === 'solid' (e.g. '#ffffff')
+  hidden: boolean;            // master visibility switch — true hides every bubble window while leaving the bridge, hooks, pollers, and guardrails running
 }
 
 // Snapshot of a connected monitor, sent main → renderer for the Settings

@@ -11,6 +11,7 @@
   <a href="https://github.com/Dipen-Dedania/agent-pulse/releases/latest"><img src="https://img.shields.io/github/v/release/Dipen-Dedania/agent-pulse" alt="Latest release" /></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platforms" />
+  [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-pink?logo=github)](https://github.com/sponsors/Dipen-Dedania)
   
 ![GitHub Downloads (all releases)](https://img.shields.io/github/downloads/Dipen-Dedania/agent-pulse/total)
 </p>
@@ -300,6 +301,12 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 ## Security
 
 Found a vulnerability? **Please don't open a public issue** — report it privately via [GitHub security advisories](https://github.com/Dipen-Dedania/agent-pulse/security/advisories/new). See [SECURITY.md](SECURITY.md) for scope and process.
+
+## ❤️ Support this project
+
+If Agent Pulse has been useful to you, please consider sponsoring its development.
+
+➡️ https://github.com/sponsors/Dipen-Dedania
 
 ## License
 

@@ -139,6 +139,7 @@ const DEFAULTS: UserConfig = {
     sound: 'pop',
     fillMode: 'glass',
     fillColor: '#ffffff',
+    hidden: false,
   },
   attention: {
     enabled: true,
@@ -401,6 +402,7 @@ function migrateBubble(raw: unknown): BubbleConfig {
     sound: SOUNDS.includes(b.sound as BubbleSoundId) ? (b.sound as BubbleSoundId) : d.sound,
     fillMode: FILL_MODES.includes(b.fillMode as BubbleFillMode) ? (b.fillMode as BubbleFillMode) : d.fillMode,
     fillColor: isColor(b.fillColor) ? b.fillColor.trim() : d.fillColor,
+    hidden: typeof b.hidden === 'boolean' ? b.hidden : d.hidden,
   };
 }
 

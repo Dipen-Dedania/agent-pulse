@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
 import { ToolId, StatusLineRuntime } from '../../common/types';
+import { resolveAugmentedPath } from '../shell-path';
 
 export interface ToolDetection {
   installed: boolean;
@@ -35,10 +36,13 @@ export class ToolDetector {
 
   private whichCommand(cmd: string): string | undefined {
     // execFile (not exec) so `cmd` is never spliced into a shell command line —
-    // keeps us safe if a future caller ever passes user input here.
+    // keeps us safe if a future caller ever passes user input here. Look up
+    // against the augmented login-shell PATH: a GUI-launched app's PATH omits
+    // ~/.local/bin, Homebrew, nvm, etc. where these CLIs are usually installed.
     const lookup = process.platform === 'win32' ? 'where' : 'which';
+    const env = { ...process.env, PATH: resolveAugmentedPath() };
     try {
-      const out = execFileSync(lookup, [cmd], { stdio: ['ignore', 'pipe', 'ignore'] })
+      const out = execFileSync(lookup, [cmd], { stdio: ['ignore', 'pipe', 'ignore'], env })
         .toString()
         .trim()
         .split(/\r?\n/)[0];

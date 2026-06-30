@@ -6,7 +6,11 @@
 // scheduler lives here rather than OS cron).
 
 import { execFile, execFileSync, ExecFileException } from 'child_process';
+import { existsSync } from 'fs';
+import os from 'os';
+import path from 'path';
 import { logger } from '../../common/logger';
+import { resolveAugmentedPath, resetAugmentedPathCache } from '../shell-path';
 
 // Trivial prompt — its only job is to make Claude Code bootstrap auth + open a
 // window. Kept to a single token so the spend is a rounding error.
@@ -23,38 +27,68 @@ export interface OpenerResult {
 // are hours apart, so re-running `where`/`which` costs nothing).
 let cachedBin: string | null = null;
 
+/** Well-known absolute dirs where `claude` is commonly installed (POSIX). */
+function wellKnownDirs(): string[] {
+  const home = os.homedir();
+  return [
+    path.join(home, '.local', 'bin'),   // native installer (curl | sh)
+    path.join(home, '.claude', 'local'), // Claude Code local install
+    '/opt/homebrew/bin',                 // Apple-silicon Homebrew
+    '/usr/local/bin',                    // Intel Homebrew / manual
+    path.join(home, 'bin'),
+  ];
+}
+
 /**
- * Resolve the `claude` executable via PATH. On Windows, prefer the `.cmd`/`.exe`
- * shim (what cmd.exe can actually launch) over the POSIX shell script that npm
- * also drops. Returns null when `claude` isn't on PATH.
+ * Resolve the `claude` executable. First `which`/`where` against an augmented
+ * PATH (see resolveAugmentedPath); if that misses, probe well-known absolute
+ * install locations directly. On Windows, prefer the `.cmd`/`.exe` shim (what
+ * cmd.exe can actually launch) over the POSIX shell script npm also drops.
+ * Returns null when `claude` can't be found anywhere.
  */
 export function resolveClaudeBin(): string | null {
   if (cachedBin) return cachedBin;
   const lookup = process.platform === 'win32' ? 'where' : 'which';
+  const env = { ...process.env, PATH: resolveAugmentedPath() };
   try {
-    const out = execFileSync(lookup, ['claude'], { stdio: ['ignore', 'pipe', 'ignore'] })
+    const out = execFileSync(lookup, ['claude'], { stdio: ['ignore', 'pipe', 'ignore'], env })
       .toString()
       .trim()
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter(Boolean);
-    if (out.length === 0) return null;
 
-    if (process.platform === 'win32') {
-      const runnable = out.find((p) => /\.(cmd|exe|bat)$/i.test(p));
-      cachedBin = runnable ?? out[0];
-    } else {
-      cachedBin = out[0];
+    if (out.length > 0) {
+      if (process.platform === 'win32') {
+        const runnable = out.find((p) => /\.(cmd|exe|bat)$/i.test(p));
+        cachedBin = runnable ?? out[0];
+      } else {
+        cachedBin = out[0];
+      }
+      return cachedBin;
     }
-    return cachedBin;
   } catch {
-    return null;
+    // fall through to absolute-path probing
   }
+
+  // PATH lookup came up empty — probe known install locations directly.
+  const names = process.platform === 'win32' ? ['claude.cmd', 'claude.exe', 'claude.bat'] : ['claude'];
+  for (const dir of wellKnownDirs()) {
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      if (existsSync(candidate)) {
+        cachedBin = candidate;
+        return cachedBin;
+      }
+    }
+  }
+  return null;
 }
 
 /** Clear the cached path (e.g. after a "claude not found" failure surfaced to the user). */
 export function resetClaudeBinCache(): void {
   cachedBin = null;
+  resetAugmentedPathCache();
 }
 
 /**

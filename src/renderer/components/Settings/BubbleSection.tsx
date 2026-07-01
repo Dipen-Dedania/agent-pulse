@@ -190,6 +190,81 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
         </button>
       </div>
 
+      {/* ── Clawd mascot (Claude Code) ───────────────────────────────────── */}
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+        <div className='min-w-0'>
+          <p className='text-sm font-medium text-white'>Clawd mascot (Claude Code)</p>
+          <p className='text-xs text-slate-400 mt-0.5'>
+            Swap the Claude Code orb for an animated Clawd whose pose tracks the agent — sleeping when idle,
+            waving a flag when it needs you, working out while it runs. Other tools keep the orb.
+            The Claude bubble grows a little to give Clawd room.
+          </p>
+        </div>
+        <button
+          onClick={() => onChange({ mascotClaudeCode: !config.mascotClaudeCode })}
+          aria-pressed={!!config.mascotClaudeCode}
+          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
+            config.mascotClaudeCode ? 'bg-blue-500' : 'bg-slate-600'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+              config.mascotClaudeCode ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* ── Frog mascot (OpenAI Codex) ───────────────────────────────────── */}
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+        <div className='min-w-0'>
+          <p className='text-sm font-medium text-white'>Frog mascot (OpenAI Codex)</p>
+          <p className='text-xs text-slate-400 mt-0.5'>
+            Swap the OpenAI Codex orb for an animated frog whose pose tracks the agent — sleeping when idle,
+            raising a sign when it needs you, hopping and working out while it runs. Other tools keep the orb.
+            The Codex bubble grows a little to give the frog room.
+          </p>
+        </div>
+        <button
+          onClick={() => onChange({ mascotOpenaiCodex: !config.mascotOpenaiCodex })}
+          aria-pressed={!!config.mascotOpenaiCodex}
+          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
+            config.mascotOpenaiCodex ? 'bg-blue-500' : 'bg-slate-600'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+              config.mascotOpenaiCodex ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* ── GIGI mascot (Antigravity) ────────────────────────────────────── */}
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+        <div className='min-w-0'>
+          <p className='text-sm font-medium text-white'>GIGI mascot (Antigravity)</p>
+          <p className='text-xs text-slate-400 mt-0.5'>
+            Swap the Antigravity orb for an animated GIGI droplet whose pose tracks the agent — sleeping when idle,
+            raising a flag when it needs you, bouncing and working out while it runs. Other tools keep the orb.
+            The Antigravity bubble grows a little to give GIGI room.
+          </p>
+        </div>
+        <button
+          onClick={() => onChange({ mascotAntigravity: !config.mascotAntigravity })}
+          aria-pressed={!!config.mascotAntigravity}
+          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
+            config.mascotAntigravity ? 'bg-blue-500' : 'bg-slate-600'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+              config.mascotAntigravity ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
       {/* ── Size ──────────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
         <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Size</p>
@@ -295,6 +370,29 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             </label>
           </div>
         )}
+      </div>
+
+      {/* ── Opacity ──────────────────────────────────────────────────────── */}
+      <div className='flex flex-col gap-3'>
+        <div className='flex items-center justify-between'>
+          <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Opacity</p>
+          <span className='text-xs font-medium text-slate-300 tabular-nums'>
+            {Math.round((config.opacity ?? 1) * 100)}%
+          </span>
+        </div>
+        <p className='text-xs text-slate-400 -mt-1'>
+          How see-through the whole bubble is — orb or mascot, usage bars, and badges all dim together.
+        </p>
+        <input
+          type='range'
+          min={30}
+          max={100}
+          step={5}
+          value={Math.round((config.opacity ?? 1) * 100)}
+          onChange={(e) => onChange({ opacity: Number(e.target.value) / 100 })}
+          aria-label='Bubble opacity'
+          className='w-full accent-blue-500 cursor-pointer'
+        />
       </div>
 
       {/* ── Monitor ──────────────────────────────────────────────────────── */}

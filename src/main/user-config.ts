@@ -140,6 +140,10 @@ const DEFAULTS: UserConfig = {
     fillMode: 'glass',
     fillColor: '#ffffff',
     hidden: false,
+    mascotClaudeCode: false,
+    mascotOpenaiCodex: false,
+    mascotAntigravity: false,
+    opacity: 1,
   },
   attention: {
     enabled: true,
@@ -403,6 +407,14 @@ function migrateBubble(raw: unknown): BubbleConfig {
     fillMode: FILL_MODES.includes(b.fillMode as BubbleFillMode) ? (b.fillMode as BubbleFillMode) : d.fillMode,
     fillColor: isColor(b.fillColor) ? b.fillColor.trim() : d.fillColor,
     hidden: typeof b.hidden === 'boolean' ? b.hidden : d.hidden,
+    mascotClaudeCode: typeof b.mascotClaudeCode === 'boolean' ? b.mascotClaudeCode : d.mascotClaudeCode,
+    mascotOpenaiCodex: typeof b.mascotOpenaiCodex === 'boolean' ? b.mascotOpenaiCodex : d.mascotOpenaiCodex,
+    mascotAntigravity: typeof b.mascotAntigravity === 'boolean' ? b.mascotAntigravity : d.mascotAntigravity,
+    // Clamp to a floor of 0.3 so a stale/hand-edited config can't make the
+    // bubbles effectively invisible (and unfindable).
+    opacity: typeof b.opacity === 'number' && Number.isFinite(b.opacity)
+      ? Math.min(1, Math.max(0.3, b.opacity))
+      : d.opacity,
   };
 }
 

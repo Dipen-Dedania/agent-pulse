@@ -1,92 +1,93 @@
 # Brag Plan: Agent Pulse
 
 ## What is this app?
-A cross-platform Electron desktop app that floats a small frosted-glass status bubble for every AI coding agent you run (Claude Code, Cursor, Copilot, Codex, Kiro, Antigravity) — so you know at a glance whether each agent is working, waiting for you, idle, or crashed, without tab-hopping. Fully local, no telemetry.
+A cross-platform Electron desktop app that floats a small frosted-glass status bubble for every AI coding agent you run (Claude Code, Cursor, Copilot, Codex, Kiro, Antigravity). The bubble's color tells you, at a glance, whether that agent is working, waiting, idle, or stopped — and its guardrails block destructive commands before they run. Fully local, no telemetry.
 
 ## The angle
-This is a calm, premium product film. The whole point of Agent Pulse is *ambient awareness* — you shouldn't have to think about it. So the video shouldn't shout. It opens on the exact anxiety every agent user knows ("is it still working… or did it die?"), answers it with one beautiful glass bubble breathing on the desktop, then quietly reveals that the same calm surface covers six tools plus usage meters, local analytics, and command guardrails. Restraint *is* the pitch.
+A **problem → solution story**, told through two concrete disasters Agent Pulse prevents:
+1. **The silent stall.** You step into a meeting trusting Claude to ship the feature — but it stops at the first permission check and just sits there. You come back to nothing done. Agent Pulse pings you the instant it goes blue (waiting), so you never lose those minutes.
+2. **The destructive command.** Your agent is on Auto mode and fires `rm -rf /`. Agent Pulse's guardrails block it before it ever runs.
+The unifying idea in the middle: **the bubble color is a traffic light** — green working, amber idle, red stopped — so you read your whole fleet in a glance.
 
 ## Hook (first 2-3 seconds)
-A single frosted-glass bubble floats onto a soft light desktop, the Claude logo inside it, wrapped in a soft green pulsing glow with three particles orbiting it — the real "Working" animation. The line settles beneath it: **"Your AI agents, at a glance."** The motion alone says what the product is.
+Open mid-stall: a recreated Claude Code permission prompt — "Allow Claude to edit files in this session?" — frozen, unanswered, while a context line reads "You stepped into a meeting. Claude kept building…". The Claude bubble pulses **blue** (waiting). The tension: it's been sitting there, doing nothing.
 
 ## Key moments (the middle)
-- Two more glass bubbles arrive down the edge, each in a *different real state*: Cursor with the orange "1" badge (**Waiting** for you), Codex breathing amber (**Idle**). The status reads itself — green / blue / amber.
-- The quiet footer line "localhost:4242 · 3 agents connected" — the unified bridge, stated plainly.
-- Three clean feature cards using the actual app screenshots: **Usage meters** (99% available · resets in 3h 18m), **Pulse Timeline** (activity heatmap + estimated cost), **Command guardrails** (Block `rm -rf` root). Real UI, not mockups.
+- **The blue-bubble notification.** The waiting bubble does a strong radar pulse, an orange "1" badge pops, a toast slides in — "Claude is waiting for you" — and the punch lands: **"Agent Pulse pinged you instantly."**
+- **The traffic light.** Three real agent bubbles stack in a dark housing — 🟢 Claude Code · Working, 🟠 Cursor · Idle, 🔴 Codex · Stopped — lighting up one by one. Line: **"Read it like a traffic light."**
+- **The guardrail block.** A recreated terminal runs `rm -rf /`; a red banner slams in — **"Blocked · rm-rf-root — this would wipe the root filesystem."** Line: **"Destructive commands get blocked before they run."**
 
 ## Outro / punchline
-Everything calms back to the logo. Tagline verbatim: **"Ambient, glanceable awareness of AI coding agents."** The three honest stats land — **6 tools · 0 bytes sent · 1 click** — then the trust line "100% local. No telemetry." and the URL.
+Calm to the logo. Wordmark **"Agent Pulse"** + tagline verbatim: **"Ambient, glanceable awareness of AI coding agents."** Stats: **6 tools · 0 bytes sent · 1 glance.** Trust line "100% local. No telemetry." then the URL.
 
 ## User flow worth showing
-The "flow" here is passive monitoring, so the centerpiece is the live bubble surface: bubbles arriving and sitting in their true states (Working → Waiting → Idle), which is exactly what a user sees all day. The feature screenshots frame it — at most one card-row, used as a frame around the bubbles, not as a substitute.
+Passive monitoring → noticing → acting, plus a safety intercept. Centerpieces: the recreated permission prompt + blue waiting bubble (Scene 1), the traffic-light bubble stack (Scene 2), and the recreated terminal guardrail block (Scene 3) — all grounded in real product UI and copy (`rm-rf-root` rule from the real Guardrails screen).
 
 ## Tone
 - Preset: polished
-- Creative direction: calm premium product film for a developer's desktop — glassmorphism, soft motion, confidence through restraint.
-- Interpretation: fewer scenes, longer holds, soft crossfades. Motion is slow and deliberate (float, breathe, pulse). Nothing snaps or flashes. The glass aesthetic carries the polish.
+- Creative direction: calm premium product film that opens on quiet tension (the frozen prompt) and resolves into clarity and safety. Glassmorphism throughout.
+- Interpretation: soft crossfades; Scene 1 carries a relatable, low-grade dread (the stall) that releases when Agent Pulse notifies; Scene 3 has one decisive "block" beat. Anxiety → calm → safety.
 
 ## Format: landscape — 1920x1080
-## Duration: ~20s
+## Duration: ~22s
 
 ## Visual identity (from the project)
-- Background: `#f8f9fb` (mist) → `#e7edf6` (fog) soft gradient, mirroring the website hero
-- Accent: `#006bff` (signal blue); hero gradient blob `#e55cff` → `#8247f5` (magenta → violet)
-- Text: `#0b3558` (midnight navy) headings, `#476788` (slate blue) body
-- State palette: working `#16a34a`, waiting `#2563eb`, idle-active `#d97706`, error `#dc2626`
-- Display font: Manrope (Variable) — bundled; fall back to system sans
-- Body font: Manrope
-- Strongest visual element: the frosted-glass bubble with its state animation — pulse-glow + 3 orbiting particles (Working), orange "1" badge (Waiting), breathe (Idle). Recreated in CSS so the motion is crisp. Glass = `backdrop-filter: blur(12px)` over a radial state-color gradient.
+- Background: `#f8f9fb` (mist) → `#e7edf6` (fog) soft gradient; faint magenta/violet blob (`#e55cff`→`#8247f5`).
+- Accent: `#006bff` (signal blue).
+- Text: `#0b3558` (navy) headings, `#476788` (slate) body, `#a6bbd1` (steel) micro-captions.
+- State palette (real, `src/common/stateColors.ts`): working `#16a34a`, waiting `#2563eb`, idle-active `#d97706`, error `#dc2626`.
+- Scene 1 uses the **real waiting blue** `#2563eb` (matches the app). Traffic light uses green Working / amber **Idle** (`#d97706`) / red Stopped (`#dc2626`) — all real palette colors.
+- Display + body font: Manrope (bundled), fall back to system sans.
+- Strongest visual elements: the recreated permission prompt + blue waiting bubble; the vertical traffic light; the recreated terminal guardrail block.
 
 ## Share copy (draft)
-Your AI coding agents, at a glance. Agent Pulse floats a glass bubble on your desktop for Claude Code, Cursor, Copilot, Codex, Kiro & Antigravity — working, waiting, idle, or crashed. 100% local, no telemetry.
+You step into a meeting trusting your agent to ship — and come back to find it stalled on a permission prompt, or worse, about to run `rm -rf /`. Agent Pulse pings you the second an agent needs you (a blue bubble you read like a traffic light) and blocks destructive commands before they run. 100% local, no telemetry.
 
 ## Audio direction
-- Role: warm, restrained bed — present but never busy.
-- Music: `happy-beats-business-moves-vol-12-by-ende-dot-app.mp3` (steady, clean — the polished pick).
-- Music treatment: start at 0.0 at volume ~0.30; gentle fade-in over the first 0.8s; fade out under the final logo from ~18s → 20s. Let the bubble reveals breathe over it.
-- Music cue guidance: bundled preset `assets/music/cues/happy-beats-business-moves-vol-12-by-ende-dot-app.music-cues.json`, ~110 BPM. Strong cues at 8.74s, 13.11s, 17.47s, 22.93s. Target the feature-card row to land near 8.74s; lock the logo/payoff near 17.47s. Beat grid (~0.55s spacing) available for the bubble + card sequences, but hold readable text past the grid (snap every other beat).
-- Audio-reactive treatment: subtle; use music RMS/bass to make the working-bubble glow and the hero gradient blob breathe slightly. No waveform/equalizer visuals.
-- SFX posture: sparse, polished (2-3 cues total). Soft drops for bubble/card arrivals; one gentle bell for the logo payoff. Nothing aggressive.
-- Audio-coupled moments: bubble arrivals (soft drop), feature-card arrivals (soft drop), logo land (soft bell).
-- Restraint rule: no glitches, no punches, no strobing. Sound supports the calm, never interrupts it.
+- Role: warm, restrained bed that lifts at the problem→solution turn (the blue-bubble notification ~4.5s).
+- Music: `happy-beats-business-moves-vol-12-by-ende-dot-app.mp3`.
+- Music treatment: low/tense layer (~0.17) under the stall, lifting to ~0.30 the moment Agent Pulse notifies; fade out under the final logo (20s → 22s).
+- Music cue guidance: ~110 BPM. Strong cues 8.74 / 10.93 / 13.11 / 15.84 / 17.47 / 18.56 / 19.66s. Land the unified traffic-light pulse near 10.93; slam the guardrail block on 13.11; beat-lock the logo near 17.47 and the stats near 19.66. Beat grid ~0.55s — hold readable labels to every-other-beat.
+- Audio-reactive treatment: subtle/deterministic — blue waiting ring and background blob breathe (real RMS extraction documented as skipped). No waveform/equalizer visuals.
+- SFX posture: sparse, polished. Soft drop on the prompt; a gentle notification pop on the blue-bubble turn; soft drops per traffic light; a clean, decisive clink on the guardrail block; glass clink on the logo; soft bell on the stats. No alarms/buzzers.
+- Audio-coupled moments: prompt appear (drop), blue-bubble notify (pop, ~4.5), each traffic light (drop, every-other-beat), guardrail block (clink, beat-locked 13.11), logo (clink, 17.47), stats (bell, 19.66).
+- Restraint rule: the stall is quiet dread, not an alarm; the block is decisive but clean, not a harsh buzzer.
 
 ## Storyboard
 
-### Scene 1 — The glance (Working bubble) — 4.5s
-Soft mist→fog gradient backdrop with a faint magenta/violet blob (website hero feel). One frosted-glass bubble floats up into center-frame, Claude logo inside, green pulse-glow ring + 3 particles orbiting (the real Working animation). Status: green dot + "Working". Hook line crossfades up below: **"Your AI agents, at a glance."** and holds.
-Sequential/interaction: none — single hero reveal.
-Audio intent: warm bed fades in; one soft drop as the bubble settles.
-Audio-coupled idea: soft drop on bubble settle (~0.6s).
-Music: steady bed begins, low.
+### Scene 1 — Claude is waiting (the silent stall) — 6.8s
+Mist→fog backdrop. Top context line: **"You stepped into a meeting. Claude kept building…"**. Center: the Claude bubble pulses **blue** (waiting) with a radar ring. Below it, a recreated Claude Code permission prompt card — header "Claude Code · Waiting", title **"Allow Claude to edit files in this session?"**, buttons [Deny] [Allow once] [Allow for session] — frozen, unanswered. At ~4.5s the turn: the bubble does a strong pulse, an orange "1" badge pops, a toast slides in — **"Claude is waiting for you"** — and the punch line lands: **"Agent Pulse pinged you instantly."**
+Sequential/interaction: context line → prompt → (stall holds) → turn: badge + toast + punch. Labels hold to the reading floor.
+Audio intent: low, slightly uneasy bed; soft drop on the prompt; a warm notification pop at the turn as music lifts.
+Audio-coupled idea: soft drop on prompt (~1.5s); notification pop on the blue-bubble turn (~4.5s).
+Music: low/tense (~0.17) → lifts to main (~0.30) at the turn.
 Transition mood: soft crossfade → Scene 2
 
-### Scene 2 — All your agents, one surface — 5.5s
-The first bubble shifts to a vertical stack on the right (like the real "Agent Status" card). Two more glass bubbles arrive one by one: Cursor with orange "1" badge = **Waiting**; Codex breathing amber = **Idle (active)**. Each row shows logo + tool name + colored dot + state label. Quiet footer fades in: "localhost:4242 · 3 agents connected". Left side holds a calm line: **"Working. Waiting. Idle. Crashed. You just know."**
-Sequential/interaction: yes — 3 bubble rows arrive one by one (~0.7s apart), then the full set holds ~2.5s. Soft drop per arrival.
-Audio intent: gentle rhythmic arrivals over the bed.
-Audio-coupled idea: soft drop on each bubble row (beat-grid, every other beat).
-Music: bed continues.
+### Scene 2 — Read it like a traffic light — 5.4s
+Left: eyebrow "THE FIX", headline **"Read it like a traffic light."**, subline **"Green, amber, red — you always know which agent needs you."** Right: three real agent bubbles stacked in a dark traffic-light housing, lighting up one by one:
+- 🟢 **Claude Code — Working** (green)
+- 🟠 **Cursor — Idle** (amber)
+- 🔴 **Codex — Stopped** (red)
+Then all three glow once together near 10.93s.
+Sequential/interaction: 3 lights one by one (~every-other-beat, 7.1 / 8.2 / 9.3), labels hold; unified glow-pulse near 10.93s.
+Audio intent: warm; soft drop per light; gentle swell into the unified pulse.
+Music: main bed (~0.30).
 Transition mood: soft crossfade → Scene 3
 
-### Scene 3 — More than bubbles — 6s
-Three clean feature cards slide/fade in using the real app screenshots, one by one, each with a short label that holds:
-1. **Usage meters** — "Know your limit before you hit it." (usage.png — 99% available · resets 3h 18m)
-2. **Pulse Timeline** — "Local analytics. Estimated cost. Zero telemetry." (timeline.png — heatmap + cost)
-3. **Command guardrails** — "Block `rm -rf /` before it runs." (guardrails.png)
-Cards reveal ~1.4s apart then the trio holds ~2s. First card targets the 8.74s strong cue.
-Sequential/interaction: yes — 3 cards one by one; soft drop each; labels hold to the reading floor.
-Audio intent: light, confident sequence.
-Audio-coupled idea: soft drop per card (beat-grid).
-Music: bed lifts slightly toward the strong cue.
+### Scene 3 — Guardrails (the command that never ran) — 5.8s
+Headline top: **"Running unattended on Auto mode?"**. A recreated terminal card center: a window bar, then `agent ▸ applying changes…` and the command **`$ rm -rf /`** in danger red. At 13.11s a red banner slams in inside the terminal — **"⛔ Blocked · rm-rf-root"** / "This would wipe the root filesystem." Punch line below: **"Destructive commands get blocked before they run."**
+Sequential/interaction: head → terminal → command → BLOCK banner slam (beat-locked 13.11) → punch line.
+Audio intent: forward, then one decisive, clean clink on the block.
+Audio-coupled idea: clean clink on the block (beat-locked 13.11).
+Music: main bed continues.
 Transition mood: soft crossfade → Scene 4
 
-### Scene 4 — The calm, named — 4s
-Everything fades to the mist backdrop. The Agent Pulse logo settles in center (beat-locked near 17.47s) with a soft bell. Wordmark "Agent Pulse" + tagline verbatim: **"Ambient, glanceable awareness of AI coding agents."** Three stats fade in on one line: **6 tools · 0 bytes sent · 1 click**. Trust line: "100% local. No telemetry." URL: dipen-dedania.github.io/agent-pulse. Music fades under.
-Sequential/interaction: stats fade in together as a single calm line.
-Audio intent: soft bell payoff; music gently fades to end.
-Audio-coupled idea: soft bell on logo land (beat-locked ~17.47s).
-Music: fade out 18s → 20s.
+### Scene 4 — The calm, named — 4.7s
+Fade to mist. Logo settles (beat-locked ~17.47) with a glass clink. Wordmark **"Agent Pulse"** + tagline verbatim: **"Ambient, glanceable awareness of AI coding agents."** Stats land near 19.66 with a soft bell: **6 tools · 0 bytes sent · 1 glance.** Trust line "100% local. No telemetry." then URL: dipen-dedania.github.io/agent-pulse. Music fades under.
+Sequential/interaction: stats fade in as one calm line, beat-locked near 19.66.
+Audio intent: glass clink on logo, soft bell on stats; music fades to end.
+Music: fade out 20s → 22s.
 Transition mood: final hold.
 
-**Music mood for this video:** polished / steady / premium
-**Audio summary:** A steady, low business-clean bed fades in under the first bubble, carries soft drops as bubbles and feature cards arrive on the beat grid, lifts gently into a soft bell on the logo, then fades out — calm from first frame to last.
+**Music mood for this video:** polished / steady / premium, with a quiet→warm lift at the blue-bubble notification turn
+**Audio summary:** A low, uneasy bed holds under the silent stall, then lifts into a warm steady bed the moment Agent Pulse notifies; soft drops mark each traffic light, a clean clink slams the guardrail block, a glass clink lands the logo and a soft bell lands the stats, then the bed fades out under the wordmark.

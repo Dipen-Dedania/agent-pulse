@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { ToolId, AgentState } from '../../../../common/types';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -46,6 +46,22 @@ vi.mock('framer-motion', () => ({
     )),
   },
 }));
+
+// Mock gsap: ClawdMascot drives poses through it. We don't exercise the
+// animations in jsdom — a chainable no-op proxy keeps render() from crashing,
+// and context().revert() is a no-op cleanup.
+vi.mock('gsap', () => {
+  const chain: any = new Proxy(() => chain, { get: () => () => chain });
+  const gsap = {
+    context: (fn: () => void) => { try { fn(); } catch { /* no-op in jsdom */ } return { revert: () => {} }; },
+    to: () => chain,
+    set: () => chain,
+    fromTo: () => chain,
+    timeline: () => chain,
+    utils: { selector: () => () => [] },
+  };
+  return { default: gsap, ...gsap };
+});
 
 // Mock TOOL_META so we don't need image assets
 vi.mock('../../../../common/toolMeta', () => ({
@@ -228,6 +244,47 @@ describe('Bubble renders tool icon', () => {
     const img = container.querySelector('img');
     expect(img).not.toBeNull();
     expect(img?.getAttribute('src')).toBe('/mock-icon.png');
+  });
+});
+
+// ── Clawd mascot mode ─────────────────────────────────────────────────────────
+
+describe('Bubble Clawd mascot mode', () => {
+  beforeEach(() => { mockState = 'idle'; vi.clearAllMocks(); });
+  afterEach(() => { mockElectron.invoke.mockResolvedValue(undefined); });
+
+  const withMascotConfig = () => {
+    mockElectron.invoke.mockImplementation((channel: string) => {
+      if (channel === 'get-config') return Promise.resolve({ bubble: { mascotClaudeCode: true } });
+      // Usage pollers feed the bars; a valid (if empty) status avoids a crash
+      // on the awaited re-render once config resolves.
+      if (channel.endsWith('usage:get-current')) return Promise.resolve({ state: 'unknown' });
+      return Promise.resolve(undefined);
+    });
+  };
+
+  it('swaps the Claude orb for the mascot SVG when enabled', async () => {
+    withMascotConfig();
+    const container = renderBubble('claude-code');
+    await waitFor(() => expect(container.querySelector('#char')).not.toBeNull());
+    // Orb icon is gone in mascot mode
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('keeps the orb for non-Claude tools even when mascot is enabled', async () => {
+    withMascotConfig();
+    const container = renderBubble('cursor');
+    // Give the config effect a chance to apply, then confirm no mascot.
+    await waitFor(() => expect(mockElectron.invoke).toHaveBeenCalledWith('get-config'));
+    expect(container.querySelector('#char')).toBeNull();
+    expect(container.querySelector('img')).not.toBeNull();
+  });
+
+  it('renders the orb (no mascot) for Claude when disabled', () => {
+    // Default mock: invoke resolves undefined → mascot stays off.
+    const container = renderBubble('claude-code');
+    expect(container.querySelector('#char')).toBeNull();
+    expect(container.querySelector('img')).not.toBeNull();
   });
 });
 

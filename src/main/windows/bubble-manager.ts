@@ -18,6 +18,43 @@ const BUBBLE_DIMENSIONS: Record<BubbleSize, { width: number; height: number; too
   large:  { width: 86, height: 110, tooltip: 132 },
 };
 
+// Footprint for the Claude bubble when the Clawd mascot is on. Width MATCHES the
+// orb window (BUBBLE_DIMENSIONS) so that — with the stack right-edge aligned —
+// every bubble shares a vertical centerline; the narrower mascot SVG is centered
+// within (see MASCOT_WIDTH in Bubble.tsx, which stays ≤ these widths so no prop
+// clips). Height adds the usage-bar strip + bottom breathing room beneath the
+// mascot. Only the Claude bubble uses these.
+const MASCOT_DIMENSIONS: Record<BubbleSize, { width: number; height: number }> = {
+  small:  { width: 58, height: 81 },
+  medium: { width: 70, height: 94 },
+  large:  { width: 86, height: 112 },
+};
+
+// Footprint for the Codex bubble when the frog mascot is on. Width MATCHES the
+// orb window (BUBBLE_DIMENSIONS) so every bubble shares a vertical centerline
+// under the right-edge-aligned stack; the narrower frog SVG is centered within
+// (see MASCOT_WIDTH_CODEX in Bubble.tsx, ≤ these widths). The frog is taller than
+// Clawd (more headroom for the held sign + splayed hind legs), so it gets a bit
+// more vertical room; height adds the usage-bar strip + bottom breathing room.
+// Only the Codex bubble uses these.
+const MASCOT_DIMENSIONS_CODEX: Record<BubbleSize, { width: number; height: number }> = {
+  small:  { width: 58, height: 74 },
+  medium: { width: 70, height: 90 },
+  large:  { width: 86, height: 104 },
+};
+
+// Footprint for the Antigravity bubble when the GIGI droplet mascot is on. Width
+// MATCHES the orb window (BUBBLE_DIMENSIONS) so every bubble shares a vertical
+// centerline under the right-edge-aligned stack; the narrower droplet SVG is
+// centered within (see MASCOT_WIDTH_ANTIGRAVITY in Bubble.tsx, ≤ these widths).
+// GIGI is a tall teardrop, so it gets more vertical room; height adds the
+// usage-bar strip + bottom breathing room. Only the Antigravity bubble uses these.
+const MASCOT_DIMENSIONS_ANTIGRAVITY: Record<BubbleSize, { width: number; height: number }> = {
+  small:  { width: 58, height: 80 },
+  medium: { width: 70, height: 97 },
+  large:  { width: 86, height: 114 },
+};
+
 // ─── macOS / Linux ────────────────────────────────────────────────────────────
 // macOS: `open -a <name>` activates the existing window (or launches if not running)
 // Linux: binary name executed directly
@@ -694,6 +731,13 @@ export class BubbleManager {
   private width = BUBBLE_DIMENSIONS.medium.width;
   private height = BUBBLE_DIMENSIONS.medium.height;
   private tooltipHeight = BUBBLE_DIMENSIONS.medium.tooltip;
+  private size: BubbleSize = 'medium';
+  // When true, the Claude bubble uses the larger MASCOT_DIMENSIONS footprint.
+  private mascotClaudeCode = false;
+  // When true, the Codex bubble uses the larger MASCOT_DIMENSIONS_CODEX footprint.
+  private mascotOpenaiCodex = false;
+  // When true, the Antigravity bubble uses the larger MASCOT_DIMENSIONS_ANTIGRAVITY footprint.
+  private mascotAntigravity = false;
   private stackPosition: BubbleStackPosition = 'bottom-right';
   private anchor: BubbleAnchor | null = null;
   private displayId: number | null = null;
@@ -726,14 +770,37 @@ export class BubbleManager {
 
   private applyDims(config: BubbleConfig) {
     const d = BUBBLE_DIMENSIONS[config.size] ?? BUBBLE_DIMENSIONS.medium;
+    this.size = BUBBLE_DIMENSIONS[config.size] ? config.size : 'medium';
     this.width = d.width;
     this.height = d.height;
     this.tooltipHeight = d.tooltip;
+    this.mascotClaudeCode = config.mascotClaudeCode ?? false;
+    this.mascotOpenaiCodex = config.mascotOpenaiCodex ?? false;
+    this.mascotAntigravity = config.mascotAntigravity ?? false;
     this.stackPosition = config.stackPosition;
     this.anchor = config.anchor ?? null;
     this.displayId = config.displayId ?? null;
     this.displayMatch = config.displayMatch ?? null;
     this.hidden = config.hidden ?? false;
+  }
+
+  // Window footprint for a given tool. The Claude bubble grows to the mascot
+  // size when the mascot is enabled; every other bubble uses the standard
+  // size. Used everywhere a window is sized, placed, or stacked.
+  private dimsFor(toolId: ToolId): { width: number; height: number } {
+    if (toolId === 'claude-code' && this.mascotClaudeCode) {
+      const m = MASCOT_DIMENSIONS[this.size] ?? MASCOT_DIMENSIONS.medium;
+      return { width: m.width, height: m.height };
+    }
+    if (toolId === 'openai-codex' && this.mascotOpenaiCodex) {
+      const m = MASCOT_DIMENSIONS_CODEX[this.size] ?? MASCOT_DIMENSIONS_CODEX.medium;
+      return { width: m.width, height: m.height };
+    }
+    if (toolId === 'antigravity-cli' && this.mascotAntigravity) {
+      const m = MASCOT_DIMENSIONS_ANTIGRAVITY[this.size] ?? MASCOT_DIMENSIONS_ANTIGRAVITY.medium;
+      return { width: m.width, height: m.height };
+    }
+    return { width: this.width, height: this.height };
   }
 
   // The user's chosen monitor, or undefined when unset/currently unplugged
@@ -797,9 +864,10 @@ export class BubbleManager {
     window.setMaximumSize(width, height);
   }
 
-  private getStackPosition(index: number) {
-    const offset = index * (this.height + BubbleManager.STACK_GAP);
-
+  // Position the bubble whose footprint is `dims`, `offset` px into the stack
+  // (the summed height of every bubble before it, plus gaps). Per-bubble dims
+  // let a taller bubble — e.g. the Claude mascot — stack cleanly with the rest.
+  private getStackPosition(offset: number, dims: { width: number; height: number }) {
     if (this.anchor) {
       // Drag-placed anchor: global DIP point, so it addresses any monitor.
       // getDisplayNearestPoint resolves the display it lives on; if that
@@ -808,8 +876,8 @@ export class BubbleManager {
       // stranding bubbles off-screen.
       const { workArea } = screen.getDisplayNearestPoint(this.anchor);
       const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), Math.max(min, max));
-      const x = clamp(this.anchor.x, workArea.x, workArea.x + workArea.width - this.width);
-      const baseY = clamp(this.anchor.y, workArea.y, workArea.y + workArea.height - this.height);
+      const x = clamp(this.anchor.x, workArea.x, workArea.x + workArea.width - dims.width);
+      const baseY = clamp(this.anchor.y, workArea.y, workArea.y + workArea.height - dims.height);
       // Grow toward the vertical center (mirrors the corner presets): anchors
       // in the top half stack downward, bottom half stack upward.
       const growDown = baseY < workArea.y + workArea.height / 2;
@@ -827,11 +895,11 @@ export class BubbleManager {
 
     const x = onLeft
       ? workArea.x + BubbleManager.EDGE_PADDING
-      : workArea.x + workArea.width - this.width - BubbleManager.EDGE_PADDING;
+      : workArea.x + workArea.width - dims.width - BubbleManager.EDGE_PADDING;
 
     const y = onTop
       ? workArea.y + BubbleManager.EDGE_PADDING + offset
-      : workArea.y + workArea.height - this.height - BubbleManager.EDGE_PADDING - offset;
+      : workArea.y + workArea.height - dims.height - BubbleManager.EDGE_PADDING - offset;
 
     return { x, y };
   }
@@ -846,22 +914,27 @@ export class BubbleManager {
 
   private restackBubbles(reason: string) {
     this.pruneDeadBubbles(`restack:${reason}`);
-    let index = 0;
+    // Cumulative px consumed by bubbles already placed, so a taller bubble
+    // (the mascot) shifts the rest of the stack by its real height.
+    let offset = 0;
 
     for (const [toolId, window] of this.bubbles.entries()) {
-      const { x, y } = this.getStackPosition(index);
+      const dims = this.dimsFor(toolId);
+      const { x, y } = this.getStackPosition(offset, dims);
       const bounds = window.getBounds();
       if (
         bounds.x !== x ||
         bounds.y !== y ||
-        bounds.width !== this.width ||
-        bounds.height !== this.height
+        bounds.width !== dims.width ||
+        bounds.height !== dims.height
       ) {
         logger.debug(
-          `[BubbleManager] restacking ${toolId} for ${reason}: from=${JSON.stringify(bounds)} to=${JSON.stringify({ x, y, width: this.width, height: this.height })}`,
+          `[BubbleManager] restacking ${toolId} for ${reason}: from=${JSON.stringify(bounds)} to=${JSON.stringify({ x, y, width: dims.width, height: dims.height })}`,
         );
-        this.applyBounds(window, x, y, this.width, this.height);
+        this.applyBounds(window, x, y, dims.width, dims.height);
       }
+
+      offset += dims.height + BubbleManager.STACK_GAP;
 
       if (this.hidden) {
         if (window.isVisible()) {
@@ -872,8 +945,6 @@ export class BubbleManager {
         logger.debug(`[BubbleManager] showing hidden bubble for ${toolId} during ${reason}`);
         window.showInactive();
       }
-
-      index += 1;
     }
 
     this.logBubbleInventory(`restack:${reason}`);
@@ -927,15 +998,16 @@ export class BubbleManager {
         // by the same delta, so the column the user placed is what gets
         // remembered on drag-end (individual offsets were never persisted and
         // restack would snap them back into a column anyway).
-        for (const window of this.bubbles.values()) {
+        for (const [toolId, window] of this.bubbles.entries()) {
           if (!this.isUsableBubble(window)) continue;
           const bounds = window.getBounds();
+          const dims = this.dimsFor(toolId);
           // Use setBounds to enforce size on every move — prevents Windows WM resize
           window.setBounds({
             x: bounds.x + dx,
             y: bounds.y + dy,
-            width: this.width,
-            height: this.height,
+            width: dims.width,
+            height: dims.height,
           });
         }
       },
@@ -998,16 +1070,18 @@ export class BubbleManager {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (!win) return;
       const [x, y] = win.getPosition();
-      const totalHeight = this.height + this.tooltipHeight;
+      const entry = [...this.bubbles.entries()].find(([, w]) => w === win);
+      const dims = entry ? this.dimsFor(entry[0]) : { width: this.width, height: this.height };
+      const totalHeight = dims.height + this.tooltipHeight;
       if (hovered) {
         // Relax max constraint, expand upward so the bubble stays in place
-        win.setMaximumSize(this.width, totalHeight);
-        win.setSize(this.width, totalHeight);
+        win.setMaximumSize(dims.width, totalHeight);
+        win.setSize(dims.width, totalHeight);
         win.setPosition(x, y - this.tooltipHeight);
       } else {
         win.setPosition(x, y + this.tooltipHeight);
-        win.setSize(this.width, this.height);
-        win.setMaximumSize(this.width, this.height);
+        win.setSize(dims.width, dims.height);
+        win.setMaximumSize(dims.width, dims.height);
       }
     });
   }
@@ -1028,24 +1102,28 @@ export class BubbleManager {
       return;
     }
 
-    // Stack from bottom-right corner, each new bubble above the previous
-    const index = this.bubbles.size;
-    const { x, y } = this.getStackPosition(index);
+    // Stack from the chosen corner, each new bubble beyond the previous. Sum
+    // the real heights of existing bubbles so a taller mascot bubble doesn't
+    // overlap the rest (restackBubbles below reconciles every position anyway).
+    let offset = 0;
+    for (const [tid] of this.bubbles) offset += this.dimsFor(tid).height + BubbleManager.STACK_GAP;
+    const dims = this.dimsFor(toolId);
+    const { x, y } = this.getStackPosition(offset, dims);
 
     logger.debug(
-      `[BubbleManager] createBubble requested: toolId=${toolId} index=${index} x=${x} y=${y}`,
+      `[BubbleManager] createBubble requested: toolId=${toolId} offset=${offset} x=${x} y=${y} w=${dims.width} h=${dims.height}`,
     );
 
     const window = new BrowserWindow({
       title: `Agent Pulse - ${toolId}`,
       x,
       y,
-      width: this.width,
-      height: this.height,
-      minWidth: this.width,
-      minHeight: this.height,
-      maxWidth: this.width,
-      maxHeight: this.height,
+      width: dims.width,
+      height: dims.height,
+      minWidth: dims.width,
+      minHeight: dims.height,
+      maxWidth: dims.width,
+      maxHeight: dims.height,
       // When master hide is on, start hidden so a new bubble never flashes
       // on-screen before the restack below reconciles visibility.
       show: !this.hidden,

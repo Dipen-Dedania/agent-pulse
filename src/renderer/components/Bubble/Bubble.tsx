@@ -4,6 +4,9 @@ import { GuardrailEvent } from '../../../common/guardrails';
 import { SecretAccessEvent } from '../../../common/secretProtection';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
+import { ClawdMascot } from './ClawdMascot';
+import { CodexMascot } from './CodexMascot';
+import { AntigravityMascot } from './AntigravityMascot';
 import { logger } from '../../../common/logger';
 import { motion } from 'framer-motion';
 import { useStatusStore } from '../../store/useStatusStore';
@@ -24,6 +27,25 @@ const ORB_DIMENSIONS: Record<BubbleSize, BubbleDims> = {
   medium: { orb: 48, icon: 24, ring: 56, bar: { width: 50, height: 3, gap: 2 } },
   large: { orb: 60, icon: 30, ring: 70, bar: { width: 64, height: 4, gap: 3 } },
 };
+
+// Rendered width of the Clawd mascot per bubble size — the tuned widths scaled
+// to 80% (20% smaller, on request). The Claude bubble window shrinks to match
+// (see MASCOT_DIMENSIONS in bubble-manager.ts), so there's no dead space around
+// the mascot and the flag/zzz/alert props still never clip.
+const MASCOT_WIDTH: Record<BubbleSize, number> = { small: 54, medium: 66, large: 82 };
+
+// Rendered width of the Codex frog mascot per bubble size — the tuned widths
+// scaled to 60% (40% smaller, on request). The Codex bubble window shrinks to
+// match (see MASCOT_DIMENSIONS_CODEX in bubble-manager.ts), so there's no dead
+// space around the mascot and the sign/zzz/alert props still never clip.
+const MASCOT_WIDTH_CODEX: Record<BubbleSize, number> = { small: 42, medium: 52, large: 62 };
+
+// Rendered width of the Antigravity GIGI mascot per bubble size — the tuned
+// widths scaled to 60% (40% smaller, on request). The Antigravity bubble window
+// shrinks to match (see MASCOT_DIMENSIONS_ANTIGRAVITY in bubble-manager.ts), so
+// there's no dead space around the mascot and the flag/zzz/alert props still
+// never clip.
+const MASCOT_WIDTH_ANTIGRAVITY: Record<BubbleSize, number> = { small: 40, medium: 50, large: 61 };
 
 
 interface BubbleProps {
@@ -450,6 +472,10 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const [bubbleSound, setBubbleSound] = useState<BubbleSoundId>('pop');
   const [fillMode, setFillMode] = useState<BubbleFillMode>('glass');
   const [fillColor, setFillColor] = useState<string>('#ffffff');
+  const [mascotEnabled, setMascotEnabled] = useState(false);
+  const [mascotCodexEnabled, setMascotCodexEnabled] = useState(false);
+  const [mascotAntigravityEnabled, setMascotAntigravityEnabled] = useState(false);
+  const [bubbleOpacity, setBubbleOpacity] = useState(1);
   const [refreshingUsage, setRefreshingUsage] = useState(false);
 
   const usageRefreshChannel = USAGE_REFRESH_CHANNELS[toolId];
@@ -483,6 +509,12 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       if (b.sound) setBubbleSound(b.sound);
       if (b.fillMode) setFillMode(b.fillMode);
       if (b.fillColor) setFillColor(b.fillColor);
+      if (typeof b.mascotClaudeCode === 'boolean') setMascotEnabled(b.mascotClaudeCode);
+      if (typeof b.mascotOpenaiCodex === 'boolean') setMascotCodexEnabled(b.mascotOpenaiCodex);
+      if (typeof b.mascotAntigravity === 'boolean') setMascotAntigravityEnabled(b.mascotAntigravity);
+      if (typeof b.opacity === 'number' && Number.isFinite(b.opacity)) {
+        setBubbleOpacity(Math.min(1, Math.max(0.3, b.opacity)));
+      }
     };
 
     window.electron
@@ -850,6 +882,20 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const borderColor = isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.12)';
   const dims = ORB_DIMENSIONS[bubbleSize] ?? ORB_DIMENSIONS.medium;
 
+  // Mascot mode: the Claude bubble swaps its glass orb for the animated Clawd,
+  // and the Codex bubble for the animated frog — each pose conveys the state, so
+  // we drop the disc background, the per-state orb pulse, and the orbiting state
+  // rings, keeping only the corner badges.
+  const claudeMascotMode = toolId === 'claude-code' && mascotEnabled;
+  const codexMascotMode = toolId === 'openai-codex' && mascotCodexEnabled;
+  const antigravityMascotMode = toolId === 'antigravity-cli' && mascotAntigravityEnabled;
+  const mascotMode = claudeMascotMode || codexMascotMode || antigravityMascotMode;
+  const mascotWidth = codexMascotMode
+    ? (MASCOT_WIDTH_CODEX[bubbleSize] ?? MASCOT_WIDTH_CODEX.medium)
+    : antigravityMascotMode
+      ? (MASCOT_WIDTH_ANTIGRAVITY[bubbleSize] ?? MASCOT_WIDTH_ANTIGRAVITY.medium)
+      : (MASCOT_WIDTH[bubbleSize] ?? MASCOT_WIDTH.medium);
+
   const animations: Record<AgentState, any> = {
     idle: {
       scale: [1, 1.04, 1],
@@ -981,44 +1027,67 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       className='flex flex-col items-center justify-end h-full w-full pb-2'
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      // Whole-bubble opacity (orb/mascot, usage bars, badges) — a renderer CSS
+      // opacity rather than win.setOpacity(), which is a no-op on transparent
+      // windows on Windows.
+      style={{ opacity: bubbleOpacity }}
     >
       <motion.div
         onMouseDown={onMouseDown}
-        animate={activeAnimation}
-        className='relative rounded-full flex items-center justify-center cursor-pointer select-none shrink-0'
+        // In mascot mode we don't animate the wrapper (the SVG carries the
+        // motion), but we must still drive `animate` to a clean reset rather
+        // than `undefined` — otherwise Framer Motion leaves behind the inline
+        // opacity/scale it wrote while the bubble briefly rendered as an orb
+        // before the mascot config loaded, leaving the mascot stuck at ~0.5.
+        animate={mascotMode ? { opacity: 1, scale: 1, x: 0, y: 0 } : activeAnimation}
+        className={`relative flex items-center justify-center cursor-pointer select-none shrink-0 ${mascotMode ? '' : 'rounded-full'}`}
         style={{
-          width: dims.orb,
-          height: dims.orb,
+          width: mascotMode ? mascotWidth : dims.orb,
+          height: mascotMode ? undefined : dims.orb,
           marginTop: '5px',
+          // Mascot mode is a transparent stage — the character carries the look.
           // Solid fill paints an opaque backdrop so logos stay legible over busy
           // desktops; glass keeps the frosted, state-tinted gradient. The
           // state-color glow (boxShadow animation) still reads in both modes.
-          background:
-            fillMode === 'solid'
+          background: mascotMode
+            ? 'transparent'
+            : fillMode === 'solid'
               ? fillColor
               : `radial-gradient(circle, ${fill} 0%, rgba(128,128,128,0.06) 100%)`,
-          backdropFilter: fillMode === 'solid' ? undefined : 'blur(14px)',
-          WebkitBackdropFilter: fillMode === 'solid' ? undefined : 'blur(14px)',
-          border: `1.5px solid ${borderColor}`,
-          boxShadow: isDark
-            ? '0 8px 8px 0 rgba(0,0,0,0.4)'
-            : '0 4px 16px 0 rgba(0,0,0,0.15)',
+          backdropFilter: mascotMode || fillMode === 'solid' ? undefined : 'blur(14px)',
+          WebkitBackdropFilter: mascotMode || fillMode === 'solid' ? undefined : 'blur(14px)',
+          border: mascotMode ? 'none' : `1.5px solid ${borderColor}`,
+          boxShadow: mascotMode
+            ? 'none'
+            : isDark
+              ? '0 8px 8px 0 rgba(0,0,0,0.4)'
+              : '0 4px 16px 0 rgba(0,0,0,0.15)',
         }}
       >
-        <img
-          src={meta.icon}
-          alt={meta.label}
-          draggable={false}
-          className='object-contain'
-          style={{
-            width: dims.icon,
-            height: dims.icon,
-            filter: isDark ? 'none' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))',
-          }}
-        />
+        {mascotMode ? (
+          codexMascotMode ? (
+            <CodexMascot state={state} width={mascotWidth} />
+          ) : antigravityMascotMode ? (
+            <AntigravityMascot state={state} width={mascotWidth} />
+          ) : (
+            <ClawdMascot state={state} width={mascotWidth} />
+          )
+        ) : (
+          <img
+            src={meta.icon}
+            alt={meta.label}
+            draggable={false}
+            className='object-contain'
+            style={{
+              width: dims.icon,
+              height: dims.icon,
+              filter: isDark ? 'none' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))',
+            }}
+          />
+        )}
 
         {/* Orbiting ring – waiting state (slow dots) */}
-        {state === 'waiting' && ring && (
+        {!mascotMode && state === 'waiting' && ring && (
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
@@ -1028,7 +1097,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
         )}
 
         {/* Orbiting ring – working state (fast dashes) */}
-        {state === 'working' && ring && (
+        {!mascotMode && state === 'working' && ring && (
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 2.5, repeat: Infinity, ease: 'linear' }}
@@ -1040,7 +1109,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
         {/* Attention escalation — warm-orange ring + bell badge when the tool
             has waited on the user past the threshold. Distinct from the teal
             nudge badge and amber/red guardrail ring. */}
-        {isEscalated && (
+        {isEscalated && !mascotMode && (
           <motion.div
             animate={{
               opacity: [0.5, 1, 0.5],
@@ -1075,7 +1144,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
         )}
 
         {/* Error dot */}
-        {state === 'error' && (
+        {!mascotMode && state === 'error' && (
           <div
             className='absolute -top-1 -right-1 w-3 h-3 rounded-full'
             style={{
@@ -1087,7 +1156,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
 
         {/* Guardrail ring — amber pulse on warn, solid red on block. Sits
             outside the orb so it doesn't fight the working/waiting orbits. */}
-        {guardrailSignal && (
+        {!mascotMode && guardrailSignal && (
           <motion.div
             animate={
               guardrailSignal.decision === 'block'
@@ -1139,7 +1208,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
 
         {/* Secret Protection ring + badge — shown when no command-guardrail
             signal is competing for the same corner. Key icon distinguishes it. */}
-        {secretSignal && !guardrailSignal && (
+        {!mascotMode && secretSignal && !guardrailSignal && (
           <motion.div
             animate={
               secretSignal.decision === 'block'

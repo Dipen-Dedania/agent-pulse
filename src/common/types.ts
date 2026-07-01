@@ -53,6 +53,10 @@ export interface BubbleConfig {
   fillMode: BubbleFillMode;
   fillColor: string;          // CSS color used when fillMode === 'solid' (e.g. '#ffffff')
   hidden: boolean;            // master visibility switch — true hides every bubble window while leaving the bridge, hooks, pollers, and guardrails running
+  mascotClaudeCode: boolean;  // when true, the Claude Code bubble swaps its orb for the animated Clawd mascot, whose pose tracks the agent state. Other tools are unaffected. The Claude bubble window grows to fit the mascot (see MASCOT_DIMENSIONS in bubble-manager).
+  mascotOpenaiCodex: boolean; // when true, the OpenAI Codex bubble swaps its orb for the animated frog mascot, whose pose tracks the agent state. Other tools are unaffected. The Codex bubble window grows to fit the mascot (see MASCOT_DIMENSIONS_CODEX in bubble-manager).
+  mascotAntigravity: boolean; // when true, the Antigravity bubble swaps its orb for the animated GIGI droplet mascot, whose pose tracks the agent state. Other tools are unaffected. The Antigravity bubble window grows to fit the mascot (see MASCOT_DIMENSIONS_ANTIGRAVITY in bubble-manager).
+  opacity: number;            // whole-bubble window opacity (0.3–1). Applied via Electron setOpacity, so it dims the orb/mascot, usage bars, and badges uniformly. 1 = fully opaque.
 }
 
 // Snapshot of a connected monitor, sent main → renderer for the Settings

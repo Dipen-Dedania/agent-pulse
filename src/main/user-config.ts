@@ -143,6 +143,8 @@ const DEFAULTS: UserConfig = {
     mascotClaudeCode: false,
     mascotOpenaiCodex: false,
     mascotAntigravity: false,
+    mascotKiro: false,
+    mascotVscodeCopilot: false,
     opacity: 1,
   },
   attention: {
@@ -410,6 +412,8 @@ function migrateBubble(raw: unknown): BubbleConfig {
     mascotClaudeCode: typeof b.mascotClaudeCode === 'boolean' ? b.mascotClaudeCode : d.mascotClaudeCode,
     mascotOpenaiCodex: typeof b.mascotOpenaiCodex === 'boolean' ? b.mascotOpenaiCodex : d.mascotOpenaiCodex,
     mascotAntigravity: typeof b.mascotAntigravity === 'boolean' ? b.mascotAntigravity : d.mascotAntigravity,
+    mascotKiro: typeof b.mascotKiro === 'boolean' ? b.mascotKiro : d.mascotKiro,
+    mascotVscodeCopilot: typeof b.mascotVscodeCopilot === 'boolean' ? b.mascotVscodeCopilot : d.mascotVscodeCopilot,
     // Clamp to a floor of 0.3 so a stale/hand-edited config can't make the
     // bubbles effectively invisible (and unfindable).
     opacity: typeof b.opacity === 'number' && Number.isFinite(b.opacity)

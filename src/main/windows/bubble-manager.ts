@@ -55,6 +55,29 @@ const MASCOT_DIMENSIONS_ANTIGRAVITY: Record<BubbleSize, { width: number; height:
   large:  { width: 86, height: 114 },
 };
 
+// Footprint for the Kiro bubble when the ghost mascot is on. The ghost SVG uses
+// a square viewBox at the same rendered widths as Clawd (see MASCOT_WIDTH_KIRO
+// in Bubble.tsx), so it shares Clawd's exact footprint — width MATCHES the orb
+// window so every bubble keeps the vertical centerline, height adds the
+// usage-bar strip + bottom breathing room. Only the Kiro bubble uses these.
+const MASCOT_DIMENSIONS_KIRO: Record<BubbleSize, { width: number; height: number }> = {
+  small:  { width: 58, height: 81 },
+  medium: { width: 70, height: 94 },
+  large:  { width: 86, height: 112 },
+};
+
+// Footprint for the VS Code Copilot bubble when the Mico blob mascot is on. Mico
+// uses a square viewBox at the same rendered widths as Clawd (see
+// MASCOT_WIDTH_COPILOT in Bubble.tsx), so it shares Clawd's exact footprint —
+// width MATCHES the orb window so every bubble keeps the vertical centerline,
+// height adds the usage-bar strip + bottom breathing room. Only the Copilot
+// bubble uses these.
+const MASCOT_DIMENSIONS_COPILOT: Record<BubbleSize, { width: number; height: number }> = {
+  small:  { width: 58, height: 81 },
+  medium: { width: 70, height: 94 },
+  large:  { width: 86, height: 112 },
+};
+
 // ─── macOS / Linux ────────────────────────────────────────────────────────────
 // macOS: `open -a <name>` activates the existing window (or launches if not running)
 // Linux: binary name executed directly
@@ -738,6 +761,10 @@ export class BubbleManager {
   private mascotOpenaiCodex = false;
   // When true, the Antigravity bubble uses the larger MASCOT_DIMENSIONS_ANTIGRAVITY footprint.
   private mascotAntigravity = false;
+  // When true, the Kiro bubble uses the larger MASCOT_DIMENSIONS_KIRO footprint.
+  private mascotKiro = false;
+  // When true, the Copilot bubble uses the larger MASCOT_DIMENSIONS_COPILOT footprint.
+  private mascotVscodeCopilot = false;
   private stackPosition: BubbleStackPosition = 'bottom-right';
   private anchor: BubbleAnchor | null = null;
   private displayId: number | null = null;
@@ -777,6 +804,8 @@ export class BubbleManager {
     this.mascotClaudeCode = config.mascotClaudeCode ?? false;
     this.mascotOpenaiCodex = config.mascotOpenaiCodex ?? false;
     this.mascotAntigravity = config.mascotAntigravity ?? false;
+    this.mascotKiro = config.mascotKiro ?? false;
+    this.mascotVscodeCopilot = config.mascotVscodeCopilot ?? false;
     this.stackPosition = config.stackPosition;
     this.anchor = config.anchor ?? null;
     this.displayId = config.displayId ?? null;
@@ -798,6 +827,14 @@ export class BubbleManager {
     }
     if (toolId === 'antigravity-cli' && this.mascotAntigravity) {
       const m = MASCOT_DIMENSIONS_ANTIGRAVITY[this.size] ?? MASCOT_DIMENSIONS_ANTIGRAVITY.medium;
+      return { width: m.width, height: m.height };
+    }
+    if (toolId === 'kiro' && this.mascotKiro) {
+      const m = MASCOT_DIMENSIONS_KIRO[this.size] ?? MASCOT_DIMENSIONS_KIRO.medium;
+      return { width: m.width, height: m.height };
+    }
+    if (toolId === 'vscode-copilot' && this.mascotVscodeCopilot) {
+      const m = MASCOT_DIMENSIONS_COPILOT[this.size] ?? MASCOT_DIMENSIONS_COPILOT.medium;
       return { width: m.width, height: m.height };
     }
     return { width: this.width, height: this.height };

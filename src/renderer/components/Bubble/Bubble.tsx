@@ -7,6 +7,8 @@ import { colorsFor } from '../../../common/stateColors';
 import { ClawdMascot } from './ClawdMascot';
 import { CodexMascot } from './CodexMascot';
 import { AntigravityMascot } from './AntigravityMascot';
+import { KiroMascot } from './KiroMascot';
+import { MicoMascot } from './MicoMascot';
 import { logger } from '../../../common/logger';
 import { motion } from 'framer-motion';
 import { useStatusStore } from '../../store/useStatusStore';
@@ -46,6 +48,20 @@ const MASCOT_WIDTH_CODEX: Record<BubbleSize, number> = { small: 42, medium: 52, 
 // there's no dead space around the mascot and the flag/zzz/alert props still
 // never clip.
 const MASCOT_WIDTH_ANTIGRAVITY: Record<BubbleSize, number> = { small: 40, medium: 50, large: 61 };
+
+// Rendered width of the Kiro ghost mascot per bubble size — same widths as
+// Clawd (the ghost's viewBox is square like Clawd's, so at equal widths the two
+// mascots share an identical footprint). The Kiro bubble window grows to match
+// (see MASCOT_DIMENSIONS_KIRO in bubble-manager.ts), so there's no dead space
+// around the mascot and the sign/zzz/alert props still never clip.
+const MASCOT_WIDTH_KIRO: Record<BubbleSize, number> = { small: 54, medium: 66, large: 82 };
+
+// Rendered width of the Copilot Mico mascot per bubble size — same widths as
+// Clawd (Mico's viewBox is square like Clawd's, so at equal widths the two
+// mascots share an identical footprint). The Copilot bubble window grows to
+// match (see MASCOT_DIMENSIONS_COPILOT in bubble-manager.ts), so there's no dead
+// space around the mascot and the sign/zzz/alert props still never clip.
+const MASCOT_WIDTH_COPILOT: Record<BubbleSize, number> = { small: 54, medium: 66, large: 82 };
 
 
 interface BubbleProps {
@@ -475,6 +491,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const [mascotEnabled, setMascotEnabled] = useState(false);
   const [mascotCodexEnabled, setMascotCodexEnabled] = useState(false);
   const [mascotAntigravityEnabled, setMascotAntigravityEnabled] = useState(false);
+  const [mascotKiroEnabled, setMascotKiroEnabled] = useState(false);
+  const [mascotCopilotEnabled, setMascotCopilotEnabled] = useState(false);
   const [bubbleOpacity, setBubbleOpacity] = useState(1);
   const [refreshingUsage, setRefreshingUsage] = useState(false);
 
@@ -512,6 +530,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       if (typeof b.mascotClaudeCode === 'boolean') setMascotEnabled(b.mascotClaudeCode);
       if (typeof b.mascotOpenaiCodex === 'boolean') setMascotCodexEnabled(b.mascotOpenaiCodex);
       if (typeof b.mascotAntigravity === 'boolean') setMascotAntigravityEnabled(b.mascotAntigravity);
+      if (typeof b.mascotKiro === 'boolean') setMascotKiroEnabled(b.mascotKiro);
+      if (typeof b.mascotVscodeCopilot === 'boolean') setMascotCopilotEnabled(b.mascotVscodeCopilot);
       if (typeof b.opacity === 'number' && Number.isFinite(b.opacity)) {
         setBubbleOpacity(Math.min(1, Math.max(0.3, b.opacity)));
       }
@@ -889,12 +909,18 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   const claudeMascotMode = toolId === 'claude-code' && mascotEnabled;
   const codexMascotMode = toolId === 'openai-codex' && mascotCodexEnabled;
   const antigravityMascotMode = toolId === 'antigravity-cli' && mascotAntigravityEnabled;
-  const mascotMode = claudeMascotMode || codexMascotMode || antigravityMascotMode;
+  const kiroMascotMode = toolId === 'kiro' && mascotKiroEnabled;
+  const copilotMascotMode = toolId === 'vscode-copilot' && mascotCopilotEnabled;
+  const mascotMode = claudeMascotMode || codexMascotMode || antigravityMascotMode || kiroMascotMode || copilotMascotMode;
   const mascotWidth = codexMascotMode
     ? (MASCOT_WIDTH_CODEX[bubbleSize] ?? MASCOT_WIDTH_CODEX.medium)
     : antigravityMascotMode
       ? (MASCOT_WIDTH_ANTIGRAVITY[bubbleSize] ?? MASCOT_WIDTH_ANTIGRAVITY.medium)
-      : (MASCOT_WIDTH[bubbleSize] ?? MASCOT_WIDTH.medium);
+      : kiroMascotMode
+        ? (MASCOT_WIDTH_KIRO[bubbleSize] ?? MASCOT_WIDTH_KIRO.medium)
+        : copilotMascotMode
+          ? (MASCOT_WIDTH_COPILOT[bubbleSize] ?? MASCOT_WIDTH_COPILOT.medium)
+          : (MASCOT_WIDTH[bubbleSize] ?? MASCOT_WIDTH.medium);
 
   const animations: Record<AgentState, any> = {
     idle: {
@@ -1069,6 +1095,10 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
             <CodexMascot state={state} width={mascotWidth} />
           ) : antigravityMascotMode ? (
             <AntigravityMascot state={state} width={mascotWidth} />
+          ) : kiroMascotMode ? (
+            <KiroMascot state={state} width={mascotWidth} />
+          ) : copilotMascotMode ? (
+            <MicoMascot state={state} width={mascotWidth} />
           ) : (
             <ClawdMascot state={state} width={mascotWidth} />
           )

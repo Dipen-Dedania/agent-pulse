@@ -1,6 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AgentState } from '../../../common/types';
 import { STATE_COLORS } from '../../../common/stateColors';
+import { TOOL_META } from '../../../common/toolMeta';
+import { ClawdMascot } from '../Bubble/ClawdMascot';
+import { CodexMascot } from '../Bubble/CodexMascot';
+import { AntigravityMascot } from '../Bubble/AntigravityMascot';
+import { KiroMascot } from '../Bubble/KiroMascot';
+import { MicoMascot } from '../Bubble/MicoMascot';
 
 type RingStyle = 'dotted' | 'dashed' | null;
 
@@ -95,6 +101,88 @@ const StateCard: React.FC<CardConfig> = ({
   );
 };
 
+// ── Mascot states ────────────────────────────────────────────────────────────
+// The same five states, acted out by the animated mascots that replace the orb
+// when Mascot mode is enabled on a bubble. One mascot renders at a time so only
+// five GSAP loops run in the settings window.
+
+type MascotToolId = 'claude-code' | 'openai-codex' | 'antigravity-cli' | 'kiro' | 'vscode-copilot';
+
+interface MascotEntry {
+  id: MascotToolId;
+  Component: React.ComponentType<{ state: AgentState; width: number }>;
+  // Per-mascot width chosen so the differing viewBox aspect ratios land at a
+  // similar rendered height inside the card stage.
+  width: number;
+}
+
+const MASCOTS: MascotEntry[] = [
+  { id: 'claude-code', Component: ClawdMascot, width: 78 },
+  { id: 'openai-codex', Component: CodexMascot, width: 64 },
+  { id: 'antigravity-cli', Component: AntigravityMascot, width: 58 },
+  { id: 'kiro', Component: KiroMascot, width: 78 },
+  { id: 'vscode-copilot', Component: MicoMascot, width: 78 },
+];
+
+const MascotStateCard: React.FC<{ card: CardConfig; mascot: MascotEntry }> = ({
+  card,
+  mascot,
+}) => {
+  const colors = STATE_COLORS[card.state];
+  const Mascot = mascot.Component;
+
+  return (
+    <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-4 flex flex-col gap-3 shadow-xl'>
+      <div className='h-28 flex items-center justify-center overflow-hidden'>
+        <Mascot state={card.state} width={mascot.width} />
+      </div>
+      <p className={`font-semibold text-sm text-center ${colors.textClass}`}>{card.label}</p>
+    </div>
+  );
+};
+
+const MascotStates: React.FC = () => {
+  const [mascotId, setMascotId] = useState<MascotToolId>('claude-code');
+  const mascot = MASCOTS.find((m) => m.id === mascotId) ?? MASCOTS[0];
+
+  return (
+    <div className='mt-8'>
+      <div className='flex flex-wrap items-center justify-between gap-3 mb-4'>
+        <p className='text-xs font-semibold uppercase tracking-widest text-slate-500'>
+          Mascot States
+        </p>
+        <div className='flex gap-1.5'>
+          {MASCOTS.map((m) => {
+            const active = m.id === mascotId;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setMascotId(m.id)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  active
+                    ? 'bg-slate-700/80 border-slate-500/70 text-slate-100'
+                    : 'bg-slate-800/40 border-slate-700/70 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                }`}
+              >
+                <img src={TOOL_META[m.id].icon} alt='' className='w-3.5 h-3.5' />
+                {TOOL_META[m.id].label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3'>
+        {CARDS.map((card) => (
+          <MascotStateCard key={`${mascot.id}-${card.state}`} card={card} mascot={mascot} />
+        ))}
+      </div>
+      <p className='text-[11px] text-slate-500 mt-3'>
+        Shown when Mascot mode is enabled for the tool in the Bubble tab.
+      </p>
+    </div>
+  );
+};
+
 export const StatesReference: React.FC = () => (
   <div className='mt-10'>
     <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4'>
@@ -105,5 +193,6 @@ export const StatesReference: React.FC = () => (
         <StateCard key={card.state} {...card} />
       ))}
     </div>
+    <MascotStates />
   </div>
 );

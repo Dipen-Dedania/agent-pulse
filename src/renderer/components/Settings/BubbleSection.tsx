@@ -265,6 +265,56 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
         </button>
       </div>
 
+      {/* ── Ghost mascot (Kiro) ──────────────────────────────────────────── */}
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+        <div className='min-w-0'>
+          <p className='text-sm font-medium text-white'>Ghost mascot (Kiro)</p>
+          <p className='text-xs text-slate-400 mt-0.5'>
+            Swap the Kiro orb for an animated ghost whose pose tracks the agent — sleeping when idle,
+            raising a sign when it needs you, hopping and spinning while it runs. Other tools keep the orb.
+            The Kiro bubble grows a little to give the ghost room.
+          </p>
+        </div>
+        <button
+          onClick={() => onChange({ mascotKiro: !config.mascotKiro })}
+          aria-pressed={!!config.mascotKiro}
+          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
+            config.mascotKiro ? 'bg-blue-500' : 'bg-slate-600'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+              config.mascotKiro ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* ── Mico mascot (VS Code Copilot) ────────────────────────────────── */}
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+        <div className='min-w-0'>
+          <p className='text-sm font-medium text-white'>Mico mascot (VS Code Copilot)</p>
+          <p className='text-xs text-slate-400 mt-0.5'>
+            Swap the Copilot orb for an animated Mico blob whose pose tracks the agent — sleeping when idle,
+            raising a sign when it needs you, bouncing and lifting weights while it runs. Other tools keep the orb.
+            The Copilot bubble grows a little to give Mico room.
+          </p>
+        </div>
+        <button
+          onClick={() => onChange({ mascotVscodeCopilot: !config.mascotVscodeCopilot })}
+          aria-pressed={!!config.mascotVscodeCopilot}
+          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
+            config.mascotVscodeCopilot ? 'bg-blue-500' : 'bg-slate-600'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+              config.mascotVscodeCopilot ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
       {/* ── Size ──────────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
         <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Size</p>

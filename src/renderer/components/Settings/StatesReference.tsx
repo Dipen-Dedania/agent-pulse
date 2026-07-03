@@ -158,11 +158,10 @@ const MascotStates: React.FC = () => {
               <button
                 key={m.id}
                 onClick={() => setMascotId(m.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                  active
+                className={`flex items-center cursor-pointer gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${active
                     ? 'bg-slate-700/80 border-slate-500/70 text-slate-100'
                     : 'bg-slate-800/40 border-slate-700/70 text-slate-400 hover:text-slate-200 hover:border-slate-600'
-                }`}
+                  }`}
               >
                 <img src={TOOL_META[m.id].icon} alt='' className='w-3.5 h-3.5' />
                 {TOOL_META[m.id].label}

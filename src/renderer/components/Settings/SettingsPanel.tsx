@@ -15,6 +15,11 @@ import { StatusLineSection } from './StatusLineSection';
 import { GuardrailsTab } from './GuardrailsTab';
 import { SecretProtectionTab } from './SecretProtectionTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
+import { BacklogBoardTab } from '../Backlog/BacklogBoardTab';
+import { BacklogSchedulerSection } from './BacklogSchedulerSection';
+import { BacklogSchedulerConfig } from '../../../common/backlog-types';
+import { useBacklogStore, useBacklogSync } from '../../store/useBacklogStore';
+import { AppDialogHost, appAlert } from '../Dialog/AppDialog';
 import { UpdatesTab } from './UpdatesTab';
 import { usePricingSync } from '../../pricing-sync';
 
@@ -228,12 +233,13 @@ const SubTabPill: React.FC<{ active: boolean; onClick: () => void; children: Rea
 
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
-type TabId = 'hooks' | 'bubble' | 'usage' | 'analytics' | 'guardrails' | 'updates';
+type TabId = 'hooks' | 'bubble' | 'usage' | 'backlog' | 'analytics' | 'guardrails' | 'updates';
 
 const TABS: { id: TabId; label: string; description: string }[] = [
   { id: 'hooks',      label: 'Hooks',      description: 'Manage which AI tools show a status bubble.' },
   { id: 'bubble',     label: 'Bubble',     description: 'Size, screen position, and inactivity sound for the bubbles.' },
   { id: 'usage',      label: 'Usage',      description: 'Monitor plan usage and configure Claude Code’s scheduler & status line.' },
+  { id: 'backlog',    label: 'Backlog',    description: 'Queue research tasks that run themselves during your idle windows.' },
   { id: 'analytics',  label: 'Analytics',  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
   { id: 'guardrails', label: 'Guardrails', description: 'Block risky shell commands and protect secret files from agents.' },
   { id: 'updates',    label: 'Updates',    description: 'Check for and install new versions of Agent Pulse.' },
@@ -256,6 +262,7 @@ export const SettingsPanel: React.FC = () => {
   const [antigravityUsageConfig, setAntigravityUsageConfig] = useState<AntigravityUsageConfigUI | null>(null);
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfigUI | null>(null);
+  const [backlogSchedulerConfig, setBacklogSchedulerConfig] = useState<BacklogSchedulerConfig | null>(null);
   const [bubbleConfig, setBubbleConfig] = useState<BubbleConfig | null>(null);
   const [attentionConfig, setAttentionConfig] = useState<AttentionConfig | null>(null);
   const [statusLineConfig, setStatusLineConfig] = useState<StatusLineConfig | null>(null);
@@ -273,6 +280,12 @@ export const SettingsPanel: React.FC = () => {
   // Install live LiteLLM rates; re-renders this panel (and its cost-showing
   // children) when fresher prices arrive from the main process.
   usePricingSync();
+
+  // Backlog board data + engine status (shared by the Backlog tab and the
+  // Backlog Scheduler section's glance). Hydrates once, then follows
+  // main-process broadcasts.
+  useBacklogSync();
+  const backlogStatus = useBacklogStore((s) => s.status);
 
   const getBubbleStates = React.useCallback(async (
     config?: { enabledBubbles?: Partial<Record<ToolId, boolean>> },
@@ -314,6 +327,7 @@ export const SettingsPanel: React.FC = () => {
         if (config?.copilotUsage) setCopilotUsageConfig(config.copilotUsage);
         if (config?.antigravityUsage) setAntigravityUsageConfig(config.antigravityUsage);
         if (config?.scheduler) setSchedulerConfig(config.scheduler);
+        if (config?.backlogScheduler) setBacklogSchedulerConfig(config.backlogScheduler);
         if (config?.bubble) setBubbleConfig(config.bubble);
         if (config?.attention) setAttentionConfig(config.attention);
         if (config?.statusLine) setStatusLineConfig(config.statusLine);
@@ -375,6 +389,12 @@ export const SettingsPanel: React.FC = () => {
     const handler = (_event: unknown, incoming: SchedulerStatus) => setSchedulerStatus(incoming);
     window.electron.on('scheduler:updated', handler);
     return () => window.electron.off('scheduler:updated', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: BacklogSchedulerConfig) => setBacklogSchedulerConfig(incoming);
+    window.electron.on('backlog:scheduler:config-updated', handler);
+    return () => window.electron.off('backlog:scheduler:config-updated', handler);
   }, []);
 
   useEffect(() => {
@@ -457,6 +477,18 @@ export const SettingsPanel: React.FC = () => {
     }
   };
 
+  const handleBacklogSchedulerConfigChange = async (partial: Partial<BacklogSchedulerConfig>) => {
+    // Optimistic apply for instant feedback, then reconcile with the validated
+    // config the main process returns.
+    setBacklogSchedulerConfig((prev) => (prev ? { ...prev, ...partial } : prev));
+    try {
+      const updated = await window.electron.invoke('backlog:scheduler:update-config', partial);
+      setBacklogSchedulerConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update backlog scheduler config', e);
+    }
+  };
+
   const handleBubbleConfigChange = async (partial: Partial<BubbleConfig>) => {
     // Optimistically apply so the UI (selection highlight) feels instant, then
     // reconcile with the validated config the main process returns.
@@ -511,9 +543,12 @@ export const SettingsPanel: React.FC = () => {
     try {
       const result = await window.electron.invoke('status-line:install', { replace });
       if (result?.reason === 'no-runtime') {
-        alert('No script runtime (Node, Python, or PowerShell) was found on your PATH. Install Node.js to enable the status line.');
+        void appAlert(
+          'No script runtime (Node, Python, or PowerShell) was found on your PATH. Install Node.js to enable the status line.',
+          'Status line',
+        );
       } else if (result?.reason === 'error') {
-        alert('Failed to install status line: ' + (result.message ?? 'unknown error'));
+        void appAlert('Failed to install status line: ' + (result.message ?? 'unknown error'), 'Status line');
       }
     } catch (e) {
       logger.error('[SettingsPanel] failed to install status line', e);
@@ -582,7 +617,7 @@ export const SettingsPanel: React.FC = () => {
         }));
       }
     } catch (e) {
-      alert('Failed to install hook: ' + e);
+      void appAlert('Failed to install hook: ' + e, 'Hooks');
     }
   };
 
@@ -596,7 +631,7 @@ export const SettingsPanel: React.FC = () => {
         }));
       }
     } catch (e) {
-      alert('Failed to uninstall hook: ' + e);
+      void appAlert('Failed to uninstall hook: ' + e, 'Hooks');
     }
   };
 
@@ -887,6 +922,13 @@ export const SettingsPanel: React.FC = () => {
                     onTestOpener={handleSchedulerTestOpener}
                   />
                 )}
+                {backlogSchedulerConfig && (
+                  <BacklogSchedulerSection
+                    config={backlogSchedulerConfig}
+                    status={backlogStatus}
+                    onChange={handleBacklogSchedulerConfigChange}
+                  />
+                )}
                 {statusLineConfig && statusLineDetect && (
                   <StatusLineSection
                     config={statusLineConfig}
@@ -939,6 +981,8 @@ export const SettingsPanel: React.FC = () => {
         );
       })()}
 
+      {activeTab === 'backlog' && <BacklogBoardTab />}
+
       {activeTab === 'analytics' && <AnalyticsTabContainer />}
 
       {activeTab === 'guardrails' && <GuardrailsParent />}
@@ -952,6 +996,9 @@ export const SettingsPanel: React.FC = () => {
           onClose={() => setActiveInfo(null)}
         />
       )}
+
+      {/* Styled alert/confirm host — replaces the renderer-blocking native dialogs. */}
+      <AppDialogHost />
     </div>
   );
 };

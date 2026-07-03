@@ -23,6 +23,12 @@
 // and Antigravity (hook payload). Cursor, VS Code Copilot, and Kiro report no
 // tokens, so they have no cost — callers must treat a null/zero result as
 // "not priced", not "$0 of work".
+//
+// Unknown models: when no bundled row matches, rateForModel falls back to an
+// exact-id lookup in a map built from the full LiteLLM feed (buildFallbackRates,
+// installed alongside the table). New model launches therefore price
+// automatically at list price — with the raw model id as label — until a
+// curated row is added. Curated rows always win when they match.
 
 // Date the BUNDLED fallback numbers below were last hand-checked. When live
 // LiteLLM prices are installed, getPricingMeta() reports the fetch time instead.
@@ -63,6 +69,8 @@ export interface RateEntry {
 // (legacy Haiku) omit `source` and stay pinned to their bundled numbers.
 const TABLE: RateEntry[] = [
   // ── Anthropic — Claude ────────────────────────────────────────────────────
+  // Fable 5 (new top tier above Opus): $10 / $50.
+  { match: ['fable'], source: 'claude-fable-5', rate: { label: 'Claude Fable', provider: 'anthropic', input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1.0 } },
   // Opus 4.5 and later (4.5, 4.6, 4.7, 4.8 …): $5 / $25. Anthropic cut the Opus
   // price ~3× starting with 4.5 — modern ids ("claude-opus-4-8") MUST hit this
   // row, not the legacy one below, or every estimate runs 3× high. All modern
@@ -127,10 +135,15 @@ export interface PricingMeta {
   fetchedAt: number | null;
 }
 
+/** Exact-id → rate map for models the curated table doesn't match. */
+export type FallbackRateMap = Record<string, ModelRate>;
+
 /** The active rate table plus its provenance — handed main → renderer over IPC. */
 export interface PricingSnapshot {
   table: RateEntry[];
   meta: PricingMeta;
+  /** Optional so snapshots from older main-process builds still apply cleanly. */
+  fallback?: FallbackRateMap;
 }
 
 // The table `rateForModel` actually reads. Defaults to the bundled TABLE so the
@@ -138,6 +151,9 @@ export interface PricingSnapshot {
 // each renderer install their own refreshed copy via installRates().
 let activeTable: RateEntry[] = TABLE;
 let activeMeta: PricingMeta = { source: 'bundled', lastUpdated: PRICING_LAST_UPDATED, fetchedAt: null };
+// Safety net for models no curated row matches. Empty until a live fetch —
+// the bundled build ships no fallback, so offline behavior is unchanged.
+let activeFallback: FallbackRateMap = {};
 
 /** Unique LiteLLM ids the bundled table references — the set the fetcher needs. */
 export function referencedModelIds(): string[] {
@@ -181,21 +197,76 @@ export function buildRatesFromLitellm(data: LitellmPriceMap): RateEntry[] {
   return applyLitellmPricing(TABLE, data);
 }
 
-/** Install a refreshed rate table (+ its provenance) as the active source. */
-export function installRates(table: RateEntry[], meta: PricingMeta): void {
+// LiteLLM's `litellm_provider` values we accept for the fallback map, mapped to
+// our provider union. Restricting to the three bare providers (not azure /
+// bedrock / vertex re-serves) keeps ids canonical and avoids duplicate tiers.
+const FALLBACK_PROVIDERS: Record<string, ModelRate['provider']> = {
+  anthropic: 'anthropic',
+  openai: 'openai',
+  gemini: 'google',
+};
+
+/**
+ * Build the exact-id fallback map from the FULL LiteLLM feed body. Keeps chat
+ * models from the three providers we render, priced per-1M. Keys are
+ * normalized (lowercased, provider prefix stripped: "gemini/gemini-2.5-pro" →
+ * "gemini-2.5-pro"); first entry per id wins. The raw id doubles as the UI
+ * label, which visibly marks the rate as auto-derived rather than curated.
+ */
+export function buildFallbackRates(body: Record<string, unknown>): FallbackRateMap {
+  const out: FallbackRateMap = {};
+  for (const [key, entry] of Object.entries(body)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const provider = FALLBACK_PROVIDERS[String(e.litellm_provider ?? '')];
+    if (!provider) continue;
+    // Embedding / image / audio entries lack a real input+output pair; the
+    // mode check plus the positive-cost requirement below filters them out.
+    if (typeof e.mode === 'string' && e.mode !== 'chat' && e.mode !== 'responses') continue;
+    const asNum = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+    const input = perMillion(asNum(e.input_cost_per_token));
+    const output = perMillion(asNum(e.output_cost_per_token));
+    if (input === undefined || output === undefined) continue;
+    const id = key.toLowerCase().split('/').pop()!;
+    if (out[id]) continue;
+    out[id] = {
+      label: id,
+      provider,
+      input,
+      output,
+      cacheWrite: perMillion(asNum(e.cache_creation_input_token_cost)) ?? input,
+      cacheRead: perMillion(asNum(e.cache_read_input_token_cost)) ?? input,
+    };
+  }
+  return out;
+}
+
+/** Install a refreshed rate table (+ provenance and fallback) as the active source. */
+export function installRates(
+  table: RateEntry[],
+  meta: PricingMeta,
+  fallback: FallbackRateMap = {},
+): void {
   activeTable = table && table.length > 0 ? table : TABLE;
   activeMeta = meta;
+  activeFallback = fallback;
 }
 
 /** Revert to the bundled table — used by tests and as a safety reset. */
 export function resetRates(): void {
   activeTable = TABLE;
   activeMeta = { source: 'bundled', lastUpdated: PRICING_LAST_UPDATED, fetchedAt: null };
+  activeFallback = {};
 }
 
 /** The table currently backing rateForModel (for IPC hand-off to renderers). */
 export function getActiveTable(): RateEntry[] {
   return activeTable;
+}
+
+/** The active fallback map (for IPC hand-off to renderers). */
+export function getActiveFallback(): FallbackRateMap {
+  return activeFallback;
 }
 
 /** Provenance of the active rates, for the "prices updated …" UI line. */
@@ -213,8 +284,10 @@ export interface TokenCounts {
 
 /**
  * Resolve the rate for a raw model id (e.g. "claude-opus-4-7",
- * "gpt-5-codex", "gemini-2.5-pro"). Returns null when no entry matches, so
- * callers can flag the usage as "unpriced" rather than silently charging $0.
+ * "gpt-5-codex", "gemini-2.5-pro"). Curated table rows win; a model no row
+ * matches falls back to an exact-id lookup in the live LiteLLM map, so new
+ * model launches price automatically. Returns null when both miss, so callers
+ * can flag the usage as "unpriced" rather than silently charging $0.
  */
 export function rateForModel(model: string | null | undefined): ModelRate | null {
   if (!model) return null;
@@ -222,7 +295,7 @@ export function rateForModel(model: string | null | undefined): ModelRate | null
   for (const entry of activeTable) {
     if (entry.match.every((m) => id.includes(m))) return entry.rate;
   }
-  return null;
+  return activeFallback[id] ?? null;
 }
 
 /** Result of a cost estimate. `priced` is false when the model was unknown. */

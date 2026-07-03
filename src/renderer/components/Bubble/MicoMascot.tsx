@@ -38,9 +38,9 @@ interface MicoMascotProps {
 // at y 432, centre x ≈ 231) plus reserved headroom above (y -160..112) for the
 // enlarged overhead props — the flag sign and drifting zzz reach up there — and
 // a little breathing room below the foot (432 → box bottom 480). The box is
-// SQUARE and centred on the character's x so, at the same rendered width as
-// Clawd, the Mico bubble has exactly Clawd's footprint — it shares the same
-// MASCOT_WIDTH-style sizing (see MASCOT_WIDTH_COPILOT in Bubble.tsx and
+// SQUARE and centred on the character's x, and Mico renders at Clawd's widths
+// scaled to 120% — so the Mico bubble is exactly Clawd's footprint grown 20%
+// (see MASCOT_WIDTH_COPILOT in Bubble.tsx and
 // MASCOT_DIMENSIONS_COPILOT in bubble-manager.ts): a uniform zoom-out that keeps
 // every prop inside the window, so nothing clips. Keep extremes in sync with
 // the prop geometry below.

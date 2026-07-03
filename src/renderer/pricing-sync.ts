@@ -17,7 +17,7 @@ let initialized = false;
 
 function applySnapshot(snap: PricingSnapshot | null): void {
   if (!snap?.table?.length) return;
-  installRates(snap.table, snap.meta);
+  installRates(snap.table, snap.meta, snap.fallback ?? {});
   for (const l of listeners) l();
 }
 

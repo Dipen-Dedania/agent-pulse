@@ -13,10 +13,13 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from '../../common/logger';
 import {
+  FallbackRateMap,
   LitellmModelPrice,
   LitellmPriceMap,
   PricingSnapshot,
+  buildFallbackRates,
   buildRatesFromLitellm,
+  getActiveFallback,
   getActiveTable,
   getPricingMeta,
   installRates,
@@ -32,12 +35,13 @@ const ENDPOINT =
 
 const REFRESH_MS = 24 * 60 * 60_000;       // pull at most once a day
 const RETRY_MS = 60 * 60_000;              // after a failure, retry in an hour
-const CACHE_VERSION = 1;                   // bump if the cache shape changes
+const CACHE_VERSION = 2;                   // bump if the cache shape changes
 
 interface PricingCache {
   version: number;
   fetchedAt: number;          // epoch ms of the successful fetch
   data: LitellmPriceMap;      // filtered to the ids our table references
+  fallback: FallbackRateMap;  // exact-id rates for models no curated row matches
 }
 
 export class LlmPricingPoller {
@@ -98,11 +102,15 @@ export class LlmPricingPoller {
         return;
       }
 
-      const cache: PricingCache = { version: CACHE_VERSION, fetchedAt: Date.now(), data };
+      const fallback = buildFallbackRates(body!);
+      const cache: PricingCache = { version: CACHE_VERSION, fetchedAt: Date.now(), data, fallback };
       this.writeCache(cache);
       this.install(cache);
       this.broadcast();
-      logger.info(`[LlmPricingPoller] refreshed prices for ${Object.keys(data).length} model id(s)`);
+      logger.info(
+        `[LlmPricingPoller] refreshed prices for ${Object.keys(data).length} model id(s) ` +
+          `(+${Object.keys(fallback).length} fallback id(s))`,
+      );
       this.scheduleNext(REFRESH_MS);
     } catch (e: any) {
       logger.warn('[LlmPricingPoller] fetch error:', e?.message ?? e);
@@ -131,15 +139,19 @@ export class LlmPricingPoller {
 
   private install(cache: PricingCache): void {
     const table = buildRatesFromLitellm(cache.data);
-    installRates(table, {
-      source: 'litellm',
-      lastUpdated: new Date(cache.fetchedAt).toISOString().slice(0, 10),
-      fetchedAt: cache.fetchedAt,
-    });
+    installRates(
+      table,
+      {
+        source: 'litellm',
+        lastUpdated: new Date(cache.fetchedAt).toISOString().slice(0, 10),
+        fetchedAt: cache.fetchedAt,
+      },
+      cache.fallback ?? {},
+    );
   }
 
   private snapshot(): PricingSnapshot {
-    return { table: getActiveTable(), meta: getPricingMeta() };
+    return { table: getActiveTable(), meta: getPricingMeta(), fallback: getActiveFallback() };
   }
 
   private broadcast(): void {

@@ -8,7 +8,13 @@ import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
-import { loadConfig, saveConfig, defaultStatusLineConfig, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, CopilotUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
+import path from 'path';
+import { loadConfig, saveConfig, defaultStatusLineConfig, migrateBacklogScheduler, migrateBacklogTemplates, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, CopilotUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
+import { BacklogSchedulerConfig, BacklogTemplate } from '../common/backlog-types';
+import { initBacklogDb, closeBacklogDb } from './backlog/db';
+import { BacklogStore } from './backlog/store';
+import { BacklogEngine } from './backlog/engine';
+import { registerBacklogIpc } from './backlog/ipc';
 import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, DisplayInfo } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
@@ -61,6 +67,8 @@ class AgentPulseApp {
   private llmPricingPoller: LlmPricingPoller;
   private scheduler: Scheduler;
   private attentionEngine: AttentionEngine;
+  private backlogStore: BacklogStore | null = null;
+  private backlogEngine: BacklogEngine | null = null;
   private timeline: TimelineHandle | null = null;
   private updater!: UpdaterHandle;
 
@@ -127,7 +135,11 @@ class AgentPulseApp {
     this.llmPricingPoller = new LlmPricingPoller();
     // Scheduler consumes the usage poller (live 5-hour resetsAt), so construct
     // it after the poller exists.
-    this.scheduler = new Scheduler(this.userConfig.scheduler, { usagePoller: this.usagePoller });
+    this.scheduler = new Scheduler(this.userConfig.scheduler, {
+      usagePoller: this.usagePoller,
+      // Backlog runs spend + anchor windows themselves; skip redundant openers.
+      shouldSkipOpener: () => this.backlogEngine?.isRunningCard() ?? false,
+    });
     // Attention escalation watches state transitions from the bridge's state
     // manager, so it can be built as soon as the state manager exists.
     this.attentionEngine = new AttentionEngine(this.userConfig.attention, { stateManager: this.stateManager });
@@ -225,6 +237,25 @@ class AgentPulseApp {
       });
       this.rehydrateAgentPids();
 
+      // Boot the backlog board + scheduler. Separate SQLite file from the
+      // timeline; if better-sqlite3 won't load, the board tab shows a clean
+      // unavailable state and the rest of the app keeps running.
+      const backlogDb = initBacklogDb();
+      if (backlogDb) {
+        this.backlogStore = new BacklogStore(backlogDb);
+        this.backlogEngine = new BacklogEngine(this.userConfig.backlogScheduler, {
+          store: this.backlogStore,
+          usagePoller: this.usagePoller,
+          artifactsDir: path.join(app.getPath('userData'), 'backlog-artifacts'),
+        });
+        this.backlogEngine.start();
+      }
+      registerBacklogIpc({
+        store: this.backlogStore,
+        engine: this.backlogEngine,
+        getTemplates: () => this.userConfig.backlogTemplates,
+      });
+
       // Sync the OS login-item state to whatever we persisted. Cheap and
       // self-healing if the user toggled it externally.
       setAutoLaunch(this.userConfig.autoLaunch);
@@ -277,6 +308,10 @@ class AgentPulseApp {
       this.antigravityUsagePoller.stop();
       this.llmPricingPoller.stop();
       this.scheduler.stop();
+      // Engine stop kills any running claude process tree and finalizes the
+      // card as Paused before the DB closes.
+      this.backlogEngine?.stop();
+      closeBacklogDb();
       this.tooltipManager.destroy();
       this.timeline?.shutdown();
       this.updater.shutdown();
@@ -509,6 +544,30 @@ class AgentPulseApp {
       const updated = this.userConfig.scheduler;
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send('scheduler:config-updated', updated);
+      }
+      return updated;
+    });
+
+    ipcMain.handle('backlog:scheduler:update-config', (_event, partial: Partial<BacklogSchedulerConfig>) => {
+      // Revalidate the merged result — renderer payloads get the same
+      // guarantees as disk loads (parseable slot times, days clamped 0–6,
+      // maxConcurrent pinned to 1 for Phase 1's sequential queue).
+      this.userConfig.backlogScheduler = migrateBacklogScheduler({ ...this.userConfig.backlogScheduler, ...partial });
+      saveConfig(this.userConfig);
+      this.backlogEngine?.applyConfig(this.userConfig.backlogScheduler);
+      const updated = this.userConfig.backlogScheduler;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('backlog:scheduler:config-updated', updated);
+      }
+      return updated;
+    });
+
+    ipcMain.handle('backlog:templates:update', (_event, templates: BacklogTemplate[]) => {
+      this.userConfig.backlogTemplates = migrateBacklogTemplates(templates);
+      saveConfig(this.userConfig);
+      const updated = this.userConfig.backlogTemplates;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('backlog:templates-updated', updated);
       }
       return updated;
     });

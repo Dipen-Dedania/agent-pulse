@@ -21,11 +21,16 @@ const MIDNIGHT_SKEW_MS = 1_000; // fire the daily reset just after local midnigh
 
 export interface SchedulerDeps {
   usagePoller: UsagePoller;
+  // Backlog runs spend real messages and anchor windows by themselves, so an
+  // opener ping fired mid-run would be redundant spend. Optional so tests and
+  // callers without a backlog engine don't need to stub it.
+  shouldSkipOpener?: () => boolean;
 }
 
 export class Scheduler {
   private config: SchedulerConfig;
   private readonly usagePoller: UsagePoller;
+  private readonly shouldSkipOpener: (() => boolean) | undefined;
   private status: SchedulerStatus;
 
   private timer: NodeJS.Timeout | null = null;
@@ -38,6 +43,7 @@ export class Scheduler {
   constructor(config: SchedulerConfig, deps: SchedulerDeps) {
     this.config = config;
     this.usagePoller = deps.usagePoller;
+    this.shouldSkipOpener = deps.shouldSkipOpener;
     this.status = {
       mode: config.mode,
       nextFireAt: null,
@@ -146,6 +152,19 @@ export class Scheduler {
   /** Fire the ping for an event, record the result, then reschedule. */
   private async runEvent(kind: NextEvent['kind'], manual: boolean): Promise<SchedulerLastRun> {
     const at = Date.now();
+
+    // A backlog card is executing right now — it's already spending messages
+    // in (and anchoring) the window, so a scheduled opener adds nothing.
+    // Manual test pings still go through so the user can verify the pipeline.
+    if (!manual && kind === 'opener' && this.shouldSkipOpener?.()) {
+      logger.info('[Scheduler] opener skipped: backlog window active');
+      const lastRun: SchedulerLastRun = { at, kind, ok: true, reason: 'skipped: backlog run in progress' };
+      this.status = { ...this.status, lastRun };
+      this.broadcast();
+      if (!this.stopped) void this.reschedule();
+      return lastRun;
+    }
+
     logger.info(`[Scheduler] firing ${kind}${manual ? ' (manual)' : ''}`);
     const result = await fireOpener();
 

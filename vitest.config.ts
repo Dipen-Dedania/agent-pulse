@@ -6,7 +6,11 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
-    exclude: ['dist/**', 'node_modules/**'],
+    // Nested patterns keep vitest out of compiled output in agent worktrees
+    // (.claude/worktrees/*/dist) and the github-pages subpackage's own
+    // node_modules — both contain files that match the test glob but can't
+    // run under this config.
+    exclude: ['**/dist/**', '**/node_modules/**', '.claude/**', 'github-pages/**'],
     // 5s (vitest default) is tight for the installer tests that do real
     // filesystem work in a per-test temp directory. Windows CI runners
     // occasionally hit the limit even though dev boxes finish in ~1s.

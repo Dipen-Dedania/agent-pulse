@@ -3,6 +3,7 @@ import { LOGO_URL } from '../data/tools';
 import { REPO_URL, useLatestRelease } from '../hooks/useLatestRelease';
 
 const NAV_LINKS = [
+  { label: 'Demo', href: '#demo' },
   { label: 'Features', href: '#features' },
   { label: 'How it works', href: '#how-it-works' },
   { label: 'Privacy', href: '#privacy' },

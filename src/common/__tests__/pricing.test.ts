@@ -5,6 +5,7 @@ import {
   formatUsd,
   applyLitellmPricing,
   buildRatesFromLitellm,
+  buildFallbackRates,
   installRates,
   resetRates,
   getPricingMeta,
@@ -15,6 +16,7 @@ import {
 
 describe('rateForModel', () => {
   it('matches Claude families across versions', () => {
+    expect(rateForModel('claude-fable-5')?.label).toBe('Claude Fable');
     expect(rateForModel('claude-opus-4-8')?.label).toBe('Claude Opus');
     expect(rateForModel('claude-opus-4-7-thinking')?.label).toBe('Claude Opus');
     expect(rateForModel('claude-sonnet-4-6')?.label).toBe('Claude Sonnet');
@@ -54,6 +56,17 @@ describe('estimateCost', () => {
     });
     expect(priced).toBe(true);
     expect(costUsd).toBeCloseTo(5 + 25 + 6.25 + 0.5, 6);
+  });
+
+  it('prices Fable 5 at $10/$50 with the Anthropic cache split', () => {
+    const { costUsd, priced } = estimateCost('claude-fable-5', {
+      tokensIn: 1_000_000,
+      tokensOut: 1_000_000,
+      cacheWrite: 1_000_000,
+      cacheRead: 1_000_000,
+    });
+    expect(priced).toBe(true);
+    expect(costUsd).toBeCloseTo(10 + 50 + 12.5 + 1.0, 6);
   });
 
   it('prices legacy Opus (3/4/4.1) at the old $15/$75', () => {
@@ -149,9 +162,128 @@ describe('applyLitellmPricing', () => {
   });
 });
 
+describe('buildFallbackRates', () => {
+  const feed = {
+    // Anthropic chat model with full cache pricing — the auto-add case.
+    'claude-next-9': {
+      litellm_provider: 'anthropic',
+      mode: 'chat',
+      input_cost_per_token: 10e-6,
+      output_cost_per_token: 50e-6,
+      cache_creation_input_token_cost: 12.5e-6,
+      cache_read_input_token_cost: 1e-6,
+    },
+    // Gemini id carries a provider prefix in the feed — must be stripped.
+    'gemini/gemini-9-flash': {
+      litellm_provider: 'gemini',
+      mode: 'chat',
+      input_cost_per_token: 0.3e-6,
+      output_cost_per_token: 2.5e-6,
+    },
+    // Non-chat mode → excluded.
+    'text-embedding-3-large': {
+      litellm_provider: 'openai',
+      mode: 'embedding',
+      input_cost_per_token: 0.13e-6,
+      output_cost_per_token: 0.13e-6,
+    },
+    // Provider we don't render → excluded.
+    'grok-5': {
+      litellm_provider: 'xai',
+      mode: 'chat',
+      input_cost_per_token: 3e-6,
+      output_cost_per_token: 15e-6,
+    },
+    // Missing output cost → excluded (can't price generation).
+    'claude-input-only': {
+      litellm_provider: 'anthropic',
+      mode: 'chat',
+      input_cost_per_token: 1e-6,
+    },
+    // LiteLLM's schema-doc dummy entry → excluded (no provider match).
+    sample_spec: { input_cost_per_token: 1, output_cost_per_token: 1 },
+  };
+
+  it('keeps chat models from rendered providers, per-1M, id as label', () => {
+    const map = buildFallbackRates(feed);
+    expect(Object.keys(map).sort()).toEqual(['claude-next-9', 'gemini-9-flash']);
+    expect(map['claude-next-9']).toEqual({
+      label: 'claude-next-9',
+      provider: 'anthropic',
+      input: 10,
+      output: 50,
+      cacheWrite: 12.5,
+      cacheRead: 1,
+    });
+  });
+
+  it('falls cache costs back to input when the feed omits them', () => {
+    const g = buildFallbackRates(feed)['gemini-9-flash'];
+    expect(g.provider).toBe('google');
+    expect(g.cacheWrite).toBeCloseTo(0.3, 9);
+    expect(g.cacheRead).toBeCloseTo(0.3, 9);
+  });
+});
+
+describe('rateForModel fallback', () => {
+  afterEach(() => resetRates());
+
+  it('prices an unknown model via the installed fallback map', () => {
+    expect(rateForModel('claude-next-9')).toBeNull(); // bundled: no fallback
+    installRates(
+      buildRatesFromLitellm({}),
+      { source: 'litellm', lastUpdated: '2026-07-03', fetchedAt: 1 },
+      {
+        'claude-next-9': {
+          label: 'claude-next-9', provider: 'anthropic',
+          input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1,
+        },
+      },
+    );
+    expect(rateForModel('claude-next-9')?.label).toBe('claude-next-9');
+    expect(estimateCost('claude-next-9', { tokensIn: 1_000_000 })).toEqual({
+      costUsd: 10,
+      priced: true,
+    });
+    // Still null for models in neither the table nor the fallback.
+    expect(rateForModel('some-random-model')).toBeNull();
+  });
+
+  it('curated rows win over a colliding fallback entry', () => {
+    installRates(
+      buildRatesFromLitellm({}),
+      { source: 'litellm', lastUpdated: '2026-07-03', fetchedAt: 1 },
+      {
+        'claude-fable-5': {
+          label: 'claude-fable-5', provider: 'anthropic',
+          input: 999, output: 999, cacheWrite: 999, cacheRead: 999,
+        },
+      },
+    );
+    expect(rateForModel('claude-fable-5')?.label).toBe('Claude Fable');
+    expect(rateForModel('claude-fable-5')?.input).toBe(10);
+  });
+
+  it('resetRates clears the fallback map', () => {
+    installRates(
+      buildRatesFromLitellm({}),
+      { source: 'litellm', lastUpdated: '2026-07-03', fetchedAt: 1 },
+      {
+        'claude-next-9': {
+          label: 'claude-next-9', provider: 'anthropic',
+          input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1,
+        },
+      },
+    );
+    resetRates();
+    expect(rateForModel('claude-next-9')).toBeNull();
+  });
+});
+
 describe('referencedModelIds', () => {
   it('lists sourced ids without duplicates and omits pinned (legacy) rows', () => {
     const ids = referencedModelIds();
+    expect(ids).toContain('claude-fable-5');
     expect(ids).toContain('claude-opus-4-5');
     expect(ids).toContain('gpt-5-codex');
     expect(ids).toContain('gemini-2.5-pro');

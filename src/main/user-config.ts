@@ -3,7 +3,9 @@ import path from 'path';
 import os from 'os';
 import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold } from '../common/types';
 import { GuardrailConfig } from '../common/guardrails';
+import { BacklogSchedulerConfig, BacklogSlot, BacklogTemplate } from '../common/backlog-types';
 import { SecretProtectionConfig, SecretRule } from '../common/secretProtection';
+import { parseHHmm } from './scheduler/timing';
 import { logger } from '../common/logger';
 
 // Cap warning fires when REMAINING credit ≤ threshold (i.e. you're about
@@ -118,6 +120,11 @@ export interface UserConfig {
   analytics: AnalyticsConfig;
   updates: UpdaterConfig;
   scheduler: SchedulerConfig;
+  // Backlog Scheduler — time RANGES during which queued backlog cards may
+  // auto-execute (vs the Cowork scheduler's fire instants). See backlog.md.
+  backlogScheduler: BacklogSchedulerConfig;
+  // Quick-task templates for the backlog board's card creator.
+  backlogTemplates: BacklogTemplate[];
   statusLine: StatusLineConfig;
 }
 
@@ -218,6 +225,44 @@ const DEFAULTS: UserConfig = {
     tokenNudge: { enabled: true, leadMs: 2 * 60 * 1000 },
     maxOpenersPerDay: 6,
   },
+  backlogScheduler: {
+    enabled: false,
+    slots: [],
+    requireIdle: true,
+    maxConcurrent: 1, // Phase 1: sequential only; migration clamps this
+  },
+  // Seed templates from backlog.md. Phase 1 is research-only: every template
+  // outputs a report/plan — nothing touches the repo.
+  backlogTemplates: [
+    {
+      id: 'tpl-readme',
+      name: 'Update README',
+      title: 'Update README',
+      description:
+        'Review the codebase and bring README.md up to date. Output the full proposed README as a markdown report — do not modify any files.',
+    },
+    {
+      id: 'tpl-roadmap-tasks',
+      name: 'Roadmap → task list',
+      title: 'Turn the roadmap into a task list',
+      description:
+        'Review ROADMAP.md. Write a detailed development task list for building the entire thing. Include tests that will prove the built work actually works. Output the task list as a markdown report.',
+    },
+    {
+      id: 'tpl-10x-roadmap',
+      name: '10x roadmap',
+      title: 'Draft a 10x roadmap',
+      description:
+        'Review our current codebase. What new features or capabilities would make this 10x more valuable? Create a detailed roadmap for building it out, including clearly defined acceptance criteria for each feature.',
+    },
+    {
+      id: 'tpl-smoke-test',
+      name: 'Smoke-test hunt',
+      title: 'Smoke-test the app and report bugs',
+      description:
+        'Review the features we have developed so far and smoke-test them by reading the code paths end to end. Find 5 likely bugs that need to be fixed and generate a report about them, with file references and suggested fixes.',
+    },
+  ],
   statusLine: {
     version: 1,
     separator: '  ·  ',
@@ -322,6 +367,63 @@ function migrateScheduler(raw: unknown): SchedulerConfig {
       : d.maxOpenersPerDay;
 
   return { mode, fixed, adaptive, tokenNudge, maxOpenersPerDay };
+}
+
+// Validate a persisted Backlog Scheduler block. Slots are filtered to rows with
+// two parseable 'HH:mm' times; days clamped to 0–6 integers. `maxConcurrent`
+// is forced to 1 in Phase 1 regardless of the persisted value — the engine is
+// sequential-only and a hand-edited config must not fan out claude processes.
+// Exported: the backlog:scheduler:update-config IPC handler revalidates
+// renderer partials through it before persisting.
+export function migrateBacklogScheduler(raw: unknown): BacklogSchedulerConfig {
+  const d = DEFAULTS.backlogScheduler;
+  if (!raw || typeof raw !== 'object') {
+    return { ...d, slots: [] };
+  }
+  const s = raw as any;
+  // parseHHmm (not a loose regex) so an out-of-range time like '25:00' is
+  // dropped here instead of persisting as a slot that silently never fires.
+  const slots: BacklogSlot[] = Array.isArray(s.slots)
+    ? s.slots
+        .filter((row: any): row is BacklogSlot =>
+          !!row && typeof row.start === 'string' && parseHHmm(row.start) !== null &&
+          typeof row.end === 'string' && parseHHmm(row.end) !== null)
+        .map((row: any) => ({
+          start: row.start.trim(),
+          end: row.end.trim(),
+          days: Array.isArray(row.days)
+            ? row.days.filter((n: unknown) => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 6)
+            : [0, 1, 2, 3, 4, 5, 6],
+          enabled: typeof row.enabled === 'boolean' ? row.enabled : true,
+        }))
+    : [];
+  return {
+    enabled: typeof s.enabled === 'boolean' ? s.enabled : d.enabled,
+    slots,
+    requireIdle: typeof s.requireIdle === 'boolean' ? s.requireIdle : d.requireIdle,
+    maxConcurrent: 1,
+  };
+}
+
+// Validate the persisted quick-task template list. Missing/garbage → reseed
+// with the shipped defaults; individual rows need non-empty id/name/title.
+// Exported: the backlog:templates:update IPC handler reuses it on writes.
+export function migrateBacklogTemplates(raw: unknown): BacklogTemplate[] {
+  if (!Array.isArray(raw)) {
+    return DEFAULTS.backlogTemplates.map((t) => ({ ...t }));
+  }
+  return raw
+    .filter((row: any): row is BacklogTemplate =>
+      !!row &&
+      typeof row.id === 'string' && row.id.length > 0 &&
+      typeof row.name === 'string' && row.name.length > 0 &&
+      typeof row.title === 'string' && row.title.length > 0)
+    .map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      title: row.title,
+      description: typeof row.description === 'string' ? row.description : '',
+    }));
 }
 
 // Validate a persisted Secret Protection block. Falls back to defaults for any
@@ -627,6 +729,8 @@ export function loadConfig(): UserConfig {
           lastCheckedAt: typeof updates.lastCheckedAt === 'number' ? updates.lastCheckedAt : null,
         },
         scheduler: migrateScheduler(parsed.scheduler),
+        backlogScheduler: migrateBacklogScheduler(parsed.backlogScheduler),
+        backlogTemplates: migrateBacklogTemplates(parsed.backlogTemplates),
         statusLine: migrateStatusLine(parsed.statusLine),
       };
     }
@@ -671,6 +775,8 @@ export function loadConfig(): UserConfig {
     analytics: { ...DEFAULTS.analytics },
     updates: { ...DEFAULTS.updates },
     scheduler: migrateScheduler(undefined),
+    backlogScheduler: migrateBacklogScheduler(undefined),
+    backlogTemplates: migrateBacklogTemplates(undefined),
     statusLine: migrateStatusLine(undefined),
   };
 }

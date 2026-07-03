@@ -56,12 +56,12 @@ const MASCOT_WIDTH_ANTIGRAVITY: Record<BubbleSize, number> = { small: 40, medium
 // around the mascot and the sign/zzz/alert props still never clip.
 const MASCOT_WIDTH_KIRO: Record<BubbleSize, number> = { small: 54, medium: 66, large: 82 };
 
-// Rendered width of the Copilot Mico mascot per bubble size — same widths as
-// Clawd (Mico's viewBox is square like Clawd's, so at equal widths the two
-// mascots share an identical footprint). The Copilot bubble window grows to
-// match (see MASCOT_DIMENSIONS_COPILOT in bubble-manager.ts), so there's no dead
-// space around the mascot and the sign/zzz/alert props still never clip.
-const MASCOT_WIDTH_COPILOT: Record<BubbleSize, number> = { small: 54, medium: 66, large: 82 };
+// Rendered width of the Copilot Mico mascot per bubble size — Clawd's widths
+// scaled to 120% (20% larger, on request; Mico's viewBox is square like
+// Clawd's). The Copilot bubble window grows to match (see
+// MASCOT_DIMENSIONS_COPILOT in bubble-manager.ts), so there's no dead space
+// around the mascot and the sign/zzz/alert props still never clip.
+const MASCOT_WIDTH_COPILOT: Record<BubbleSize, number> = { small: 65, medium: 79, large: 98 };
 
 
 interface BubbleProps {

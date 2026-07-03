@@ -67,15 +67,15 @@ const MASCOT_DIMENSIONS_KIRO: Record<BubbleSize, { width: number; height: number
 };
 
 // Footprint for the VS Code Copilot bubble when the Mico blob mascot is on. Mico
-// uses a square viewBox at the same rendered widths as Clawd (see
-// MASCOT_WIDTH_COPILOT in Bubble.tsx), so it shares Clawd's exact footprint —
-// width MATCHES the orb window so every bubble keeps the vertical centerline,
-// height adds the usage-bar strip + bottom breathing room. Only the Copilot
-// bubble uses these.
+// uses a square viewBox at Clawd's rendered widths scaled to 120% (see
+// MASCOT_WIDTH_COPILOT in Bubble.tsx), so this is Clawd's footprint grown by the
+// same 20% — width hugs the enlarged mascot (wider than the orb window, so the
+// Copilot bubble sits slightly off the shared centerline), height adds the
+// usage-bar strip + bottom breathing room. Only the Copilot bubble uses these.
 const MASCOT_DIMENSIONS_COPILOT: Record<BubbleSize, { width: number; height: number }> = {
-  small:  { width: 58, height: 81 },
-  medium: { width: 70, height: 94 },
-  large:  { width: 86, height: 112 },
+  small:  { width: 69, height: 92 },
+  medium: { width: 83, height: 107 },
+  large:  { width: 102, height: 128 },
 };
 
 // ─── macOS / Linux ────────────────────────────────────────────────────────────

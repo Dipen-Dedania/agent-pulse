@@ -17,11 +17,13 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
   beforeEach(() => {
     db = openBacklogDb(':memory:')!;
     store = new BacklogStore(db);
-    projectId = store.addProject('E:\\repos\\demo').id;
+    // Forward slashes: path.basename treats them as separators on every
+    // platform, while backslashes only split on Windows.
+    projectId = store.addProject('E:/repos/demo').id;
   });
 
   it('addProject is idempotent on path and derives name from basename', () => {
-    const again = store.addProject('E:\\repos\\demo');
+    const again = store.addProject('E:/repos/demo');
     expect(again.id).toBe(projectId);
     expect(again.name).toBe('demo');
     expect(store.listProjects()).toHaveLength(1);

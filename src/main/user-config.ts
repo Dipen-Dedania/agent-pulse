@@ -105,6 +105,17 @@ export interface UpdaterConfig {
   lastCheckedAt: number | null;   // unix ms of last completed check (success or no-update)
 }
 
+// First-run tour + setup checklist. hasSeenTour flips on finish OR skip — the
+// tour must never re-trigger for returning users (it stays re-runnable from
+// the splash). firstEventAt is stamped once, on the first hook event this
+// install ever receives, and drives the checklist's "first live status" item.
+export interface TourConfig {
+  hasSeenTour: boolean;
+  completedAt: number | null;    // null when skipped rather than finished
+  firstEventAt: number | null;
+  setupDismissed: boolean;       // user closed the Hooks-tab setup checklist
+}
+
 export interface UserConfig {
   enabledBubbles: Partial<Record<ToolId, boolean>>;
   bubble: BubbleConfig;
@@ -119,6 +130,7 @@ export interface UserConfig {
   autoLaunch: boolean;
   analytics: AnalyticsConfig;
   updates: UpdaterConfig;
+  tour: TourConfig;
   scheduler: SchedulerConfig;
   // Backlog Scheduler — time RANGES during which queued backlog cards may
   // auto-execute (vs the Cowork scheduler's fire instants). See backlog.md.
@@ -214,6 +226,12 @@ const DEFAULTS: UserConfig = {
   updates: {
     autoCheck: true,
     lastCheckedAt: null,
+  },
+  tour: {
+    hasSeenTour: false,
+    completedAt: null,
+    firstEventAt: null,
+    setupDismissed: false,
   },
   scheduler: {
     mode: 'off',
@@ -524,6 +542,21 @@ function migrateBubble(raw: unknown): BubbleConfig {
   };
 }
 
+// Validate a persisted tour block. Timestamps must be positive finite numbers
+// or null — a hand-edited value can't strand the checklist in a weird state.
+function migrateTour(raw: unknown): TourConfig {
+  const d = DEFAULTS.tour;
+  const t = (raw && typeof raw === 'object' ? raw : {}) as Partial<TourConfig>;
+  const ts = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : null;
+  return {
+    hasSeenTour: typeof t.hasSeenTour === 'boolean' ? t.hasSeenTour : d.hasSeenTour,
+    completedAt: ts(t.completedAt),
+    firstEventAt: ts(t.firstEventAt),
+    setupDismissed: typeof t.setupDismissed === 'boolean' ? t.setupDismissed : d.setupDismissed,
+  };
+}
+
 // Smallest allowed escalation delay. Below this the feature would fire almost
 // instantly on every `waiting` flip, defeating the "give the user a moment"
 // intent and risking webhook spam.
@@ -728,6 +761,7 @@ export function loadConfig(): UserConfig {
           autoCheck: typeof updates.autoCheck === 'boolean' ? updates.autoCheck : DEFAULTS.updates.autoCheck,
           lastCheckedAt: typeof updates.lastCheckedAt === 'number' ? updates.lastCheckedAt : null,
         },
+        tour: migrateTour(parsed.tour),
         scheduler: migrateScheduler(parsed.scheduler),
         backlogScheduler: migrateBacklogScheduler(parsed.backlogScheduler),
         backlogTemplates: migrateBacklogTemplates(parsed.backlogTemplates),
@@ -774,6 +808,7 @@ export function loadConfig(): UserConfig {
     secretProtection: migrateSecretProtection(undefined),
     analytics: { ...DEFAULTS.analytics },
     updates: { ...DEFAULTS.updates },
+    tour: migrateTour(undefined),
     scheduler: migrateScheduler(undefined),
     backlogScheduler: migrateBacklogScheduler(undefined),
     backlogTemplates: migrateBacklogTemplates(undefined),

@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
-import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, CopilotQuotaWindow, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload } from '../../../common/types';
+import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, CopilotQuotaWindow, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload, TourDemoState } from '../../../common/types';
 import { GuardrailEvent } from '../../../common/guardrails';
 import { SecretAccessEvent } from '../../../common/secretProtection';
 import { TOOL_META } from '../../../common/toolMeta';
@@ -66,6 +66,11 @@ const MASCOT_WIDTH_COPILOT: Record<BubbleSize, number> = { small: 65, medium: 79
 
 interface BubbleProps {
   toolId: ToolId;
+  // First-run tour demo: the bubble ignores real hook/usage data and instead
+  // renders scripted states pushed by the coach card via `tour:demo-state`.
+  // Forced to large size + Clawd mascot; drag/click-to-focus are disabled so
+  // the demo can't move the real stack or foreground a tool mid-tour.
+  demo?: boolean;
 }
 
 function useDarkMode() {
@@ -470,10 +475,39 @@ const USAGE_REFRESH_CHANNELS: Partial<Record<ToolId, string>> = {
   'antigravity-cli': 'antigravity-usage:refresh-now',
 };
 
-export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
-  const status = useStatusStore((state) => state.statuses[toolId]);
+export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
+  const storeStatus = useStatusStore((state) => state.statuses[toolId]);
   const updateStatus = useStatusStore((state) => state.updateStatus);
+
+  // Demo pose, driven step-by-step by the tour's coach card.
+  const [demoState, setDemoState] = useState<AgentState>('working');
+  const [demoEscalated, setDemoEscalated] = useState(false);
+  useEffect(() => {
+    if (!demo) return;
+    const handler = (_e: unknown, p: TourDemoState) => {
+      setDemoState(p.state);
+      setDemoEscalated(!!p.escalated);
+    };
+    window.electron.on('tour:demo-state', handler);
+    return () => window.electron.off('tour:demo-state', handler);
+  }, [demo]);
+
+  // Synthetic-but-plausible status so the hover tooltip tells a real story
+  // ("Working · 1 agent · Just now") instead of "Never".
+  const status: ToolStatus | undefined = demo
+    ? { toolId, state: demoState, lastUpdated: Date.now(), activeAgents: 1, currentTask: 'Refactoring the auth module' }
+    : storeStatus;
   const state = status?.state || 'idle';
+
+  // Healthy-looking fake quota for the demo's usage bars + tooltip lines.
+  const demoUsage = useMemo<UsageStatus>(() => ({
+    state: 'ok',
+    snapshot: {
+      fiveHour: { utilization: 28, resetsAt: Date.now() + 2 * 60 * 60 * 1000 },
+      sevenDay: { utilization: 55, resetsAt: Date.now() + 3 * 24 * 60 * 60 * 1000 },
+    },
+    lastUpdated: Date.now(),
+  }), []);
   const isDark = useDarkMode();
   const meta = TOOL_META[toolId];
   const [hovered, setHovered] = useState(false);
@@ -521,6 +555,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   // edits from Settings. Every bubble listens so size/sound/fill changes apply
   // without recreating the window.
   useEffect(() => {
+    if (demo) return; // demo renders fixed large + mascot; user prefs don't apply
     const applyBubble = (b?: Partial<BubbleConfig>) => {
       if (!b) return;
       if (b.size) setBubbleSize(b.size);
@@ -545,13 +580,13 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     const handler = (_event: unknown, cfg: Partial<BubbleConfig>) => applyBubble(cfg);
     window.electron.on('bubble:config-updated', handler);
     return () => window.electron.off('bubble:config-updated', handler);
-  }, [toolId]);
+  }, [toolId, demo]);
 
   // Subscribe to usage updates. Only meaningful for the Claude bubble, but
   // we listen in every renderer so the IPC channel doesn't depend on bubble
   // identity. Unused snapshots are cheap.
   useEffect(() => {
-    if (toolId !== 'claude-code') return;
+    if (demo || toolId !== 'claude-code') return;
     window.electron
       .invoke('usage:get-current')
       .then((s: UsageStatus) => setUsageStatus(s))
@@ -579,7 +614,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       window.electron.off('usage:updated', handler);
       window.electron.off('usage:config-updated', configHandler);
     };
-  }, [toolId]);
+  }, [toolId, demo]);
 
   // Codex usage — only meaningful for the openai-codex bubble.
   useEffect(() => {
@@ -651,7 +686,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
 
   // Scheduler window-state glance — only meaningful for the Claude bubble.
   useEffect(() => {
-    if (toolId !== 'claude-code') return;
+    if (demo || toolId !== 'claude-code') return;
     window.electron
       .invoke('scheduler:get-current')
       .then((s: SchedulerStatus) => setSchedulerStatus(s))
@@ -737,6 +772,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   }, []);
 
   useEffect(() => {
+    if (demo) return; // scripted states only — real hook events must not leak in
     logger.debug(`[Bubble:${toolId}] Registering status-update listener`);
     const handler = (_event: any, incoming: ToolStatus) => {
       // console.log(`[Bubble:${toolId}] status-update received:`, incoming);
@@ -756,13 +792,14 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       logger.debug(`[Bubble:${toolId}] Removing status-update listener`);
       window.electron.off('status-update', handler);
     };
-  }, [toolId, updateStatus]);
+  }, [toolId, updateStatus, demo]);
 
   // Attention escalation — the main-process engine flips this on when the tool
   // has sat in "waiting" past the user's threshold, and off when it's
   // acknowledged or the agent moves on. Mirrors the guardrail listener below.
   const [escalated, setEscalated] = useState(false);
   useEffect(() => {
+    if (demo) return; // escalation is scripted via tour:demo-state in demo mode
     const onEscalate = (_e: unknown, { toolId: id }: { toolId: ToolId }) => {
       if (id === toolId) setEscalated(true);
     };
@@ -775,7 +812,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       window.electron.off('attention:escalate', onEscalate);
       window.electron.off('attention:clear', onClear);
     };
-  }, [toolId]);
+  }, [toolId, demo]);
 
   // Belt-and-suspenders: drop the local escalation the moment we leave waiting,
   // so the badge never lingers if the clear broadcast is missed.
@@ -788,6 +825,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   // independently and filters by toolId.
   const [guardrailSignal, setGuardrailSignal] = useState<GuardrailEvent | null>(null);
   useEffect(() => {
+    if (demo) return; // real guardrail events must not badge the demo bubble
     const handler = (_e: unknown, evt: GuardrailEvent) => {
       if (evt.toolId !== toolId) return;
       setGuardrailSignal(evt);
@@ -798,7 +836,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     };
     window.electron.on('guardrail:event', handler);
     return () => window.electron.off('guardrail:event', handler);
-  }, [toolId]);
+  }, [toolId, demo]);
 
   const dismissGuardrailSignal = useCallback(() => {
     setGuardrailSignal(null);
@@ -809,6 +847,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
   // guardrail ring, but for a protected-file read. Filtered by toolId.
   const [secretSignal, setSecretSignal] = useState<SecretAccessEvent | null>(null);
   useEffect(() => {
+    if (demo) return; // real secret-access events must not badge the demo bubble
     const handler = (_e: unknown, evt: SecretAccessEvent) => {
       if (evt.toolId !== toolId) return;
       setSecretSignal(evt);
@@ -819,7 +858,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     };
     window.electron.on('secret-access:event', handler);
     return () => window.electron.off('secret-access:event', handler);
-  }, [toolId]);
+  }, [toolId, demo]);
 
   const dismissSecretSignal = useCallback(() => {
     setSecretSignal(null);
@@ -900,27 +939,31 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
 
   const { fill, glow, ring } = colorsFor(state, isDark);
   const borderColor = isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.12)';
-  const dims = ORB_DIMENSIONS[bubbleSize] ?? ORB_DIMENSIONS.medium;
+  // Demo always renders large — the tour window is sized to the large mascot
+  // footprint (see TourManager.DEMO_W/H) and showcase clarity beats fidelity
+  // to the user's not-yet-chosen size preference.
+  const renderSize: BubbleSize = demo ? 'large' : bubbleSize;
+  const dims = ORB_DIMENSIONS[renderSize] ?? ORB_DIMENSIONS.medium;
 
   // Mascot mode: the Claude bubble swaps its glass orb for the animated Clawd,
   // and the Codex bubble for the animated frog — each pose conveys the state, so
   // we drop the disc background, the per-state orb pulse, and the orbiting state
-  // rings, keeping only the corner badges.
-  const claudeMascotMode = toolId === 'claude-code' && mascotEnabled;
+  // rings, keeping only the corner badges. The tour demo always stars Clawd.
+  const claudeMascotMode = toolId === 'claude-code' && (mascotEnabled || demo);
   const codexMascotMode = toolId === 'openai-codex' && mascotCodexEnabled;
   const antigravityMascotMode = toolId === 'antigravity-cli' && mascotAntigravityEnabled;
   const kiroMascotMode = toolId === 'kiro' && mascotKiroEnabled;
   const copilotMascotMode = toolId === 'vscode-copilot' && mascotCopilotEnabled;
   const mascotMode = claudeMascotMode || codexMascotMode || antigravityMascotMode || kiroMascotMode || copilotMascotMode;
   const mascotWidth = codexMascotMode
-    ? (MASCOT_WIDTH_CODEX[bubbleSize] ?? MASCOT_WIDTH_CODEX.medium)
+    ? (MASCOT_WIDTH_CODEX[renderSize] ?? MASCOT_WIDTH_CODEX.medium)
     : antigravityMascotMode
-      ? (MASCOT_WIDTH_ANTIGRAVITY[bubbleSize] ?? MASCOT_WIDTH_ANTIGRAVITY.medium)
+      ? (MASCOT_WIDTH_ANTIGRAVITY[renderSize] ?? MASCOT_WIDTH_ANTIGRAVITY.medium)
       : kiroMascotMode
-        ? (MASCOT_WIDTH_KIRO[bubbleSize] ?? MASCOT_WIDTH_KIRO.medium)
+        ? (MASCOT_WIDTH_KIRO[renderSize] ?? MASCOT_WIDTH_KIRO.medium)
         : copilotMascotMode
-          ? (MASCOT_WIDTH_COPILOT[bubbleSize] ?? MASCOT_WIDTH_COPILOT.medium)
-          : (MASCOT_WIDTH[bubbleSize] ?? MASCOT_WIDTH.medium);
+          ? (MASCOT_WIDTH_COPILOT[renderSize] ?? MASCOT_WIDTH_COPILOT.medium)
+          : (MASCOT_WIDTH[renderSize] ?? MASCOT_WIDTH.medium);
 
   const animations: Record<AgentState, any> = {
     idle: {
@@ -968,7 +1011,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     ],
     transition: { duration: 0.8, repeat: Infinity, ease: 'easeInOut' },
   };
-  const isEscalated = escalated && state === 'waiting';
+  const isEscalated = (demo ? demoEscalated : escalated) && state === 'waiting';
   const activeAnimation = isEscalated ? escalatedAnimation : animations[state];
 
   const stateLabel: Record<AgentState, string> = {
@@ -1002,7 +1045,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
 
     const lines: string[] = [];
     if (toolId === 'claude-code') {
-      lines.push(...claudeTooltipLines(usageStatus, showSevenDay));
+      lines.push(...claudeTooltipLines(demo ? demoUsage : usageStatus, showSevenDay));
     } else if (toolId === 'openai-codex') {
       lines.push(...codexTooltipLines(codexUsageStatus));
     } else if (toolId === 'cursor') {
@@ -1014,8 +1057,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
     }
     if (status?.currentTask) lines.unshift(status.currentTask);
 
-    return { title: meta.label, subtitle: subtitle.join(' · '), lines, accent: glow };
-  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, cursorUsageStatus, copilotUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow, tooltipClock]);
+    return { title: demo ? `${meta.label} · demo` : meta.label, subtitle: subtitle.join(' · '), lines, accent: glow };
+  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, cursorUsageStatus, copilotUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow, tooltipClock, demo, demoUsage]);
 
   // Push fresh content to the overlay while hovering (so usage updates show
   // live); the show/position/visibility is handled by the main process.
@@ -1056,16 +1099,20 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
       // Whole-bubble opacity (orb/mascot, usage bars, badges) — a renderer CSS
       // opacity rather than win.setOpacity(), which is a no-op on transparent
       // windows on Windows.
-      style={{ opacity: bubbleOpacity }}
+      style={{ opacity: demo ? 1 : bubbleOpacity }}
     >
       <motion.div
-        onMouseDown={onMouseDown}
+        onMouseDown={demo ? undefined : onMouseDown}
+        // Demo pops in with a spring so the tour's opening beat lands.
+        initial={demo ? { opacity: 0, scale: 0.4 } : false}
         // In mascot mode we don't animate the wrapper (the SVG carries the
         // motion), but we must still drive `animate` to a clean reset rather
         // than `undefined` — otherwise Framer Motion leaves behind the inline
         // opacity/scale it wrote while the bubble briefly rendered as an orb
         // before the mascot config loaded, leaving the mascot stuck at ~0.5.
-        animate={mascotMode ? { opacity: 1, scale: 1, x: 0, y: 0 } : activeAnimation}
+        animate={mascotMode
+          ? { opacity: 1, scale: 1, x: 0, y: 0, ...(demo ? { transition: { type: 'spring', stiffness: 260, damping: 18 } } : {}) }
+          : activeAnimation}
         className={`relative flex items-center justify-center cursor-pointer select-none shrink-0 ${mascotMode ? '' : 'rounded-full'}`}
         style={{
           width: mascotMode ? mascotWidth : dims.orb,
@@ -1390,7 +1437,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
             Top-LEFT: the right corner belongs to the status badges above.
             stopPropagation on mousedown too, or the orb's drag/focus handler
             would treat the click as a bubble click. */}
-        {usageRefreshChannel && (hovered || refreshingUsage) && (
+        {!demo && usageRefreshChannel && (hovered || refreshingUsage) && (
           <button
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); refreshUsageNow(); }}
@@ -1417,7 +1464,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId }) => {
           Sits below the orb; window height was sized to fit (see BUBBLE_HEIGHT). */}
       {toolId === 'claude-code' && (
         <UsageBars
-          status={usageStatus}
+          status={demo ? demoUsage : usageStatus}
           isDark={isDark}
           showSevenDay={showSevenDay}
           bar={dims.bar}

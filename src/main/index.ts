@@ -1,6 +1,7 @@
 import { app, ipcMain, shell, BrowserWindow, Menu, dialog, screen } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
 import { TooltipManager } from './windows/tooltip-window';
+import { TourManager } from './windows/tour-manager';
 import { SettingsWindow } from './windows/settings-window';
 import { TrayManager } from './windows/tray';
 import { ENABLE_APP_MENU } from './feature-flags';
@@ -15,7 +16,7 @@ import { initBacklogDb, closeBacklogDb } from './backlog/db';
 import { BacklogStore } from './backlog/store';
 import { BacklogEngine } from './backlog/engine';
 import { registerBacklogIpc } from './backlog/ipc';
-import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, DisplayInfo } from '../common/types';
+import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, DisplayInfo, TourState } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
 import { isPatternSafe } from './guardrails/engine';
@@ -52,6 +53,7 @@ if (!gotSingleInstanceLock) {
 class AgentPulseApp {
   private bubbleManager: BubbleManager;
   private tooltipManager: TooltipManager;
+  private tourManager: TourManager;
   private settingsWindow: SettingsWindow;
   private trayManager: TrayManager;
   private stateManager: StatusStateManager;
@@ -123,6 +125,24 @@ class AgentPulseApp {
       }
     };
     this.tooltipManager = new TooltipManager();
+    this.tourManager = new TourManager();
+    // Tour ends (finished or skipped) → never auto-offer it again, land the
+    // user on Settings where the setup checklist takes over the narrative.
+    this.tourManager.onFinished = (completed) => {
+      this.userConfig.tour = {
+        ...this.userConfig.tour,
+        hasSeenTour: true,
+        completedAt: completed ? Date.now() : this.userConfig.tour.completedAt,
+      };
+      saveConfig(this.userConfig);
+      this.broadcastTourState();
+      this.settingsWindow.show();
+      // The splash listens for this and navigates itself to the Settings view
+      // (Hooks tab), where the setup checklist is waiting.
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('tour:completed', { completed });
+      }
+    };
     this.settingsWindow = new SettingsWindow();
     this.trayManager = new TrayManager();
     this.detector = new ToolDetector();
@@ -199,6 +219,18 @@ class AgentPulseApp {
       this.refreshDeployedStatusLine();
       this.bubbleManager.init();
       this.tooltipManager.init();
+      this.tourManager.init();
+      // Stamp the install's very first hook event — the setup checklist's
+      // "first live status" item flips on this. One save, then unsubscribe.
+      if (!this.userConfig.tour.firstEventAt) {
+        const unsubscribe = this.stateManager.onEvent(() => {
+          if (this.userConfig.tour.firstEventAt) return;
+          this.userConfig.tour = { ...this.userConfig.tour, firstEventAt: Date.now() };
+          saveConfig(this.userConfig);
+          this.broadcastTourState();
+          unsubscribe();
+        });
+      }
       this.usagePoller.init();
       this.usagePoller.start();
       this.codexUsagePoller.init();
@@ -313,6 +345,7 @@ class AgentPulseApp {
       this.backlogEngine?.stop();
       closeBacklogDb();
       this.tooltipManager.destroy();
+      this.tourManager.destroy();
       this.timeline?.shutdown();
       this.updater.shutdown();
       this.trayManager.destroy();
@@ -732,6 +765,18 @@ class AgentPulseApp {
       return next;
     });
 
+    // ── Tour / setup checklist IPC ────────────────────────────────────────
+    // `tour:start`, `tour:demo-state`, `tour:card-measured`, and `tour:finish`
+    // are owned by TourManager.init(); only the persisted state lives here.
+    ipcMain.handle('tour:get-state', (): TourState => this.projectTourState());
+
+    ipcMain.handle('tour:set-setup-dismissed', (_event, dismissed: boolean) => {
+      this.userConfig.tour = { ...this.userConfig.tour, setupDismissed: !!dismissed };
+      saveConfig(this.userConfig);
+      this.broadcastTourState();
+      return this.projectTourState();
+    });
+
     // ── Auto-launch IPC ───────────────────────────────────────────────────
     ipcMain.handle('auto-launch:get', () => ({
       enabled: this.userConfig.autoLaunch,
@@ -749,6 +794,23 @@ class AgentPulseApp {
         packaged: app.isPackaged,
       };
     });
+  }
+
+  // Renderer-facing slice of the tour config (completedAt stays internal).
+  private projectTourState(): TourState {
+    const t = this.userConfig.tour;
+    return {
+      hasSeenTour: t.hasSeenTour,
+      firstEventAt: t.firstEventAt,
+      setupDismissed: t.setupDismissed,
+    };
+  }
+
+  private broadcastTourState() {
+    const state = this.projectTourState();
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('tour:state-updated', state);
+    }
   }
 
   // When the status line is installed (ours), push the current config to its

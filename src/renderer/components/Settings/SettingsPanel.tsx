@@ -3,6 +3,7 @@ import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageS
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
+import { SetupChecklist } from './SetupChecklist';
 import { UsageSection, UsageConfigUI } from './UsageSection';
 import { CodexUsageSection, CodexUsageConfigUI } from './CodexUsageSection';
 import { CursorUsageSection, CursorUsageConfigUI } from './CursorUsageSection';
@@ -709,6 +710,10 @@ export const SettingsPanel: React.FC = () => {
         </div>
       ) : (
         <>
+        <SetupChecklist
+          anyHookInstalled={Object.values(tools).some((t) => t.hookInstalled)}
+          anyBubbleEnabled={Object.values(tools).some((t) => t.enabled)}
+        />
         <GeneralSection />
         <div className='grid grid-cols-1 md:grid-cols-2 gap-5'>
           {(Object.keys(TOOL_META) as ToolId[]).map((toolId) => {

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Bubble } from './components/Bubble/Bubble';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { TooltipOverlay } from './components/Tooltip/TooltipOverlay';
-import { ToolId } from '../common/types';
+import { TourCard } from './components/Tour/TourCard';
+import { ToolId, TourState } from '../common/types';
 import { motion } from 'framer-motion';
 
 type Feature = {
@@ -95,22 +96,43 @@ const FeatureCard: React.FC<{ feature: Feature; index: number }> = ({ feature, i
   </motion.div>
 );
 
-const App: React.FC = () => {
-  const params = new URLSearchParams(window.location.search);
-  const toolId = (params.get('toolId') as ToolId) || null;
-  const view = params.get('view');
+// The splash/landing hero shown when the Settings window loads its bare URL.
+// Doubles as the welcome sheet: on first run the tour is the primary CTA, and
+// it stays re-runnable from here forever (Raycast's "Show Onboarding" pattern).
+const Landing: React.FC = () => {
+  const [tourState, setTourState] = useState<TourState | null>(null);
 
-  if (view === 'settings') {
-    return <SettingsPanel />;
-  }
+  useEffect(() => {
+    let cancelled = false;
+    window.electron
+      .invoke('tour:get-state')
+      .then((s: TourState) => { if (!cancelled) setTourState(s); })
+      .catch(() => { /* tour unavailable — render the plain splash */ });
+    const handler = (_e: unknown, s: TourState) => setTourState(s);
+    window.electron.on('tour:state-updated', handler);
+    return () => {
+      cancelled = true;
+      window.electron.off('tour:state-updated', handler);
+    };
+  }, []);
 
-  if (view === 'tooltip') {
-    return <TooltipOverlay />;
-  }
+  // Tour ended while we're on the splash — hand off to Settings (Hooks tab),
+  // where the setup checklist continues the story.
+  useEffect(() => {
+    const handler = () => { window.location.href = '?view=settings'; };
+    window.electron.on('tour:completed', handler);
+    return () => window.electron.off('tour:completed', handler);
+  }, []);
 
-  if (toolId) {
-    return <Bubble toolId={toolId} />;
-  }
+  const startTour = () => window.electron.send('tour:start');
+  // Until the state loads, assume returning user so the CTA never flashes
+  // from "Configure Tools" to the tour variant on a seasoned install.
+  const firstRun = tourState ? !tourState.hasSeenTour : false;
+
+  const primaryClass =
+    'px-8 py-4 bg-white text-slate-900 font-bold rounded-full hover:bg-blue-50 transition-all hover:scale-105 active:scale-95 shadow-xl shadow-white/10 cursor-pointer';
+  const secondaryClass =
+    'px-6 py-3 rounded-full text-sm font-semibold text-slate-300 border border-slate-600/60 hover:border-slate-400 hover:text-white transition-all hover:scale-105 active:scale-95 cursor-pointer';
 
   return (
     <div className='h-screen w-screen bg-slate-900 text-white flex items-center justify-center font-sans overflow-hidden relative py-5'>
@@ -147,12 +169,30 @@ const App: React.FC = () => {
         </div>
 
         <div className='flex flex-col sm:flex-row gap-4 justify-center items-center'>
-          <a
-            href='?view=settings'
-            className='px-8 py-4 bg-white text-slate-900 font-bold rounded-full hover:bg-blue-50 transition-all hover:scale-105 active:scale-95 shadow-xl shadow-white/10'
-          >
-            Configure Tools
-          </a>
+          {firstRun ? (
+            <>
+              <button onClick={startTour} className={primaryClass}>
+                Show me how it works
+              </button>
+              <a href='?view=settings' className={secondaryClass}>
+                Configure Tools
+              </a>
+            </>
+          ) : (
+            <>
+              <a href='?view=settings' className={primaryClass}>
+                Configure Tools
+              </a>
+              <button onClick={startTour} className={secondaryClass} title='Replay the welcome tour'>
+                <span className='flex items-center gap-2'>
+                  <svg viewBox='0 0 24 24' className='w-3.5 h-3.5' fill='currentColor'>
+                    <path d='M8 5v14l11-7z' />
+                  </svg>
+                  Welcome tour
+                </span>
+              </button>
+            </>
+          )}
           <div className='text-slate-500 text-sm flex items-center gap-2'>
             <div className='w-2 h-2 bg-green-500 rounded-full animate-pulse' />
             Status Bridge Active
@@ -162,6 +202,30 @@ const App: React.FC = () => {
       </motion.div>
     </div>
   );
+};
+
+const App: React.FC = () => {
+  const params = new URLSearchParams(window.location.search);
+  const toolId = (params.get('toolId') as ToolId) || null;
+  const view = params.get('view');
+
+  if (view === 'settings') {
+    return <SettingsPanel />;
+  }
+
+  if (view === 'tooltip') {
+    return <TooltipOverlay />;
+  }
+
+  if (view === 'tour') {
+    return <TourCard />;
+  }
+
+  if (toolId) {
+    return <Bubble toolId={toolId} demo={params.get('demo') === '1'} />;
+  }
+
+  return <Landing />;
 };
 
 export default App;

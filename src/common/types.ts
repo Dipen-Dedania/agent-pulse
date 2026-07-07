@@ -104,6 +104,24 @@ export interface BubbleTooltipPayload {
   accent?: string;      // rgba glow for the title status dot
 }
 
+// ─── First-run tour & setup checklist ────────────────────────────────────────
+// The slice of tour config the renderers need: the splash swaps its primary CTA
+// on hasSeenTour, and the Hooks-tab checklist derives its third item ("first
+// live status") from firstEventAt. Projected from UserConfig.tour by the
+// `tour:get-state` handler and pushed via `tour:state-updated` broadcasts.
+export interface TourState {
+  hasSeenTour: boolean;
+  firstEventAt: number | null;
+  setupDismissed: boolean;
+}
+
+// One demo-bubble pose during the tour: the coach card drives these into the
+// demo bubble window so each step shows the matching live animation.
+export interface TourDemoState {
+  state: AgentState;
+  escalated?: boolean;
+}
+
 export interface NormalizedEvent {
   toolId: ToolId;
   state: AgentState;

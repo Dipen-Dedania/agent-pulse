@@ -1,0 +1,390 @@
+<!doctype html>
+<!-- Source for public/og-image.png (1200x630). Render: open in Chrome at 1200x630 and screenshot. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      @font-face {
+        font-family: 'Manrope Variable';
+        font-style: normal;
+        font-weight: 200 800;
+        src: url('./node_modules/@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2')
+          format('woff2-variations');
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        font-family: 'Manrope Variable', system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .card {
+        position: relative;
+        width: 1200px;
+        height: 630px;
+        background: #f6f8fb;
+        overflow: hidden;
+      }
+
+      /* soft gradient blobs, matching the site */
+      .blob {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(90px);
+        opacity: 0.55;
+      }
+      .blob-blue {
+        width: 620px;
+        height: 620px;
+        background: #0099ff;
+        top: -280px;
+        left: -180px;
+      }
+      .blob-purple {
+        width: 560px;
+        height: 560px;
+        background: #8247f5;
+        top: -160px;
+        right: -160px;
+        opacity: 0.45;
+      }
+      .blob-orange {
+        width: 480px;
+        height: 480px;
+        background: #ffa600;
+        bottom: -260px;
+        left: 300px;
+        opacity: 0.35;
+      }
+      .blob-pink {
+        width: 420px;
+        height: 420px;
+        background: #e55cff;
+        bottom: -220px;
+        right: -80px;
+        opacity: 0.35;
+      }
+
+      .inner {
+        position: relative;
+        z-index: 2;
+        height: 100%;
+        padding: 52px 64px 48px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .brand img {
+        width: 58px;
+        height: 58px;
+      }
+      .brand .name {
+        font-size: 34px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: #0f172a;
+      }
+      .pill {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 20px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.65);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        backdrop-filter: blur(12px);
+        font-size: 19px;
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .pill .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #22c55e;
+        box-shadow: 0 0 10px 2px rgba(34, 197, 94, 0.6);
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 40px;
+        margin-top: 8px;
+      }
+
+      .left {
+        flex: 1;
+        min-width: 0;
+      }
+      h1 {
+        font-size: 58px;
+        line-height: 1.08;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        color: #0f172a;
+        margin-bottom: 30px;
+      }
+      h1 .accent {
+        background: linear-gradient(90deg, #0099ff, #8247f5);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .features {
+        display: grid;
+        grid-template-columns: repeat(2, max-content);
+        column-gap: 44px;
+        row-gap: 18px;
+      }
+      .feature {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 23px;
+        font-weight: 600;
+        color: #1e293b;
+        white-space: nowrap;
+      }
+      .check {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(34, 197, 94, 0.15);
+        border: 1.5px solid rgba(34, 197, 94, 0.5);
+      }
+      .check svg {
+        width: 15px;
+        height: 15px;
+      }
+
+      /* mascot side */
+      .right {
+        flex: none;
+        width: 330px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+      }
+      .halo {
+        position: absolute;
+        width: 330px;
+        height: 330px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle,
+          rgba(34, 197, 94, 0.28) 0%,
+          rgba(0, 153, 255, 0.14) 45%,
+          transparent 70%
+        );
+      }
+      .bubble {
+        position: relative;
+        width: 296px;
+        height: 296px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.55);
+        border: 1.5px solid rgba(255, 255, 255, 0.9);
+        box-shadow:
+          0 24px 60px rgba(15, 23, 42, 0.14),
+          inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(14px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .bubble img {
+        width: 218px;
+        height: 218px;
+      }
+      .status-chip {
+        position: absolute;
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 18px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+        font-size: 17px;
+        font-weight: 700;
+        color: #15803d;
+        white-space: nowrap;
+      }
+      .status-chip .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #22c55e;
+        box-shadow: 0 0 8px 2px rgba(34, 197, 94, 0.55);
+      }
+
+      /* bottom tools strip */
+      .bottom {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+      }
+      .works {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+        white-space: nowrap;
+      }
+      .tools {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .tool {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 9px 16px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.7);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        backdrop-filter: blur(10px);
+        font-size: 17px;
+        font-weight: 700;
+        color: #334155;
+        white-space: nowrap;
+      }
+      .tool img {
+        width: 22px;
+        height: 22px;
+        border-radius: 5px;
+        object-fit: contain;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="blob blob-blue"></div>
+      <div class="blob blob-purple"></div>
+      <div class="blob blob-orange"></div>
+      <div class="blob blob-pink"></div>
+
+      <div class="inner">
+        <div class="top">
+          <div class="brand">
+            <img src="./public/assets/logo-transparent.png" alt="" />
+            <div class="name">Agent Pulse</div>
+          </div>
+          <div class="pill"><span class="dot"></span>Free &amp; Open Source · 100% Local</div>
+        </div>
+
+        <div class="main">
+          <div class="left">
+            <h1>Your AI coding agents,<br /><span class="accent">at a glance</span></h1>
+            <div class="features">
+              <div class="feature">
+                <span class="check"
+                  ><svg viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M2.5 8.5L6 12L13.5 4.5"
+                      stroke="#16a34a"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    /></svg
+                ></span>
+                Live status bubbles
+              </div>
+              <div class="feature">
+                <span class="check"
+                  ><svg viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M2.5 8.5L6 12L13.5 4.5"
+                      stroke="#16a34a"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    /></svg
+                ></span>
+                Usage meters &amp; limits
+              </div>
+              <div class="feature">
+                <span class="check"
+                  ><svg viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M2.5 8.5L6 12L13.5 4.5"
+                      stroke="#16a34a"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    /></svg
+                ></span>
+                Local analytics &amp; costs
+              </div>
+              <div class="feature">
+                <span class="check"
+                  ><svg viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M2.5 8.5L6 12L13.5 4.5"
+                      stroke="#16a34a"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    /></svg
+                ></span>
+                Command guardrails
+              </div>
+            </div>
+          </div>
+
+          <div class="right">
+            <div class="halo"></div>
+            <div class="bubble">
+              <img src="./public/assets/logo-transparent.png" alt="Agent Pulse mascot" />
+              <div class="status-chip"><span class="dot"></span>Working</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bottom">
+          <div class="works">Works with</div>
+          <div class="tools">
+            <div class="tool"><img src="./public/assets/claude.png" alt="" />Claude Code</div>
+            <div class="tool"><img src="./public/assets/cursor.png" alt="" />Cursor</div>
+            <div class="tool"><img src="./public/assets/githubcopilot.png" alt="" />Copilot</div>
+            <div class="tool"><img src="./public/assets/codex.png" alt="" />Codex</div>
+            <div class="tool"><img src="./public/assets/kiro.png" alt="" />Kiro</div>
+            <div class="tool"><img src="./public/assets/antigravity.png" alt="" />Antigravity</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

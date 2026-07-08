@@ -10,8 +10,16 @@
     />
     <link rel="canonical" href="https://dipen-dedania.github.io/agent-pulse/" />
     <meta name="theme-color" content="#f8f9fb" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="author" content="Dipen Dedania" />
+    <meta
+      name="keywords"
+      content="AI coding agents, agent monitor, Claude Code, Cursor, GitHub Copilot, OpenAI Codex, Kiro, Antigravity, usage meter, agent status, desktop app, open source"
+    />
 
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Agent Pulse" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:title" content="Agent Pulse — Your AI coding agents, at a glance" />
     <meta
       property="og:description"
@@ -19,6 +27,12 @@
     />
     <meta property="og:url" content="https://dipen-dedania.github.io/agent-pulse/" />
     <meta property="og:image" content="https://dipen-dedania.github.io/agent-pulse/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Agent Pulse status bubbles floating on a desktop showing AI coding agent activity"
+    />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Agent Pulse — Your AI coding agents, at a glance" />
     <meta
@@ -40,11 +54,96 @@
         "name": "Agent Pulse",
         "operatingSystem": "Windows, macOS, Linux",
         "applicationCategory": "DeveloperApplication",
-        "description": "Ambient, glanceable awareness of AI coding agents. Floats glass status bubbles for Claude Code, Cursor, Copilot, Codex, Kiro and Antigravity.",
+        "description": "Ambient, glanceable awareness of AI coding agents. Floats glass status bubbles for Claude Code, Cursor, Copilot, Codex, Kiro and Antigravity — plus usage meters, local analytics, and command guardrails. 100% local, no telemetry.",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
         "url": "https://dipen-dedania.github.io/agent-pulse/",
-        "downloadUrl": "https://github.com/Dipen-Dedania/agent-pulse/releases/latest"
+        "downloadUrl": "https://github.com/Dipen-Dedania/agent-pulse/releases/latest",
+        "image": "https://dipen-dedania.github.io/agent-pulse/og-image.png",
+        "screenshot": [
+          "https://dipen-dedania.github.io/agent-pulse/screenshots/bubbles.png",
+          "https://dipen-dedania.github.io/agent-pulse/screenshots/usage.png",
+          "https://dipen-dedania.github.io/agent-pulse/screenshots/timeline.png",
+          "https://dipen-dedania.github.io/agent-pulse/screenshots/guardrails.png"
+        ],
+        "featureList": [
+          "Always-on-top glass status bubbles for each AI coding agent",
+          "Live subscription usage meters for Claude Code, Codex, Cursor and Antigravity",
+          "Local SQLite analytics timeline with activity heatmap and cost estimates",
+          "Command guardrails that block or warn on risky shell commands",
+          "Claude Code status line with model, context and session cost",
+          "Discord and Slack alerts when an agent is waiting on you"
+        ],
+        "author": {
+          "@type": "Person",
+          "name": "Dipen Dedania",
+          "url": "https://github.com/Dipen-Dedania"
+        },
+        "sameAs": ["https://github.com/Dipen-Dedania/agent-pulse"]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is Agent Pulse free?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Agent Pulse is open source under AGPLv3. If you want to use it commercially without AGPL obligations, a paid license is available."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Agent Pulse send my data anywhere?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Events flow from local hooks to a local bridge to a local database. The only network calls are the vendors' own usage APIs (with your existing credentials) and the update check."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Which tools does Agent Pulse support?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Claude Code, Cursor, GitHub Copilot (VS Code), OpenAI Codex, Kiro, and Antigravity (CLI + IDE). Hooks install and uninstall with one click each."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does Agent Pulse know what my agents are doing?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Each tool exposes lifecycle hooks. Agent Pulse writes a small hook config that POSTs events to localhost:4242, and normalizes them into a single state model."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Are the cost numbers my real bill?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No — they're estimates at public API list prices (via a daily-refreshed LiteLLM table), useful for relative comparison. Your subscription bills differently."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Agent Pulse modify my tools?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Only their documented hook config files (e.g. ~/.claude/settings.json), and it backs up anything it replaces. Uninstalling a hook restores a clean state."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Agent Pulse run on Windows, macOS and Linux?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "All three. Windows gets full auto-update; macOS is manual-update for now; Linux ships as an AppImage."
+            }
+          }
+        ]
       }
     </script>
   </head>

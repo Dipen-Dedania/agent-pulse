@@ -1,0 +1,38 @@
+# Agent Pulse
+
+> Agent Pulse is a free, open-source (AGPLv3) desktop app for Windows, macOS, and Linux that gives you ambient, glanceable awareness of your AI coding agents. It floats always-on-top frosted-glass status bubbles for Claude Code, Cursor, GitHub Copilot (VS Code), OpenAI Codex, Kiro, and Antigravity — plus subscription usage meters, local analytics, and command guardrails. 100% local: events flow from local hooks to a local bridge (localhost:4242) to a local SQLite database. No telemetry.
+
+Key facts:
+
+- Website: https://dipen-dedania.github.io/agent-pulse/
+- Source code: https://github.com/Dipen-Dedania/agent-pulse
+- Downloads (Windows installer, macOS dmg, Linux AppImage): https://github.com/Dipen-Dedania/agent-pulse/releases/latest
+- License: AGPLv3 (commercial licensing available — dipen27891@gmail.com)
+- Price: free
+- Platforms: Windows (full auto-update), macOS (manual update), Linux (AppImage)
+- Supported tools: Claude Code, Cursor, GitHub Copilot (VS Code), OpenAI Codex, Kiro, Antigravity (CLI + IDE)
+
+## Features
+
+- **Status bubbles**: each agent gets a draggable, always-on-top glass bubble. Green pulsing glow = working, blue ring + badge = waiting on you (permission or response), calm breathing = idle, red shake = error/dead. Layout survives restarts.
+- **Usage meters**: live meters for Claude Code's 5-hour and 7-day windows, Codex, Cursor's billing cycle, and Antigravity's per-model quotas, with warnings before you hit a cap and nudges when a window is about to reset unused.
+- **Analytics timeline**: a local SQLite timeline with daily digest, GitHub-style activity heatmap, hour-of-day rhythm, tool mix, model usage, and per-project breakdowns. Cost cards show estimated API list prices (clearly labeled estimates, never your real bill).
+- **Guardrails**: block or warn on risky shell commands before they reach an agent (e.g. `rm -rf /`, force-pushes to protected branches, or custom regex rules). Every trigger is logged.
+- **Claude Code status line**: model, context bar, git branch, and session cost at the bottom of every turn; one-click install with backup of existing config.
+- **Discord & Slack alerts**: get pinged when an agent waits past your threshold.
+- **Cowork scheduler**: keeps Claude's 5-hour window warm with scheduled micro-pings.
+- **Quiet auto-updates, tray app**: background update checks (never silent installs), single instance, optional launch on startup, closes to tray.
+
+## How it works
+
+Each supported tool exposes lifecycle hooks. Agent Pulse writes a small hook config (only the tools' documented config files, e.g. `~/.claude/settings.json`, with backups of anything replaced) that POSTs events to a local HTTP bridge on `localhost:4242`. Events are normalized into a single state model (working / waiting / idle / error) that drives the bubbles, timeline, and alerts. Hooks install and uninstall with one click each; uninstalling restores a clean state.
+
+## Privacy
+
+All data stays on your machine. The only network calls are the vendors' own usage APIs (using your existing credentials) and the update check. A privacy toggle redacts task summaries in the timeline.
+
+## Links
+
+- [README](https://github.com/Dipen-Dedania/agent-pulse#readme): full documentation
+- [Latest release](https://github.com/Dipen-Dedania/agent-pulse/releases/latest): downloads for all platforms
+- [Issues](https://github.com/Dipen-Dedania/agent-pulse/issues): bug reports and feature requests

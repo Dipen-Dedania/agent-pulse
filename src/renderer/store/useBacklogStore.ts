@@ -50,6 +50,8 @@ interface BacklogStore {
   runNow: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
   stopRun: () => Promise<{ ok: boolean; reason?: string }>;
   removeWorktree: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
+  applyWorktree: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; conflicted?: boolean; dirtyTarget?: boolean; changedFiles?: string[] }>;
+  applyWorktreeStashed: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; stashed?: boolean; stashConflicted?: boolean; changedFiles?: string[] }>;
   updateTemplates: (templates: BacklogTemplate[]) => Promise<BacklogTemplate[] | null>;
 }
 
@@ -183,6 +185,30 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
       return res ?? { ok: false, reason: 'unavailable' };
     } catch (e) {
       logger.error('[useBacklogStore] removeWorktree failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  // Lands the worktree's changes onto the project's working tree. Leaves the
+  // worktree pointer intact, so no hydrate is needed on success.
+  applyWorktree: async (cardId) => {
+    try {
+      const res = await window.electron.invoke('backlog:apply-worktree', { cardId });
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] applyWorktree failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  // Stashes the project's local changes, applies the worktree, then pops the
+  // stash back on top. Offered when applyWorktree reports a dirty target.
+  applyWorktreeStashed: async (cardId) => {
+    try {
+      const res = await window.electron.invoke('backlog:apply-worktree-stashed', { cardId });
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] applyWorktreeStashed failed', e);
       return { ok: false, reason: String(e) };
     }
   },

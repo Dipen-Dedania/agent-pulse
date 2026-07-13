@@ -3,6 +3,7 @@ import { BacklogArtifact, BacklogArtifactKind, BacklogAttempt, BacklogCard } fro
 import { logger } from '../../../common/logger';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { appAlert, appConfirm } from '../Dialog/AppDialog';
+import { DiffView } from './DiffView';
 
 // Card detail: attempt history + artifacts (research report / execution diff
 // + QA report) +, for execution cards, the worktree the diff came from.
@@ -57,10 +58,15 @@ function parseQaVerdict(content: string | null): 'passed' | 'failed' | null {
 
 export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
   const removeWorktree = useBacklogStore((s) => s.removeWorktree);
+  const applyWorktree = useBacklogStore((s) => s.applyWorktree);
+  const applyWorktreeStashed = useBacklogStore((s) => s.applyWorktreeStashed);
+  const [applying, setApplying] = useState(false);
   const [attempts, setAttempts] = useState<BacklogAttempt[]>([]);
   const [artifacts, setArtifacts] = useState<BacklogArtifact[]>([]);
   const [selected, setSelected] = useState<BacklogArtifact | null>(null);
   const [content, setContent] = useState<string | null>(null);
+  // True when only the ~500-char preview was available (artifact file unreadable).
+  const [contentTruncated, setContentTruncated] = useState(false);
   const [loading, setLoading] = useState(true);
   // Hides the worktree panel immediately after a successful removal — the
   // `card` prop is a snapshot from the board and won't itself update until
@@ -86,10 +92,14 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
   }, [card.id]);
 
   useEffect(() => {
-    if (!selected) { setContent(null); return; }
+    if (!selected) { setContent(null); setContentTruncated(false); return; }
     let cancelled = false;
     window.electron.invoke('backlog:read-artifact', { artifactId: selected.id })
-      .then((res: { content: string | null }) => { if (!cancelled) setContent(res?.content ?? null); })
+      .then((res: { content: string | null; truncated?: boolean }) => {
+        if (cancelled) return;
+        setContent(res?.content ?? null);
+        setContentTruncated(Boolean(res?.truncated));
+      })
       .catch((e: unknown) => logger.error('[ArtifactViewer] failed to read artifact', e));
     return () => { cancelled = true; };
   }, [selected]);
@@ -100,6 +110,60 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
 
   const openWorktreeFolder = () => {
     if (card.worktreePath) void window.electron.invoke('open-path', card.worktreePath);
+  };
+
+  const applySuccessMessage = (res: { empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; stashed?: boolean; stashConflicted?: boolean; changedFiles?: string[] }): string => {
+    if (res.alreadyApplied) {
+      const files = res.changedFiles ?? [];
+      const list = files.length
+        ? `\n\nGit reports these files already match the worktree:\n${files.slice(0, 20).map((f) => `• ${f}`).join('\n')}${files.length > 20 ? `\n…and ${files.length - 20} more` : ''}\n\nIf you expected other files (e.g. a new folder) that aren’t listed here, the worktree’s live changes differ from the saved diff — they may be untracked/ignored. Open the worktree folder to check.`
+        : '';
+      return `These changes already appear to be present in the project — nothing new to apply.${list}`;
+    }
+    if (res.empty) return 'The worktree had no changes to apply.';
+    if (res.stashConflicted) {
+      return 'Worktree changes applied. Your own local changes could not be re-merged automatically — they’re preserved in a git stash (run `git stash list`). Resolve the conflict markers, then `git stash drop`.';
+    }
+    if (res.stashed) {
+      return 'Your local changes were stashed, the worktree was applied, and your changes were restored on top. Review the working tree before committing.';
+    }
+    if (res.threeWay) return 'Changes applied to the project via a 3-way merge. Review the working tree before committing.';
+    return 'Changes applied to the project. Review the working tree before committing.';
+  };
+
+  const handleApplyWorktree = async () => {
+    const ok = await appConfirm({
+      title: 'Apply to project?',
+      message:
+        'This applies the worktree’s changes onto your project’s working directory, left unstaged for you to review and commit. The worktree stays until you remove it.',
+      confirmLabel: 'Apply to project',
+    });
+    if (!ok) return;
+    setApplying(true);
+    try {
+      const res = await applyWorktree(card.id);
+      if (res.ok) {
+        void appAlert(applySuccessMessage(res), 'Backlog');
+      } else if (res.dirtyTarget) {
+        // The project's working tree overlaps the patch. Offer the automatic
+        // stash → apply → pop path right here instead of a dead-end alert.
+        const doStash = await appConfirm({
+          title: 'Stash local changes and apply?',
+          message:
+            `${res.reason}\n\nAlternatively, Agent Pulse can stash your local changes, apply the worktree, then restore your changes on top. Overlapping edits are left as conflict markers to resolve.`,
+          confirmLabel: 'Stash, apply & restore',
+        });
+        if (doStash) {
+          const stashRes = await applyWorktreeStashed(card.id);
+          if (stashRes.ok) void appAlert(applySuccessMessage(stashRes), 'Backlog');
+          else if (stashRes.reason) void appAlert(stashRes.reason, 'Backlog');
+        }
+      } else if (res.reason) {
+        void appAlert(res.reason, 'Backlog');
+      }
+    } finally {
+      setApplying(false);
+    }
   };
 
   const handleRemoveWorktree = async () => {
@@ -116,11 +180,16 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
   };
 
   const qaVerdict = selected?.kind === 'qa-report' ? parseQaVerdict(content) : null;
+  // Diffs need room for the file rail + side-by-side hunks; other artifacts
+  // stay in the narrow reading column.
+  const isDiff = selected?.kind === 'diff';
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
       <div
-        className='apple-scroll relative w-full max-w-3xl mx-4 bg-slate-900/95 border border-slate-700/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
+        className={`apple-scroll relative w-full mx-4 bg-slate-900/95 border border-slate-700/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-3 overflow-y-auto ${
+          isDiff ? 'max-w-[1600px] max-h-[92vh]' : 'max-w-3xl max-h-[85vh]'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -141,12 +210,12 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
         ) : (
           <>
             {/* Attempt history */}
-            <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4'>
-              <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold mb-2'>Attempts</p>
+            <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl px-4 py-3'>
+              <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold mb-1.5'>Attempts</p>
               {attempts.length === 0 ? (
                 <p className='text-sm text-slate-400'>No runs yet.</p>
               ) : (
-                <div className='flex flex-col gap-1.5'>
+                <div className='flex flex-col gap-1'>
                   {attempts.map((a) => (
                     <div key={a.id} className='flex items-center gap-3 text-xs flex-wrap'>
                       <span className='text-slate-400 w-32 shrink-0'>{formatWhen(a.startedAt)}</span>
@@ -207,10 +276,11 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                   </button>
                 </div>
                 {selected?.kind === 'diff' ? (
-                  // Git patch — preserve exact formatting, scroll sideways instead of wrapping.
-                  <pre className='text-xs text-slate-200 leading-relaxed font-mono max-h-96 overflow-auto apple-scroll whitespace-pre'>
-                    {content ?? 'Loading diff…'}
-                  </pre>
+                  content == null ? (
+                    <p className='text-sm text-slate-400'>Loading diff…</p>
+                  ) : (
+                    <DiffView patch={content} truncated={contentTruncated} />
+                  )
                 ) : (
                   <pre className='whitespace-pre-wrap text-xs text-slate-200 leading-relaxed font-mono max-h-96 overflow-y-auto apple-scroll'>
                     {content ?? 'Loading…'}
@@ -221,15 +291,26 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
 
             {/* Worktree — execution cards only, preserved until removed by hand */}
             {card.taskType === 'execution' && card.worktreePath && !worktreeGone && (
-              <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 flex flex-col gap-2'>
-                <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Worktree</p>
-                <p className='text-xs text-slate-300 font-mono break-all'>{card.worktreePath}</p>
-                {card.baseSha && (
-                  <p className='text-xs text-slate-500'>
-                    base <span className='font-mono text-slate-400'>{card.baseSha.slice(0, 7)}</span>
-                  </p>
-                )}
-                <div className='flex items-center gap-2 mt-1'>
+              <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl px-4 py-3 flex flex-col gap-2'>
+                <div className='flex items-baseline gap-2 min-w-0'>
+                  <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold shrink-0'>Worktree</p>
+                  <span className='text-xs text-slate-300 font-mono truncate flex-1 min-w-0' title={card.worktreePath}>
+                    {card.worktreePath}
+                  </span>
+                  {card.baseSha && (
+                    <span className='text-xs text-slate-500 shrink-0'>
+                      base <span className='font-mono text-slate-400'>{card.baseSha.slice(0, 7)}</span>
+                    </span>
+                  )}
+                </div>
+                <div className='flex items-center gap-2'>
+                  <button
+                    onClick={() => void handleApplyWorktree()}
+                    disabled={applying}
+                    className='px-3 py-1 rounded-lg text-xs font-medium bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  >
+                    {applying ? 'Applying…' : 'Apply to project'}
+                  </button>
                   <button
                     onClick={openWorktreeFolder}
                     className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'

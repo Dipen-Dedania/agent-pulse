@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { createWorktree, captureDiff, removeWorktree, reconcileWorktrees } from '../worktree';
+import { createWorktree, captureDiff, applyWorktree, applyWorktreeStashed, removeWorktree, reconcileWorktrees } from '../worktree';
 
 // Real temp git repos, no mocks — the module's whole job is driving git
 // correctly. Skips cleanly when git isn't on PATH (CI images without git).
@@ -106,6 +106,180 @@ describe.skipIf(!gitAvailable())('backlog worktree module', () => {
     fs.writeFileSync(patchFile, cap.diff.patch);
     git(repo, 'apply', patchFile);
     expect(fs.readFileSync(path.join(repo, 'new-file.txt'), 'utf8')).toBe('from executor\n');
+  });
+
+  it('applyWorktree lands modified + new files onto the project working tree, unstaged', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    fs.writeFileSync(path.join(res.worktreePath, 'a.txt'), 'changed\n');
+    fs.writeFileSync(path.join(res.worktreePath, 'new-file.txt'), 'from executor\n');
+
+    const applied = await applyWorktree(repo, res.worktreePath);
+    expect(applied.ok).toBe(true);
+    expect(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8')).toBe('changed\n');
+    expect(fs.readFileSync(path.join(repo, 'new-file.txt'), 'utf8')).toBe('from executor\n');
+    // Left unstaged for the user to review — the project HEAD is untouched.
+    expect(git(repo, 'rev-parse', 'HEAD').trim()).toBe(res.baseSha);
+    expect(git(repo, 'status', '--porcelain')).toMatch(/new-file\.txt/);
+    // The worktree itself survives the apply.
+    expect(fs.existsSync(res.worktreePath)).toBe(true);
+  });
+
+  it('applyWorktree reports empty when the worktree has no changes', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    const applied = await applyWorktree(repo, res.worktreePath);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.empty).toBe(true);
+  });
+
+  it('applyWorktree falls back to a 3-way merge when the project has since moved', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    // Worktree adds a brand-new file...
+    fs.writeFileSync(path.join(res.worktreePath, 'feature.txt'), 'feature work\n');
+    // ...while the project advances HEAD on an unrelated file.
+    fs.writeFileSync(path.join(repo, 'b.txt'), 'unrelated\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-m', 'unrelated advance');
+
+    const applied = await applyWorktree(repo, res.worktreePath);
+    expect(applied.ok).toBe(true);
+    expect(fs.readFileSync(path.join(repo, 'feature.txt'), 'utf8')).toBe('feature work\n');
+  });
+
+  it('applyWorktree refuses (touching nothing) when the target has overlapping uncommitted edits', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    // Worktree edits a.txt one way...
+    fs.writeFileSync(path.join(res.worktreePath, 'a.txt'), 'worktree change\n');
+    // ...while the project has its own unstaged edit to the same file.
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'local uncommitted work\n');
+
+    const applied = await applyWorktree(repo, res.worktreePath);
+    expect(applied.ok).toBe(false);
+    if (applied.ok) return;
+    expect(applied.reason).toMatch(/uncommitted local changes/i);
+    expect(applied.conflicted).toBeUndefined();
+    // The project's local edit is left exactly as it was — nothing clobbered.
+    expect(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8')).toBe('local uncommitted work\n');
+  });
+
+  it('applyWorktree reports alreadyApplied with the file list when the changes are already present', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    fs.writeFileSync(path.join(res.worktreePath, 'a.txt'), 'changed\n');
+    fs.writeFileSync(path.join(res.worktreePath, 'feature.txt'), 'feature work\n');
+
+    // Land the changes once...
+    const first = await applyWorktree(repo, res.worktreePath);
+    expect(first.ok).toBe(true);
+    // ...then applying the same worktree again is a no-op: every post-image is
+    // already in the tree, so it reverse-applies clean.
+    const second = await applyWorktree(repo, res.worktreePath);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.alreadyApplied).toBe(true);
+    expect(second.changedFiles).toEqual(expect.arrayContaining(['a.txt', 'feature.txt']));
+  });
+
+  it('applyWorktree reports changedFiles on a clean apply', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    fs.writeFileSync(path.join(res.worktreePath, 'feature.txt'), 'feature work\n');
+
+    const applied = await applyWorktree(repo, res.worktreePath);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.alreadyApplied).toBeFalsy();
+    expect(applied.changedFiles).toContain('feature.txt');
+  });
+
+  it('applyWorktree rejects a non-repo project folder', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    const notRepo = path.join(root, 'plain');
+    fs.mkdirSync(notRepo);
+    const applied = await applyWorktree(notRepo, res.worktreePath);
+    expect(applied.ok).toBe(false);
+    if (applied.ok) return;
+    expect(applied.reason).toContain('not a git repository');
+  });
+
+  it('applyWorktreeStashed stashes, applies, and pops non-overlapping local changes back on top', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    fs.writeFileSync(path.join(res.worktreePath, 'feature.txt'), 'feature work\n');
+    // Project has its own uncommitted edit to a different file.
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'locally edited\n');
+
+    const applied = await applyWorktreeStashed(repo, res.worktreePath);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.stashed).toBe(true);
+    expect(applied.stashConflicted).toBeUndefined();
+    // Worktree change landed AND the local edit was restored on top.
+    expect(fs.readFileSync(path.join(repo, 'feature.txt'), 'utf8')).toBe('feature work\n');
+    expect(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8')).toBe('locally edited\n');
+    // Stash was fully consumed on a clean pop.
+    expect(git(repo, 'stash', 'list').trim()).toBe('');
+  });
+
+  it('applyWorktreeStashed preserves the stash and marks conflicts when edits overlap', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    // Worktree and project edit the SAME line different ways.
+    fs.writeFileSync(path.join(res.worktreePath, 'a.txt'), 'worktree version\n');
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'local version\n');
+
+    const applied = await applyWorktreeStashed(repo, res.worktreePath);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.stashConflicted).toBe(true);
+    // The applied worktree change is present, with conflict markers from the pop.
+    expect(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8')).toContain('<<<<<<<');
+    // The user's work is not lost — the stash entry is kept for recovery.
+    expect(git(repo, 'stash', 'list').trim()).not.toBe('');
+  });
+
+  it('applyWorktreeStashed with a clean project behaves like a plain apply', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    fs.writeFileSync(path.join(res.worktreePath, 'feature.txt'), 'feature work\n');
+
+    const applied = await applyWorktreeStashed(repo, res.worktreePath);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.stashed).toBeFalsy();
+    expect(fs.readFileSync(path.join(repo, 'feature.txt'), 'utf8')).toBe('feature work\n');
+    expect(git(repo, 'stash', 'list').trim()).toBe('');
+  });
+
+  it('applyWorktreeStashed restores the project untouched when the apply fails', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-1');
+    if (!res.ok) throw new Error(res.reason);
+    // Patch MODIFIES a.txt, so it depends on context/base blobs.
+    fs.writeFileSync(path.join(res.worktreePath, 'a.txt'), 'worktree change\n');
+
+    // An independent repo: it shares no history/objects with `repo`, so the
+    // patch's base blob is missing and neither a clean apply nor --3way works —
+    // the apply fails AFTER we've stashed the target's local edit.
+    const other = path.join(root, 'other');
+    fs.mkdirSync(other);
+    git(other, 'init');
+    git(other, 'config', 'user.email', 'test@test.local');
+    git(other, 'config', 'user.name', 'test');
+    fs.writeFileSync(path.join(other, 'a.txt'), 'totally different content\n');
+    git(other, 'add', '-A');
+    git(other, 'commit', '-m', 'other initial');
+    fs.writeFileSync(path.join(other, 'a.txt'), 'other local edit\n');
+
+    const applied = await applyWorktreeStashed(other, res.worktreePath);
+    expect(applied.ok).toBe(false);
+    // The stashed local edit was popped straight back — nothing left behind.
+    expect(fs.readFileSync(path.join(other, 'a.txt'), 'utf8')).toBe('other local edit\n');
+    expect(git(other, 'stash', 'list').trim()).toBe('');
   });
 
   it('removeWorktree force-removes a dirty worktree and its registration', async () => {

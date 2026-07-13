@@ -10,7 +10,7 @@ import { BacklogCardState, BacklogState, BacklogTemplate } from '../../common/ba
 import { BacklogStore, CreateCardInput, UpdateCardPatch } from './store';
 import { BacklogEngine } from './engine';
 import { resolveProjectDefaultModel, ProjectDefaultModel } from './claude-settings';
-import { removeWorktree } from './worktree';
+import { applyWorktree, applyWorktreeStashed, removeWorktree } from './worktree';
 
 export interface BacklogIpcDeps {
   store: BacklogStore | null;
@@ -156,6 +156,37 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
       broadcastChanged();
     }
     return res;
+  });
+
+  // Explicit user action from the card ("Apply to project") — lands the
+  // worktree's uncommitted changes onto the project's active working tree.
+  // Both paths come from the DB (engine-written), never from the renderer.
+  ipcMain.handle('backlog:apply-worktree', async (_e, args: { cardId: string }) => {
+    if (!store) return { ok: false, reason: 'backlog storage unavailable' };
+    const card = store.getCard(args?.cardId);
+    if (!card) return { ok: false, reason: 'card not found' };
+    if (!card.worktreePath) return { ok: false, reason: 'card has no worktree' };
+    if (engine?.getStatus().runningCardId === card.id) {
+      return { ok: false, reason: 'card is running — stop it first' };
+    }
+    const project = store.listProjects().find((p) => p.id === card.projectId);
+    if (!project) return { ok: false, reason: 'project not found for this card' };
+    return applyWorktree(project.path, card.worktreePath);
+  });
+
+  // Follow-up action when apply reported an overlapping dirty target: stash the
+  // project's local changes, apply, then pop the stash back on top.
+  ipcMain.handle('backlog:apply-worktree-stashed', async (_e, args: { cardId: string }) => {
+    if (!store) return { ok: false, reason: 'backlog storage unavailable' };
+    const card = store.getCard(args?.cardId);
+    if (!card) return { ok: false, reason: 'card not found' };
+    if (!card.worktreePath) return { ok: false, reason: 'card has no worktree' };
+    if (engine?.getStatus().runningCardId === card.id) {
+      return { ok: false, reason: 'card is running — stop it first' };
+    }
+    const project = store.listProjects().find((p) => p.id === card.projectId);
+    if (!project) return { ok: false, reason: 'project not found for this card' };
+    return applyWorktreeStashed(project.path, card.worktreePath);
   });
 
   ipcMain.handle('backlog:get-attempts', (_e, args: { cardId: string }) => {

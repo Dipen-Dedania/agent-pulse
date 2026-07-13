@@ -45,3 +45,61 @@ body {
   background: rgba(255, 255, 255, 0.32);
   background-clip: padding-box;
 }
+
+/* ── react-diff-view: retheme to the app's glass palette ──────────────────
+   The library ships light-mode defaults driven by CSS variables; we override
+   them under the .ap-diff scope (see DiffView.tsx) plus a dark Prism token
+   palette for syntax highlighting. */
+.ap-diff {
+  --diff-background-color: transparent;
+  --diff-text-color: #cbd5e1;                          /* slate-300 */
+  --diff-font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --diff-selection-background-color: rgba(56, 189, 248, 0.25);
+  --diff-gutter-insert-background-color: rgba(16, 185, 129, 0.12);
+  --diff-gutter-delete-background-color: rgba(239, 68, 68, 0.12);
+  --diff-code-insert-background-color: rgba(16, 185, 129, 0.12);
+  --diff-code-delete-background-color: rgba(239, 68, 68, 0.12);
+  --diff-code-insert-edit-background-color: rgba(16, 185, 129, 0.32);
+  --diff-code-delete-edit-background-color: rgba(239, 68, 68, 0.32);
+  --diff-gutter-selected-background-color: rgba(148, 163, 184, 0.15);
+  --diff-code-selected-background-color: rgba(148, 163, 184, 0.12);
+  --diff-omit-gutter-line-color: rgba(148, 163, 184, 0.4);
+  font-size: 12px;
+}
+.ap-diff .diff-gutter { color: #64748b; }              /* slate-500 line numbers */
+.ap-diff .diff-hunk-header {
+  background: rgba(148, 163, 184, 0.08);
+  color: #64748b;
+  font-size: 11px;
+}
+.ap-diff .diff-code { padding: 0 0.75em; }
+
+/* Prism token colors (dark). Applied on top of the +/− line backgrounds. */
+.ap-diff .token.comment,
+.ap-diff .token.prolog,
+.ap-diff .token.doctype,
+.ap-diff .token.cdata { color: #64748b; font-style: italic; }
+.ap-diff .token.punctuation { color: #94a3b8; }
+.ap-diff .token.keyword,
+.ap-diff .token.boolean,
+.ap-diff .token.atrule,
+.ap-diff .token.important { color: #c084fc; }
+.ap-diff .token.string,
+.ap-diff .token.char,
+.ap-diff .token.attr-value,
+.ap-diff .token.regex,
+.ap-diff .token.inserted { color: #86efac; }
+.ap-diff .token.function,
+.ap-diff .token.class-name { color: #7dd3fc; }
+.ap-diff .token.number,
+.ap-diff .token.constant,
+.ap-diff .token.symbol { color: #fbbf24; }
+.ap-diff .token.tag,
+.ap-diff .token.selector,
+.ap-diff .token.deleted { color: #f87171; }
+.ap-diff .token.attr-name,
+.ap-diff .token.property,
+.ap-diff .token.variable { color: #fdba74; }
+.ap-diff .token.operator,
+.ap-diff .token.entity,
+.ap-diff .token.url { color: #94a3b8; }

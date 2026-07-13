@@ -171,6 +171,46 @@ export const InfoTooltip: React.FC<{ children: React.ReactNode; label?: string }
   );
 };
 
+// Cursor-following hover tooltip for chart marks (bars, cells, hit-rects) —
+// replaces native `title` attributes, which are slow, unstyled, and clash with
+// the glass aesthetic. One tooltip per chart: spread `tipHandlers(content)`
+// onto each mark and render `tipOverlay` once. The overlay is a portal with
+// fixed positioning clamped to the viewport, matching InfoTooltip's panel.
+export function useChartTip() {
+  const [tip, setTip] = useState<{ content: React.ReactNode; x: number; y: number } | null>(null);
+
+  const place = (e: { clientX: number; clientY: number }, content: React.ReactNode) => {
+    // Offset above-right of the cursor; flip below when near the top edge.
+    const margin = 12;
+    const x = Math.min(e.clientX + margin, window.innerWidth - 200);
+    const y = e.clientY < 72 ? e.clientY + margin + 8 : e.clientY - margin - 24;
+    setTip({ content, x, y });
+  };
+
+  const tipHandlers = useCallback((content: React.ReactNode) => ({
+    onMouseEnter: (e: React.MouseEvent) => place(e, content),
+    onMouseMove:  (e: React.MouseEvent) => place(e, content),
+    onMouseLeave: () => setTip(null),
+  }), []);
+
+  const tipOverlay = tip
+    ? createPortal(
+        <div
+          role='tooltip'
+          style={{ position: 'fixed', left: tip.x, top: tip.y, zIndex: 9999, pointerEvents: 'none' }}
+          className='w-max max-w-[18rem]'
+        >
+          <span className='block bg-slate-900/95 backdrop-blur-md border border-slate-600/60 rounded-lg shadow-2xl px-2.5 py-1.5 text-left text-[11px] text-slate-200 whitespace-nowrap'>
+            {tip.content}
+          </span>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return { tipHandlers, tipOverlay };
+}
+
 // Effective $/1M-token rate for a class, derived from the dollars actually
 // attributed and the tokens counted. Equals the list rate for single-model
 // rows; blends automatically when an aggregate spans several models.

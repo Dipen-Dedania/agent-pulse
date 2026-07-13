@@ -268,6 +268,7 @@ export const BacklogBoardTab: React.FC = () => {
   };
 
   const blocked = byState('blocked');
+  const rework = byState('rework');
   const paused = byState('paused');
 
   return (
@@ -369,12 +370,18 @@ export const BacklogBoardTab: React.FC = () => {
             })}
           </div>
 
-          {/* Attention rail — only when something needs it */}
-          {(blocked.length > 0 || paused.length > 0) && (
-            <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+          {/* Attention rail — only when something needs it. Blocked / Rework /
+              Paused cards are never drop targets (see DROP_TARGETS above). */}
+          {(blocked.length > 0 || rework.length > 0 || paused.length > 0) && (
+            <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
               {blocked.length > 0 && (
                 <BoardColumn title='Blocked' count={blocked.length} accent='text-red-300' hint='needs your attention'>
                   {blocked.map(renderTile)}
+                </BoardColumn>
+              )}
+              {rework.length > 0 && (
+                <BoardColumn title='Rework' count={rework.length} accent='text-orange-300' hint='QA failed — retries once, then blocks'>
+                  {rework.map(renderTile)}
                 </BoardColumn>
               )}
               {paused.length > 0 && (

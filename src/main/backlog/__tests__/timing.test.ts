@@ -29,13 +29,17 @@ function card(partial: Partial<BacklogCard>): BacklogCard {
     description: '',
     projectId: 'p1',
     state: 'todo',
+    taskType: 'research',
     riskTier: 'green',
     model: null,
     estimatedMinutes: null,
     estimatedCostUsd: null,
     prereqIds: [],
     qaProvider: 'none',
+    qaCommand: null,
     acceptanceCriteria: [],
+    worktreePath: null,
+    baseSha: null,
     sortOrder: 0,
     blockedReason: null,
     createdAt: 0,
@@ -152,6 +156,16 @@ describe('pickNextCard', () => {
       card({ id: 'paused', state: 'paused', sortOrder: 99 }),
     ];
     expect(pickNextCard(cards, HOUR)!.id).toBe('paused');
+  });
+
+  it('picks rework after paused but before todo', () => {
+    const cards = [
+      card({ id: 'todo-first', sortOrder: 0 }),
+      card({ id: 'rework', state: 'rework', sortOrder: 50 }),
+      card({ id: 'paused', state: 'paused', sortOrder: 99 }),
+    ];
+    expect(pickNextCard(cards, HOUR)!.id).toBe('paused');
+    expect(pickNextCard(cards.filter((c) => c.id !== 'paused'), HOUR)!.id).toBe('rework');
   });
 
   it('size-fit at the tail: skips a too-big card but picks a smaller one behind it', () => {

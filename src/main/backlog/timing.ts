@@ -100,30 +100,45 @@ export function nextWindowStart(slots: BacklogSlot[], now: number): number | nul
   return best;
 }
 
+// States the picker may claim from, in priority order: interrupted work
+// resumes first (paused), a failed-QA retry next (rework — bounded by the
+// two-fails → Blocked escalation), fresh Todo cards last.
+const PICKABLE_RANK: Partial<Record<BacklogCard['state'], number>> = {
+  paused: 0,
+  rework: 1,
+  todo: 2,
+};
+
 /**
  * The next card the executor should claim, honoring:
  *  1. paused cards first (they were interrupted mid-window, resume them),
- *  2. then Todo cards in user-set `sortOrder`,
- *  3. only green-tier cards autorun,
- *  4. prereqs: every prereq card must be Done (deleted prereqs are ignored),
- *  5. size-fit at the tail: skip a card whose hard budget exceeds the
+ *  2. then rework cards (QA failed once — one bounded auto-retry),
+ *  3. then Todo cards in user-set `sortOrder`,
+ *  4. only green-tier cards autorun,
+ *  5. prereqs: every prereq card must be Done (deleted prereqs are ignored),
+ *  6. size-fit at the tail: skip a card whose hard budget exceeds the
  *     remaining window, but keep scanning — a smaller card behind it may fit.
  * Returns null when nothing runnable fits.
  */
 export function pickNextCard(cards: BacklogCard[], remainingMs: number): BacklogCard | null {
   const candidates = cards
     .filter((c) =>
-      (c.state === 'todo' || c.state === 'paused') &&
+      PICKABLE_RANK[c.state] !== undefined &&
       c.riskTier === 'green' &&
       countUnmetPrereqs(c, cards) === 0)
     .sort((a, b) => {
-      if (a.state !== b.state) return a.state === 'paused' ? -1 : 1;
+      if (a.state !== b.state) return PICKABLE_RANK[a.state]! - PICKABLE_RANK[b.state]!;
       return a.sortOrder - b.sortOrder;
     });
   for (const card of candidates) {
     if (cardBudgetMs(card) <= remainingMs) return card;
   }
   return null;
+}
+
+/** States the picker/claim path may take a card from (shared with the engine). */
+export function isPickableState(state: BacklogCard['state']): boolean {
+  return PICKABLE_RANK[state] !== undefined;
 }
 
 export interface BacklogForecast {

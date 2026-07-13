@@ -279,6 +279,13 @@ class AgentPulseApp {
           store: this.backlogStore,
           usagePoller: this.usagePoller,
           artifactsDir: path.join(app.getPath('userData'), 'backlog-artifacts'),
+          worktreesDir: path.join(app.getPath('userData'), 'backlog-worktrees'),
+          // Usage latch: the engine pauses auto-claims while the Claude
+          // 5-hour window is exhausted and re-arms at its reset time.
+          getUsage: () => {
+            const snap = this.usagePoller.getStatus().snapshot;
+            return snap ? { utilization: snap.fiveHour.utilization, resetsAt: snap.fiveHour.resetsAt } : null;
+          },
         });
         this.backlogEngine.start();
       }
@@ -893,6 +900,18 @@ class AgentPulseApp {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('secret-access:event', event);
     }
+    this.timeline?.db.insertSecretAccessEvent({
+      ts: event.ts,
+      toolId: event.toolId,
+      decision: event.decision,
+      blockable: event.blockable ? 1 : 0,
+      filePath: event.filePath,
+      viaShell: event.viaShell ? 1 : 0,
+      ruleIds: event.matched.map(m => m.ruleId).join(','),
+      ruleMessages: JSON.stringify(
+        event.matched.map(m => ({ ruleId: m.ruleId, message: m.message ?? m.glob })),
+      ),
+    });
   }
 
   // Layer 1 fan-out: write the current secret-glob list into every installed

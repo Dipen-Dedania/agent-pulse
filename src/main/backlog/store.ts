@@ -2,11 +2,13 @@
 import path from 'path';
 import {
   BacklogArtifact,
+  BacklogArtifactKind,
   BacklogAttempt,
   BacklogAttemptOutcome,
   BacklogCard,
   BacklogCardState,
   BacklogProject,
+  BacklogTaskType,
   QaProvider,
   RiskTier,
   isSafeModelId,
@@ -18,16 +20,23 @@ import { Database } from './db';
 const ENGINE_ONLY_STATES: BacklogCardState[] = ['claimed', 'in-progress'];
 
 const CARD_STATES: BacklogCardState[] = [
-  'refinement', 'todo', 'claimed', 'in-progress', 'done', 'blocked', 'paused',
+  'refinement', 'todo', 'claimed', 'in-progress', 'done', 'blocked', 'rework', 'paused',
 ];
 const RISK_TIERS: RiskTier[] = ['green', 'amber', 'red'];
-const QA_PROVIDERS: QaProvider[] = ['browser', 'tests', 'lint', 'typecheck', 'custom', 'none'];
+const TASK_TYPES: BacklogTaskType[] = ['research', 'execution'];
+// 'browser' exists in the QaProvider type but isn't selectable until the
+// browser-QA phase — the store rejects it like any unknown value.
+const QA_PROVIDERS_ENABLED: QaProvider[] = ['tests', 'lint', 'typecheck', 'custom', 'none'];
+
+const QA_COMMAND_MAX_LENGTH = 500;
 
 interface CardRow {
   id: string; title: string; description: string; project_id: string;
-  state: string; risk_tier: string;
+  state: string; task_type: string; risk_tier: string;
   estimated_minutes: number | null; estimated_cost_usd: number | null;
-  prereq_ids: string; qa_provider: string; acceptance_criteria: string;
+  prereq_ids: string; qa_provider: string; qa_command: string | null;
+  acceptance_criteria: string;
+  worktree_path: string | null; base_sha: string | null;
   sort_order: number; blocked_reason: string | null; model: string | null;
   created_at: number; updated_at: number;
 }
@@ -48,6 +57,23 @@ function parseJsonStringArray(raw: string): string[] {
   }
 }
 
+/** Untrusted (IPC) custom QA command → stored value. Runs with user privileges
+ * by design (same trust as the user's own terminal), but bounded and trimmed. */
+function normalizeQaCommand(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= QA_COMMAND_MAX_LENGTH ? trimmed : null;
+}
+
+/** Untrusted (IPC) criteria list → trimmed non-empty strings. */
+function normalizeCriteria(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((x): x is string => typeof x === 'string')
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0);
+}
+
 function rowToCard(row: CardRow): BacklogCard {
   return {
     id: row.id,
@@ -55,13 +81,17 @@ function rowToCard(row: CardRow): BacklogCard {
     description: row.description,
     projectId: row.project_id,
     state: row.state as BacklogCardState,
+    taskType: row.task_type === 'execution' ? 'execution' : 'research',
     riskTier: row.risk_tier as RiskTier,
     model: row.model,
     estimatedMinutes: row.estimated_minutes,
     estimatedCostUsd: row.estimated_cost_usd,
     prereqIds: parseJsonStringArray(row.prereq_ids),
     qaProvider: row.qa_provider as QaProvider,
+    qaCommand: row.qa_command,
     acceptanceCriteria: parseJsonStringArray(row.acceptance_criteria),
+    worktreePath: row.worktree_path,
+    baseSha: row.base_sha,
     sortOrder: row.sort_order,
     blockedReason: row.blocked_reason,
     createdAt: row.created_at,
@@ -74,17 +104,21 @@ export interface CreateCardInput {
   description?: string;
   projectId: string;
   state?: 'refinement' | 'todo';
+  taskType?: BacklogTaskType;
   riskTier?: RiskTier;
   model?: string | null;
   estimatedMinutes?: number | null;
   estimatedCostUsd?: number | null;
   prereqIds?: string[];
+  qaProvider?: QaProvider;
+  qaCommand?: string | null;
+  acceptanceCriteria?: string[];
 }
 
 export type UpdateCardPatch = Partial<Pick<BacklogCard,
-  'title' | 'description' | 'projectId' | 'riskTier' | 'model' |
+  'title' | 'description' | 'projectId' | 'taskType' | 'riskTier' | 'model' |
   'estimatedMinutes' | 'estimatedCostUsd' | 'prereqIds' |
-  'qaProvider' | 'acceptanceCriteria'
+  'qaProvider' | 'qaCommand' | 'acceptanceCriteria'
 >>;
 
 export interface MoveResult {
@@ -155,13 +189,17 @@ export class BacklogStore {
       description: input.description ?? '',
       projectId: input.projectId,
       state,
+      taskType: TASK_TYPES.includes(input.taskType as BacklogTaskType) ? (input.taskType as BacklogTaskType) : 'research',
       riskTier: RISK_TIERS.includes(input.riskTier as RiskTier) ? (input.riskTier as RiskTier) : 'green',
       model: normalizeModel(input.model),
       estimatedMinutes: typeof input.estimatedMinutes === 'number' ? input.estimatedMinutes : null,
       estimatedCostUsd: typeof input.estimatedCostUsd === 'number' ? input.estimatedCostUsd : null,
       prereqIds: Array.isArray(input.prereqIds) ? input.prereqIds : [],
-      qaProvider: 'none',        // Phase 1: QA fields exist but stay disabled
-      acceptanceCriteria: [],
+      qaProvider: QA_PROVIDERS_ENABLED.includes(input.qaProvider as QaProvider) ? (input.qaProvider as QaProvider) : 'none',
+      qaCommand: normalizeQaCommand(input.qaCommand),
+      acceptanceCriteria: normalizeCriteria(input.acceptanceCriteria),
+      worktreePath: null,
+      baseSha: null,
       sortOrder: state === 'todo' ? this.nextSortOrder() : 0,
       blockedReason: null,
       createdAt: now,
@@ -169,13 +207,15 @@ export class BacklogStore {
     };
     this.db.prepare(`
       INSERT INTO cards (
-        id, title, description, project_id, state, risk_tier, model,
-        estimated_minutes, estimated_cost_usd, prereq_ids, qa_provider,
-        acceptance_criteria, sort_order, blocked_reason, created_at, updated_at
+        id, title, description, project_id, state, task_type, risk_tier, model,
+        estimated_minutes, estimated_cost_usd, prereq_ids, qa_provider, qa_command,
+        acceptance_criteria, worktree_path, base_sha, sort_order, blocked_reason,
+        created_at, updated_at
       ) VALUES (
-        @id, @title, @description, @projectId, @state, @riskTier, @model,
-        @estimatedMinutes, @estimatedCostUsd, @prereqIds, @qaProvider,
-        @acceptanceCriteria, @sortOrder, @blockedReason, @createdAt, @updatedAt
+        @id, @title, @description, @projectId, @state, @taskType, @riskTier, @model,
+        @estimatedMinutes, @estimatedCostUsd, @prereqIds, @qaProvider, @qaCommand,
+        @acceptanceCriteria, @worktreePath, @baseSha, @sortOrder, @blockedReason,
+        @createdAt, @updatedAt
       )
     `).run({
       ...card,
@@ -193,21 +233,25 @@ export class BacklogStore {
       ...(typeof patch.title === 'string' ? { title: patch.title.trim() } : {}),
       ...(typeof patch.description === 'string' ? { description: patch.description } : {}),
       ...(typeof patch.projectId === 'string' ? { projectId: patch.projectId } : {}),
+      ...(TASK_TYPES.includes(patch.taskType as BacklogTaskType) ? { taskType: patch.taskType as BacklogTaskType } : {}),
       ...(RISK_TIERS.includes(patch.riskTier as RiskTier) ? { riskTier: patch.riskTier as RiskTier } : {}),
       ...(patch.model !== undefined ? { model: normalizeModel(patch.model) } : {}),
       ...(patch.estimatedMinutes !== undefined ? { estimatedMinutes: patch.estimatedMinutes } : {}),
       ...(patch.estimatedCostUsd !== undefined ? { estimatedCostUsd: patch.estimatedCostUsd } : {}),
       ...(Array.isArray(patch.prereqIds) ? { prereqIds: patch.prereqIds } : {}),
-      ...(QA_PROVIDERS.includes(patch.qaProvider as QaProvider) ? { qaProvider: patch.qaProvider as QaProvider } : {}),
-      ...(Array.isArray(patch.acceptanceCriteria) ? { acceptanceCriteria: patch.acceptanceCriteria } : {}),
+      ...(QA_PROVIDERS_ENABLED.includes(patch.qaProvider as QaProvider) ? { qaProvider: patch.qaProvider as QaProvider } : {}),
+      ...(patch.qaCommand !== undefined ? { qaCommand: normalizeQaCommand(patch.qaCommand) } : {}),
+      ...(Array.isArray(patch.acceptanceCriteria) ? { acceptanceCriteria: normalizeCriteria(patch.acceptanceCriteria) } : {}),
       updatedAt: Date.now(),
     };
     this.db.prepare(`
       UPDATE cards SET
         title = @title, description = @description, project_id = @projectId,
-        risk_tier = @riskTier, model = @model, estimated_minutes = @estimatedMinutes,
+        task_type = @taskType, risk_tier = @riskTier, model = @model,
+        estimated_minutes = @estimatedMinutes,
         estimated_cost_usd = @estimatedCostUsd, prereq_ids = @prereqIds,
-        qa_provider = @qaProvider, acceptance_criteria = @acceptanceCriteria,
+        qa_provider = @qaProvider, qa_command = @qaCommand,
+        acceptance_criteria = @acceptanceCriteria,
         updated_at = @updatedAt
       WHERE id = @id
     `).run({
@@ -257,21 +301,33 @@ export class BacklogStore {
   }
 
   /**
-   * Atomic claim: flips todo/paused → claimed in a single UPDATE so two
-   * concurrent claimers can't grab the same card. Returns false if the card
-   * was already claimed, moved, or deleted.
+   * Atomic claim: flips todo/paused/rework → claimed in a single UPDATE so
+   * two concurrent claimers can't grab the same card. Returns false if the
+   * card was already claimed, moved, or deleted.
    */
   claimCard(id: string): boolean {
     const info = this.db.prepare(
-      "UPDATE cards SET state = 'claimed', updated_at = ? WHERE id = ? AND state IN ('todo', 'paused')",
+      "UPDATE cards SET state = 'claimed', updated_at = ? WHERE id = ? AND state IN ('todo', 'paused', 'rework')",
     ).run([Date.now(), id]);
     return Number(info.changes) === 1;
   }
 
-  /** Engine-internal transition (in-progress / done / blocked / paused). */
+  /** Engine-internal transition (in-progress / done / blocked / rework / paused). */
   setCardState(id: string, state: BacklogCardState, blockedReason?: string | null): void {
     this.db.prepare('UPDATE cards SET state = ?, blocked_reason = ?, updated_at = ? WHERE id = ?')
       .run([state, blockedReason ?? null, Date.now(), id]);
+  }
+
+  /** Engine-internal: record the execution worktree created for this card. */
+  setWorktree(id: string, worktreePath: string, baseSha: string): void {
+    this.db.prepare('UPDATE cards SET worktree_path = ?, base_sha = ?, updated_at = ? WHERE id = ?')
+      .run([worktreePath, baseSha, Date.now(), id]);
+  }
+
+  /** The user removed the worktree from the card — clear the pointer. */
+  clearWorktree(id: string): void {
+    this.db.prepare('UPDATE cards SET worktree_path = NULL, base_sha = NULL, updated_at = ? WHERE id = ?')
+      .run([Date.now(), id]);
   }
 
   private nextSortOrder(): number {
@@ -327,12 +383,25 @@ export class BacklogStore {
    * back-to-back budget kills escalate.
    */
   countConsecutiveKills(cardId: string): number {
+    return this.countTrailingOutcome(cardId, 'killed');
+  }
+
+  /**
+   * Same streak logic for QA failures: back-to-back 'qa-failed' attempts
+   * escalate a rework card to Blocked instead of retrying forever. Any other
+   * outcome (success, pause, kill) resets the streak.
+   */
+  countConsecutiveQaFails(cardId: string): number {
+    return this.countTrailingOutcome(cardId, 'qa-failed');
+  }
+
+  private countTrailingOutcome(cardId: string, outcome: BacklogAttemptOutcome): number {
     const rows = this.db.prepare(
       'SELECT outcome FROM attempts WHERE card_id = ? AND outcome IS NOT NULL ORDER BY started_at DESC',
     ).all(cardId) as { outcome: string }[];
     let n = 0;
     for (const row of rows) {
-      if (row.outcome !== 'killed') break;
+      if (row.outcome !== outcome) break;
       n += 1;
     }
     return n;
@@ -347,12 +416,15 @@ export class BacklogStore {
     }));
   }
 
-  insertArtifact(input: { cardId: string; attemptId: string; path: string; preview: string }): BacklogArtifact {
+  insertArtifact(input: {
+    cardId: string; attemptId: string; path: string; preview: string;
+    kind?: BacklogArtifactKind;
+  }): BacklogArtifact {
     const artifact: BacklogArtifact = {
       id: randomUUID(),
       cardId: input.cardId,
       attemptId: input.attemptId,
-      kind: 'report',
+      kind: input.kind ?? 'report',
       path: input.path,
       preview: input.preview,
       createdAt: Date.now(),

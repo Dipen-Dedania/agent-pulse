@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { ModelUsageRange, ModelUsageMode } from '../../../../common/timeline-types';
+import { ModelUsageMode } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { estimateCostBreakdown, formatUsd } from '../../../../common/pricing';
 import { useModelUsage } from './useAnalytics';
+import { useGlobalRange } from './rangeContext';
 import { Card, CostBreakdownContent, EmptyState, InfoPill, InfoTooltip, Segmented, SkeletonLine, formatCompactNumber } from './shared';
 
 const COVERAGE_NOTE =
@@ -11,7 +12,7 @@ const COVERAGE_NOTE =
   'Cursor, VS Code Copilot, and Kiro don\'t expose model info via their hooks.';
 
 export const ModelUsageCard: React.FC = () => {
-  const [range, setRange] = useState<ModelUsageRange>('30d');
+  const range = useGlobalRange();
   const [mode, setMode] = useState<ModelUsageMode>('tokens');
   const { data, loading } = useModelUsage(range, mode);
 
@@ -28,7 +29,7 @@ export const ModelUsageCard: React.FC = () => {
       title='Model usage'
       subtitle='Which models did the work.'
       right={
-        <div className='flex gap-2 flex-wrap'>
+        <div className='flex items-center gap-2 flex-wrap'>
           <Segmented
             value={mode}
             onChange={(v) => setMode(v as ModelUsageMode)}
@@ -38,22 +39,15 @@ export const ModelUsageCard: React.FC = () => {
               { value: 'sessions', label: 'By sessions' },
             ]}
           />
-          <Segmented
-            value={range}
-            onChange={(v) => setRange(v as ModelUsageRange)}
-            options={[
-              { value: '7d',  label: '7d' },
-              { value: '30d', label: '30d' },
-            ]}
-          />
+          <span className='inline-flex items-center gap-1.5'>
+            <InfoPill>Source coverage</InfoPill>
+            <InfoTooltip label='Model source coverage'>
+              <span className='text-[11px] text-slate-300 leading-snug'>{COVERAGE_NOTE}</span>
+            </InfoTooltip>
+          </span>
         </div>
       }
     >
-      <div className='mb-3 flex items-center gap-2 flex-wrap'>
-        <InfoPill>Source coverage</InfoPill>
-        <span className='text-[11px] text-slate-400'>{COVERAGE_NOTE}</span>
-      </div>
-
       {loading && !data ? (
         <SkeletonLine width='100%' height='3rem' />
       ) : !data || data.rows.length === 0 ? (

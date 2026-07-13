@@ -157,6 +157,147 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(store.countConsecutiveKills(card.id)).toBe(1);
   });
 
+  // ── Phase 2: execution tasks ───────────────────────────────────────────────
+
+  it('cards default to research; execution taskType persists and is patchable', () => {
+    const a = store.createCard({ title: 'a', projectId });
+    expect(a.taskType).toBe('research');
+    const b = store.createCard({ title: 'b', projectId, taskType: 'execution' });
+    expect(store.getCard(b.id)!.taskType).toBe('execution');
+    store.updateCard(a.id, { taskType: 'execution' });
+    expect(store.getCard(a.id)!.taskType).toBe('execution');
+    // Unknown values are ignored, not stored.
+    store.updateCard(a.id, { taskType: 'evil' as any });
+    expect(store.getCard(a.id)!.taskType).toBe('execution');
+  });
+
+  it('accepts enabled QA providers, rejects browser and unknowns', () => {
+    const a = store.createCard({ title: 'a', projectId, taskType: 'execution', qaProvider: 'tests' });
+    expect(a.qaProvider).toBe('tests');
+    const b = store.createCard({ title: 'b', projectId, qaProvider: 'browser' as any });
+    expect(b.qaProvider).toBe('none');
+    store.updateCard(a.id, { qaProvider: 'browser' });
+    expect(store.getCard(a.id)!.qaProvider).toBe('tests'); // rejected, unchanged
+    store.updateCard(a.id, { qaProvider: 'custom' });
+    expect(store.getCard(a.id)!.qaProvider).toBe('custom');
+  });
+
+  it('normalizes qaCommand and acceptance criteria', () => {
+    const a = store.createCard({
+      title: 'a', projectId,
+      qaCommand: '  npm run e2e  ',
+      acceptanceCriteria: [' keeps API stable ', '', 42 as any, 'tests pass'],
+    });
+    expect(a.qaCommand).toBe('npm run e2e');
+    expect(a.acceptanceCriteria).toEqual(['keeps API stable', 'tests pass']);
+    store.updateCard(a.id, { qaCommand: '   ' });
+    expect(store.getCard(a.id)!.qaCommand).toBeNull();
+  });
+
+  it('claimCard also claims rework cards', () => {
+    const card = store.createCard({ title: 'x', projectId, state: 'todo' });
+    store.setCardState(card.id, 'rework');
+    expect(store.claimCard(card.id)).toBe(true);
+    expect(store.getCard(card.id)!.state).toBe('claimed');
+  });
+
+  it('moveCard allows rework → todo for a manual requeue', () => {
+    const card = store.createCard({ title: 'x', projectId, state: 'todo' });
+    store.setCardState(card.id, 'rework');
+    const res = store.moveCard(card.id, 'todo');
+    expect(res.ok).toBe(true);
+    expect(res.card!.state).toBe('todo');
+  });
+
+  it('setWorktree / clearWorktree round-trip', () => {
+    const card = store.createCard({ title: 'x', projectId, taskType: 'execution' });
+    store.setWorktree(card.id, 'E:/wt/abc', 'deadbeef123');
+    let got = store.getCard(card.id)!;
+    expect(got.worktreePath).toBe('E:/wt/abc');
+    expect(got.baseSha).toBe('deadbeef123');
+    store.clearWorktree(card.id);
+    got = store.getCard(card.id)!;
+    expect(got.worktreePath).toBeNull();
+    expect(got.baseSha).toBeNull();
+  });
+
+  it('artifacts persist their kind (report default, diff, qa-report)', () => {
+    const card = store.createCard({ title: 'x', projectId, state: 'todo' });
+    const attempt = store.insertAttempt(card.id, false);
+    store.insertArtifact({ cardId: card.id, attemptId: attempt.id, path: 'a.md', preview: '' });
+    store.insertArtifact({ cardId: card.id, attemptId: attempt.id, path: 'a.patch', preview: '', kind: 'diff' });
+    store.insertArtifact({ cardId: card.id, attemptId: attempt.id, path: 'a.qa.txt', preview: '', kind: 'qa-report' });
+    const kinds = store.listArtifacts(card.id).map((a) => a.kind).sort();
+    expect(kinds).toEqual(['diff', 'qa-report', 'report']);
+  });
+
+  it('countConsecutiveQaFails counts trailing qa-failed and resets on success', () => {
+    const card = store.createCard({ title: 'x', projectId, state: 'todo' });
+    const finishAt = (outcome: 'success' | 'qa-failed' | 'paused', startedAt: number) => {
+      const attempt = store.insertAttempt(card.id, false);
+      store.finishAttempt(attempt.id, { outcome });
+      db.prepare('UPDATE attempts SET started_at = ? WHERE id = ?').run([startedAt, attempt.id]);
+    };
+    expect(store.countConsecutiveQaFails(card.id)).toBe(0);
+    finishAt('qa-failed', 1_000);
+    expect(store.countConsecutiveQaFails(card.id)).toBe(1);
+    // A qa-failed streak never counts as budget kills and vice versa.
+    expect(store.countConsecutiveKills(card.id)).toBe(0);
+    finishAt('success', 2_000);
+    expect(store.countConsecutiveQaFails(card.id)).toBe(0);
+  });
+});
+
+describe.skipIf(!dbAvailable)('backlog schema migration v2 → v3', () => {
+  it('adds the Phase 2 columns to an existing v2 board', () => {
+    const fs = require('fs') as typeof import('fs');
+    const os = require('os') as typeof import('os');
+    const path = require('path') as typeof import('path');
+    const Database = require('better-sqlite3');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pulse-mig-'));
+    const dbPath = path.join(dir, 'board.db');
+    try {
+      // Build a minimal v2 board (pre-Phase-2 cards table, version pinned to 2).
+      const legacy = new Database(dbPath);
+      legacy.exec(`
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+        CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
+        CREATE TABLE cards (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+          project_id TEXT NOT NULL REFERENCES projects(id), state TEXT NOT NULL DEFAULT 'refinement',
+          risk_tier TEXT NOT NULL DEFAULT 'green', estimated_minutes INTEGER, estimated_cost_usd REAL,
+          prereq_ids TEXT NOT NULL DEFAULT '[]', qa_provider TEXT NOT NULL DEFAULT 'none',
+          acceptance_criteria TEXT NOT NULL DEFAULT '[]', sort_order INTEGER NOT NULL DEFAULT 0,
+          blocked_reason TEXT, model TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE attempts (id TEXT PRIMARY KEY, card_id TEXT NOT NULL, started_at INTEGER NOT NULL,
+          ended_at INTEGER, outcome TEXT, reason TEXT, cost_usd REAL, num_turns INTEGER, session_id TEXT,
+          manual INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE artifacts (id TEXT PRIMARY KEY, card_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'report', path TEXT NOT NULL, preview TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES (2);
+        INSERT INTO projects (id, name, path, created_at) VALUES ('p1', 'demo', 'E:/repos/demo', 1);
+        INSERT INTO cards (id, title, project_id, state, created_at, updated_at)
+          VALUES ('c1', 'legacy card', 'p1', 'todo', 1, 1);
+      `);
+      legacy.close();
+
+      const migrated = openBacklogDb(dbPath)!;
+      expect(migrated).not.toBeNull();
+      const store = new BacklogStore(migrated);
+      const card = store.getCard('c1')!;
+      expect(card.taskType).toBe('research');   // v3 default
+      expect(card.worktreePath).toBeNull();
+      expect(card.baseSha).toBeNull();
+      expect(card.qaCommand).toBeNull();
+      const version = migrated.prepare('SELECT version FROM schema_version').get() as { version: number };
+      expect(version.version).toBe(3);
+      migrated.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe.skipIf(dbAvailable)('BacklogStore (native module unavailable)', () => {

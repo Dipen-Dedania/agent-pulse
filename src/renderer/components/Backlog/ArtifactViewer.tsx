@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { BacklogArtifact, BacklogAttempt, BacklogCard } from '../../../common/backlog-types';
+import { BacklogArtifact, BacklogArtifactKind, BacklogAttempt, BacklogCard } from '../../../common/backlog-types';
 import { logger } from '../../../common/logger';
+import { useBacklogStore } from '../../store/useBacklogStore';
+import { appAlert, appConfirm } from '../Dialog/AppDialog';
 
-// Card detail: attempt history + the latest research report. Reports live as
-// .md files under userData/backlog-artifacts; "Open file" reuses the existing
-// open-path IPC so users can read them in their own editor.
+// Card detail: attempt history + artifacts (research report / execution diff
+// + QA report) +, for execution cards, the worktree the diff came from.
+// Files live under userData/backlog-artifacts; "Open file"/"Open folder"
+// reuse the existing open-path IPC so users can inspect them in their own
+// editor/explorer.
 
 interface Props {
   card: BacklogCard;
@@ -26,14 +30,42 @@ const OUTCOME_COLOR: Record<string, string> = {
   failed: 'text-red-300',
   paused: 'text-amber-300',
   killed: 'text-amber-300',
+  'qa-failed': 'text-orange-300',
 };
 
+const OUTCOME_LABEL: Record<string, string> = {
+  'qa-failed': 'QA failed',
+};
+
+// report = markdown summary, diff = git patch (rendered monospace, no wrap),
+// qa-report = QA command output (first line carries the pass/fail verdict).
+const KIND_LABEL: Record<BacklogArtifactKind, string> = {
+  report: 'Summary',
+  diff: 'Diff',
+  'qa-report': 'QA report',
+};
+const KIND_ORDER: BacklogArtifactKind[] = ['report', 'diff', 'qa-report'];
+
+/** Parses the qa.ts-written verdict line, e.g. "# QA: PASSED" / "# QA: FAILED". */
+function parseQaVerdict(content: string | null): 'passed' | 'failed' | null {
+  if (!content) return null;
+  const firstLine = content.split('\n', 1)[0]?.trim() ?? '';
+  if (/^#\s*QA:\s*PASSED/i.test(firstLine)) return 'passed';
+  if (/^#\s*QA:\s*FAILED/i.test(firstLine)) return 'failed';
+  return null;
+}
+
 export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
+  const removeWorktree = useBacklogStore((s) => s.removeWorktree);
   const [attempts, setAttempts] = useState<BacklogAttempt[]>([]);
   const [artifacts, setArtifacts] = useState<BacklogArtifact[]>([]);
   const [selected, setSelected] = useState<BacklogArtifact | null>(null);
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Hides the worktree panel immediately after a successful removal — the
+  // `card` prop is a snapshot from the board and won't itself update until
+  // the next hydrate + re-open.
+  const [worktreeGone, setWorktreeGone] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +97,25 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
   const openFile = () => {
     if (selected) void window.electron.invoke('open-path', selected.path);
   };
+
+  const openWorktreeFolder = () => {
+    if (card.worktreePath) void window.electron.invoke('open-path', card.worktreePath);
+  };
+
+  const handleRemoveWorktree = async () => {
+    const ok = await appConfirm({
+      title: 'Remove worktree?',
+      message: 'This discards the uncommitted changes in the worktree. The captured diff artifact stays on the card.',
+      confirmLabel: 'Remove worktree',
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await removeWorktree(card.id);
+    if (res.ok) setWorktreeGone(true);
+    else if (res.reason) void appAlert(res.reason, 'Backlog');
+  };
+
+  const qaVerdict = selected?.kind === 'qa-report' ? parseQaVerdict(content) : null;
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
@@ -100,7 +151,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                     <div key={a.id} className='flex items-center gap-3 text-xs flex-wrap'>
                       <span className='text-slate-400 w-32 shrink-0'>{formatWhen(a.startedAt)}</span>
                       <span className={`font-medium ${OUTCOME_COLOR[a.outcome ?? ''] ?? 'text-slate-300'}`}>
-                        {a.outcome ?? 'running…'}
+                        {OUTCOME_LABEL[a.outcome ?? ''] ?? a.outcome ?? 'running…'}
                       </span>
                       {formatDuration(a) && <span className='text-slate-500'>{formatDuration(a)}</span>}
                       {a.costUsd != null && <span className='text-slate-500'>${a.costUsd.toFixed(2)}</span>}
@@ -113,20 +164,39 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
               )}
             </div>
 
-            {/* Report */}
+            {/* Artifact — grouped by kind: Summary / Diff / QA report */}
             {artifacts.length > 0 && (
               <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 flex flex-col gap-3'>
                 <div className='flex items-center gap-2 flex-wrap'>
-                  <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold flex-1'>Report</p>
+                  <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold flex-1'>
+                    {selected ? KIND_LABEL[selected.kind] : 'Report'}
+                  </p>
+                  {qaVerdict && (
+                    <span
+                      className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                        qaVerdict === 'passed' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'
+                      }`}
+                    >
+                      {qaVerdict === 'passed' ? 'PASS' : 'FAIL'}
+                    </span>
+                  )}
                   {artifacts.length > 1 && (
                     <select
                       value={selected?.id ?? ''}
                       onChange={(e) => setSelected(artifacts.find((x) => x.id === e.target.value) ?? null)}
                       className='bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1 text-xs text-white cursor-pointer focus:outline-none'
                     >
-                      {artifacts.map((x) => (
-                        <option key={x.id} value={x.id}>{formatWhen(x.createdAt)}</option>
-                      ))}
+                      {KIND_ORDER.map((kind) => {
+                        const inKind = artifacts.filter((x) => x.kind === kind);
+                        if (inKind.length === 0) return null;
+                        return (
+                          <optgroup key={kind} label={KIND_LABEL[kind]}>
+                            {inKind.map((x) => (
+                              <option key={x.id} value={x.id}>{formatWhen(x.createdAt)}</option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
                     </select>
                   )}
                   <button
@@ -136,9 +206,43 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                     Open file
                   </button>
                 </div>
-                <pre className='whitespace-pre-wrap text-xs text-slate-200 leading-relaxed font-mono max-h-96 overflow-y-auto apple-scroll'>
-                  {content ?? 'Loading report…'}
-                </pre>
+                {selected?.kind === 'diff' ? (
+                  // Git patch — preserve exact formatting, scroll sideways instead of wrapping.
+                  <pre className='text-xs text-slate-200 leading-relaxed font-mono max-h-96 overflow-auto apple-scroll whitespace-pre'>
+                    {content ?? 'Loading diff…'}
+                  </pre>
+                ) : (
+                  <pre className='whitespace-pre-wrap text-xs text-slate-200 leading-relaxed font-mono max-h-96 overflow-y-auto apple-scroll'>
+                    {content ?? 'Loading…'}
+                  </pre>
+                )}
+              </div>
+            )}
+
+            {/* Worktree — execution cards only, preserved until removed by hand */}
+            {card.taskType === 'execution' && card.worktreePath && !worktreeGone && (
+              <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 flex flex-col gap-2'>
+                <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Worktree</p>
+                <p className='text-xs text-slate-300 font-mono break-all'>{card.worktreePath}</p>
+                {card.baseSha && (
+                  <p className='text-xs text-slate-500'>
+                    base <span className='font-mono text-slate-400'>{card.baseSha.slice(0, 7)}</span>
+                  </p>
+                )}
+                <div className='flex items-center gap-2 mt-1'>
+                  <button
+                    onClick={openWorktreeFolder}
+                    className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'
+                  >
+                    Open folder
+                  </button>
+                  <button
+                    onClick={() => void handleRemoveWorktree()}
+                    className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-red-500/30 text-slate-300 hover:text-red-300 cursor-pointer transition-colors'
+                  >
+                    Remove worktree
+                  </button>
+                </div>
               </div>
             )}
           </>

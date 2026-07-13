@@ -54,7 +54,7 @@ const DayColumn: React.FC<{ label: string; digest: DailyDigest | undefined }> = 
             <div className='mt-4 pt-3 border-t border-slate-700/60'>
               <div className='flex items-center gap-2 mb-2'>
                 <p className='text-[10px] uppercase tracking-widest text-slate-500'>Tokens</p>
-                <InfoPill>Claude Code only</InfoPill>
+                <InfoPill>token-reporting agents</InfoPill>
               </div>
               <div className='grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-mono'>
                 <span className='text-slate-400'>in</span>

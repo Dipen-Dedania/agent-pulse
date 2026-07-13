@@ -42,12 +42,14 @@ export const WindowValueCard: React.FC = () => {
       title='Claude usage value'
       subtitle={`Estimated API-equivalent spend for ${toolLabel} — how much you're extracting from your plan.`}
     >
-      <div className='mb-3 flex items-center gap-2 flex-wrap'>
+      <div className='mb-3 flex items-center gap-1.5'>
         <InfoPill>Estimated cost</InfoPill>
-        <span className='text-[11px] text-slate-400'>
-          Trailing windows priced at API list rates. The flat-rate plan you pay is fixed — this is what the same
-          usage would cost on the API.
-        </span>
+        <InfoTooltip label='How this cost is estimated'>
+          <span className='text-[11px] text-slate-300 leading-snug'>
+            Trailing windows priced at API list rates. The flat-rate plan you pay is fixed — this is what the
+            same usage would cost on the API.
+          </span>
+        </InfoTooltip>
       </div>
 
       {loading && !data ? (

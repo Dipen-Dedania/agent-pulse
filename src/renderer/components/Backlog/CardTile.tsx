@@ -78,7 +78,19 @@ export const CardTile: React.FC<Props> = ({
       </div>
 
       <div className='flex items-center gap-2 flex-wrap text-[11px] text-slate-400'>
+        {/* Task type: quiet "R" for research, called-out "exec" chip for execution */}
+        <span
+          className={`px-1.5 py-0.5 rounded font-mono ${
+            card.taskType === 'execution' ? 'bg-cyan-500/15 text-cyan-300' : 'bg-slate-700/40 text-slate-500'
+          }`}
+          title={card.taskType === 'execution' ? 'Execution — edits files in an isolated worktree' : 'Research — read-only, produces a report'}
+        >
+          {card.taskType === 'execution' ? '⚡ exec' : 'R'}
+        </span>
         <span className={`px-1.5 py-0.5 rounded ${projectColor(card.projectId).chip}`}>{projectName}</span>
+        {card.worktreePath && (
+          <span title={`Worktree: ${card.worktreePath}`}>📁</span>
+        )}
         {/* Effective model: card override stands out, inherited default stays quiet */}
         {(card.model ?? projectDefaultModel) && (
           <span
@@ -113,6 +125,9 @@ export const CardTile: React.FC<Props> = ({
       {card.state === 'paused' && (
         <p className='text-[11px] text-amber-300/80'>Interrupted — re-runs first in the next window.</p>
       )}
+      {card.state === 'rework' && (
+        <p className='text-[11px] text-orange-300/80'>QA failed — retries once automatically, then blocks.</p>
+      )}
 
       <div className='flex items-center gap-1 flex-wrap'>
         {card.state === 'todo' && (
@@ -138,6 +153,12 @@ export const CardTile: React.FC<Props> = ({
         )}
         {card.state === 'blocked' && (
           <ActionButton onClick={() => onMove('todo')} title='Retry — back to Todo'>↻ Retry</ActionButton>
+        )}
+        {card.state === 'rework' && (
+          <>
+            <ActionButton onClick={onRunNow} title='Run now'>▶ Run</ActionButton>
+            <ActionButton onClick={() => onMove('todo')} title='Back to Todo'>→ Todo</ActionButton>
+          </>
         )}
         {card.state === 'done' && (
           <>

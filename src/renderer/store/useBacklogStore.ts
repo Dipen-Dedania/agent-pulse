@@ -33,11 +33,15 @@ interface BacklogStore {
   createCard: (input: {
     title: string; description: string; projectId: string;
     state?: 'refinement' | 'todo';
+    taskType?: BacklogCard['taskType'];
     riskTier?: BacklogCard['riskTier'];
     model?: string | null;
     estimatedMinutes?: number | null;
     estimatedCostUsd?: number | null;
     prereqIds?: string[];
+    qaProvider?: BacklogCard['qaProvider'];
+    qaCommand?: string | null;
+    acceptanceCriteria?: string[];
   }) => Promise<BacklogCard | null>;
   updateCard: (id: string, patch: Partial<BacklogCard>) => Promise<BacklogCard | null>;
   deleteCard: (id: string) => Promise<void>;
@@ -45,6 +49,7 @@ interface BacklogStore {
   reorderTodo: (orderedIds: string[]) => Promise<void>;
   runNow: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
   stopRun: () => Promise<{ ok: boolean; reason?: string }>;
+  removeWorktree: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
   updateTemplates: (templates: BacklogTemplate[]) => Promise<BacklogTemplate[] | null>;
 }
 
@@ -165,6 +170,19 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
       return res ?? { ok: false, reason: 'unavailable' };
     } catch (e) {
       logger.error('[useBacklogStore] runNow failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  // Discards the worktree's uncommitted changes (confirmed in the caller);
+  // the captured diff artifact stays on the card either way.
+  removeWorktree: async (cardId) => {
+    try {
+      const res = await window.electron.invoke('backlog:remove-worktree', { cardId });
+      if (res?.ok) await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] removeWorktree failed', e);
       return { ok: false, reason: String(e) };
     }
   },

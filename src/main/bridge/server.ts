@@ -426,7 +426,10 @@ export function buildSecretBlockResponse(
   filePath: string,
 ): any {
   const ruleIds = evaluation.matched.map(m => m.ruleId).join(',');
-  const reason = `[Agent Pulse] Blocked read of protected file ${filePath}`;
+  const detail = evaluation.matched
+    .map(m => m.message ?? m.glob)
+    .join(' | ') || 'protected file';
+  const reason = `[Agent Pulse] Blocked by ${ruleIds || 'secret protection'}: read of protected file ${filePath} — ${detail}`;
   return buildDenyResponse(toolId, reason, ruleIds);
 }
 

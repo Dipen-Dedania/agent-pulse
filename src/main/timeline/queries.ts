@@ -11,6 +11,8 @@ import {
   HeatmapSeries,
   HeatmapRange,
   HourRhythmPayload,
+  HourRhythmRange,
+  TimelineRange,
   ToolMixPayload,
   ToolMixRange,
   ModelUsagePayload,
@@ -26,9 +28,13 @@ import {
   GuardrailsAnalyticsRange,
   GuardrailToolCount,
   GuardrailRuleCount,
+  SecretAccessAnalyticsPayload,
+  SecretAccessFileCount,
   ModelUsageMode,
   WindowValuePayload,
   WindowValueSlice,
+  AnalyticsSummaryPayload,
+  SummarySlice,
 } from '../../common/timeline-types';
 import { estimateCost, estimateCostBreakdown, rateForModel, CostBreakdown, TokenCounts } from '../../common/pricing';
 
@@ -49,10 +55,15 @@ function formatLocalDate(ts: number): string {
   return `${y}-${m}-${day}`;
 }
 
-function rangeMs(range: '7d' | '30d' | '90d'): number {
-  if (range === '7d')  return 7  * DAY_MS;
-  if (range === '30d') return 30 * DAY_MS;
-  return 90 * DAY_MS;
+function rangeDays(range: TimelineRange): number {
+  if (range === '7d')  return 7;
+  if (range === '30d') return 30;
+  if (range === '90d') return 90;
+  return 365;
+}
+
+function rangeMs(range: TimelineRange): number {
+  return rangeDays(range) * DAY_MS;
 }
 
 interface SessionAggregateRow {
@@ -129,6 +140,50 @@ export class TimelineQueries {
     };
   }
 
+  // Tab-level KPI aggregates for the selected range plus the immediately
+  // preceding period of equal length, so the hero row can show deltas.
+  getSummary(range: TimelineRange): AnalyticsSummaryPayload {
+    const now = Date.now();
+    const span = rangeMs(range);
+    return {
+      range,
+      current:  this.summaryForWindow(now - span, now),
+      previous: this.summaryForWindow(now - 2 * span, now - span),
+      queriedAt: now,
+    };
+  }
+
+  private summaryForWindow(startMs: number, endMs: number): SummarySlice {
+    const rows = this.db.query<SessionAggregateRow>(
+      `SELECT project_path, started_at, ended_at, models_used,
+              total_tokens_in, total_tokens_out, total_cache_read, total_cache_write
+       FROM sessions WHERE started_at >= ? AND started_at < ?`,
+      [startMs, endMs],
+    );
+    let activeMs = 0;
+    let costUsd = 0;
+    const byProject = new Map<string, { displayName: string; activeMs: number }>();
+    for (const r of rows) {
+      const duration = Math.max(0, r.ended_at - r.started_at);
+      activeMs += duration;
+      costUsd += this.costForSession(r.models_used, {
+        tokensIn: r.total_tokens_in, tokensOut: r.total_tokens_out,
+        cacheRead: r.total_cache_read, cacheWrite: r.total_cache_write,
+      }).costUsd;
+      if (r.project_path) {
+        const displayName = path.basename(r.project_path);
+        const entry = byProject.get(displayName) ?? { displayName, activeMs: 0 };
+        entry.activeMs += duration;
+        byProject.set(displayName, entry);
+      }
+    }
+    let topProject: SummarySlice['topProject'] = null;
+    for (const p of byProject.values()) {
+      if (!topProject || p.activeMs > topProject.activeMs) topProject = p;
+    }
+    return { activeMs, sessions: rows.length, costUsd, topProject };
+  }
+
   getHeatmap(range: HeatmapRange, groupBy: 'tool' | 'project' | 'all'): HeatmapPayload {
     const now = Date.now();
     const startMs = startOfLocalDay(now) - rangeMs(range) + DAY_MS;
@@ -141,7 +196,7 @@ export class TimelineQueries {
     );
 
     // Build day list (oldest → newest)
-    const dayCount = range === '90d' ? 90 : 30;
+    const dayCount = rangeDays(range);
     const dayBuckets: string[] = [];
     const today = startOfLocalDay(now);
     for (let i = dayCount - 1; i >= 0; i--) {
@@ -226,7 +281,7 @@ export class TimelineQueries {
     return { range, groupBy, series, queriedAt: now };
   }
 
-  getHourRhythm(range: '7d' | '30d'): HourRhythmPayload {
+  getHourRhythm(range: HourRhythmRange): HourRhythmPayload {
     const now = Date.now();
     const startMs = now - rangeMs(range);
     const rows = this.db.query<{ started_at: number; ended_at: number }>(
@@ -425,7 +480,7 @@ export class TimelineQueries {
 
   getTokensTimeline(range: TokensTimelineRange): TokensTimelinePayload {
     const now = Date.now();
-    const dayCount = range === '7d' ? 7 : range === '30d' ? 30 : 90;
+    const dayCount = rangeDays(range);
     const startMs = startOfLocalDay(now) - (dayCount - 1) * DAY_MS;
 
     const rows = this.db.query<{
@@ -553,6 +608,80 @@ export class TimelineQueries {
     const byRule = Array.from(byRuleMap.values()).sort((a, b) => b.count - a.count);
 
     return { range, total, warn, block, byTool, byRule, queriedAt: now };
+  }
+
+  // Secret Protection analytics — same aggregation as getGuardrails over the
+  // secret_access_events table, plus a per-file count so the card can show
+  // which protected files agents keep trying to read.
+  getSecretAccess(range: GuardrailsAnalyticsRange): SecretAccessAnalyticsPayload {
+    const now = Date.now();
+    const startMs = now - rangeMs(range);
+
+    const rows = this.db.query<{
+      tool_id: string;
+      decision: string;
+      file_path: string;
+      rule_ids: string;
+      rule_messages: string;
+    }>(
+      `SELECT tool_id, decision, file_path, rule_ids, rule_messages
+         FROM secret_access_events
+        WHERE ts >= ?`,
+      [startMs],
+    );
+
+    let total = 0;
+    let warn  = 0;
+    let block = 0;
+    const byToolMap = new Map<string, GuardrailToolCount>();
+    const byRuleMap = new Map<string, GuardrailRuleCount>();
+    const byFileMap = new Map<string, SecretAccessFileCount>();
+
+    for (const r of rows) {
+      total += 1;
+      if (r.decision === 'warn')  warn  += 1;
+      if (r.decision === 'block') block += 1;
+
+      const toolEntry = byToolMap.get(r.tool_id) ?? {
+        toolId: r.tool_id as ToolId,
+        total: 0,
+        warn: 0,
+        block: 0,
+      };
+      toolEntry.total += 1;
+      if (r.decision === 'warn')  toolEntry.warn  += 1;
+      if (r.decision === 'block') toolEntry.block += 1;
+      byToolMap.set(r.tool_id, toolEntry);
+
+      const fileEntry = byFileMap.get(r.file_path) ?? { filePath: r.file_path, count: 0 };
+      fileEntry.count += 1;
+      byFileMap.set(r.file_path, fileEntry);
+
+      // rule_messages: JSON.stringify([{ ruleId, message }, ...]) — same
+      // fallback-to-rule_ids handling as getGuardrails.
+      let matched: Array<{ ruleId: string; message: string }> = [];
+      try {
+        const parsed = JSON.parse(r.rule_messages);
+        if (Array.isArray(parsed)) matched = parsed;
+      } catch {
+        matched = r.rule_ids.split(',').filter(Boolean).map((id) => ({ ruleId: id, message: id }));
+      }
+      for (const m of matched) {
+        const ruleEntry = byRuleMap.get(m.ruleId) ?? {
+          ruleId: m.ruleId,
+          message: m.message ?? m.ruleId,
+          count: 0,
+        };
+        ruleEntry.count += 1;
+        byRuleMap.set(m.ruleId, ruleEntry);
+      }
+    }
+
+    const byTool = Array.from(byToolMap.values()).sort((a, b) => b.total - a.total);
+    const byRule = Array.from(byRuleMap.values()).sort((a, b) => b.count - a.count);
+    const byFile = Array.from(byFileMap.values()).sort((a, b) => b.count - a.count);
+
+    return { range, total, warn, block, byTool, byRule, byFile, queriedAt: now };
   }
 
   getWindowValue(toolId: ToolId = 'claude-code'): WindowValuePayload {

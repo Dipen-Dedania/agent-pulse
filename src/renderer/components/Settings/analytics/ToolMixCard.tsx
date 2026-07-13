@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
-import { ToolMixRange } from '../../../../common/timeline-types';
+import React from 'react';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { formatUsd } from '../../../../common/pricing';
 import { useToolMix } from './useAnalytics';
-import { Card, EmptyState, InfoPill, Segmented, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
+import { useGlobalRange } from './rangeContext';
+import { Card, EmptyState, InfoPill, InfoTooltip, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
 
 const COLORS = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee'];
 
@@ -13,7 +13,7 @@ const COVERAGE_NOTE =
   '(Claude Code, OpenAI Codex, Antigravity) can be priced — Cursor, Copilot, and Kiro show activity only.';
 
 export const ToolMixCard: React.FC = () => {
-  const [range, setRange] = useState<ToolMixRange>('30d');
+  const range = useGlobalRange();
   const { data, loading } = useToolMix(range);
 
   return (
@@ -21,21 +21,14 @@ export const ToolMixCard: React.FC = () => {
       title='Agent scorecard'
       subtitle='Active time, tokens, and estimated cost per agent.'
       right={
-        <Segmented
-          value={range}
-          onChange={(v) => setRange(v as ToolMixRange)}
-          options={[
-            { value: '7d',  label: '7d' },
-            { value: '30d', label: '30d' },
-          ]}
-        />
+        <span className='inline-flex items-center gap-1.5'>
+          <InfoPill>Estimated cost</InfoPill>
+          <InfoTooltip label='Cost coverage'>
+            <span className='text-[11px] text-slate-300 leading-snug'>{COVERAGE_NOTE}</span>
+          </InfoTooltip>
+        </span>
       }
     >
-      <div className='mb-3 flex items-center gap-2 flex-wrap'>
-        <InfoPill>Estimated cost</InfoPill>
-        <span className='text-[11px] text-slate-400'>{COVERAGE_NOTE}</span>
-      </div>
-
       {loading && !data ? (
         <SkeletonLine width='100%' height='3rem' />
       ) : !data || data.slices.length === 0 ? (

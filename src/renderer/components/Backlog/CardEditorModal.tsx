@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { BacklogCard, BacklogProject, BacklogTemplate, RiskTier, isSafeModelId } from '../../../common/backlog-types';
+import {
+  BacklogCard, BacklogProject, BacklogTaskType, BacklogTemplate, QaProvider, RiskTier, isSafeModelId,
+} from '../../../common/backlog-types';
 import { TIER_META } from './CardTile';
 import { TemplateManagerModal } from './TemplateManagerModal';
 
-// Create/edit a card. Phase 1: acceptance criteria and QA provider render
-// disabled — they arrive with execution tasks (see backlog.md).
+// Create/edit a card. Research cards stay read-only (report only); execution
+// cards edit files in an isolated worktree and gain the acceptance-criteria +
+// QA-provider block below (see backlog-phase2-plan.md).
 
 interface Props {
   card: BacklogCard | null;     // null = create
@@ -13,15 +16,29 @@ interface Props {
   cards: BacklogCard[];         // prereq candidates (all board cards)
   onSave: (input: {
     title: string; description: string; projectId: string;
+    taskType: BacklogTaskType;
     riskTier: RiskTier;
     model: string | null;
     estimatedMinutes: number | null;
     estimatedCostUsd: number | null;
     prereqIds: string[];
+    qaProvider: QaProvider;
+    qaCommand: string | null;
+    acceptanceCriteria: string[];
     state?: 'refinement' | 'todo';
   }) => void;
   onClose: () => void;
 }
+
+// 'browser' is intentionally excluded — it stays disabled until the
+// browser-QA phase (see backlog-types.ts).
+const QA_PROVIDERS: { value: QaProvider; label: string; hint: string }[] = [
+  { value: 'none', label: 'None', hint: 'QA is skipped — the diff goes straight to Done.' },
+  { value: 'tests', label: 'Tests', hint: 'runs `npm test` in the worktree after the change' },
+  { value: 'lint', label: 'Lint', hint: 'runs `npm run lint` in the worktree after the change' },
+  { value: 'typecheck', label: 'Typecheck', hint: 'runs `npx tsc --noEmit` in the worktree after the change' },
+  { value: 'custom', label: 'Custom command…', hint: 'runs the command below in the worktree' },
+];
 
 // Alias presets the CLI resolves to the latest model of each tier; "custom"
 // reveals a free-text input for full ids (e.g. claude-sonnet-4-6). Empty
@@ -41,7 +58,12 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   const [title, setTitle] = useState(card?.title ?? '');
   const [description, setDescription] = useState(card?.description ?? '');
   const [projectId, setProjectId] = useState(card?.projectId ?? projects[0]?.id ?? '');
+  const [taskType, setTaskType] = useState<BacklogTaskType>(card?.taskType ?? 'research');
   const [riskTier, setRiskTier] = useState<RiskTier>(card?.riskTier ?? 'green');
+  // One criterion per line in the UI; stored/injected as a string array.
+  const [acceptanceCriteria, setAcceptanceCriteria] = useState<string>((card?.acceptanceCriteria ?? []).join('\n'));
+  const [qaProvider, setQaProvider] = useState<QaProvider>(card?.qaProvider ?? 'none');
+  const [qaCommand, setQaCommand] = useState<string>(card?.qaCommand ?? '');
   const [estimatedMinutes, setEstimatedMinutes] = useState<string>(card?.estimatedMinutes?.toString() ?? '');
   const [estimatedCostUsd, setEstimatedCostUsd] = useState<string>(card?.estimatedCostUsd?.toString() ?? '');
   const [prereqIds, setPrereqIds] = useState<string[]>(card?.prereqIds ?? []);
@@ -88,6 +110,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
     title: title.trim(),
     description,
     projectId,
+    taskType,
     riskTier,
     model: modelChoice === '' ? null : modelChoice === 'custom' ? (customModel.trim() || null) : modelChoice,
     // Mirror the engine's [5, 120] budget clamp so the card shows the minutes
@@ -95,6 +118,14 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
     estimatedMinutes: estimatedMinutes.trim() === '' ? null : Math.min(120, Math.max(5, Number(estimatedMinutes) || 0)),
     estimatedCostUsd: estimatedCostUsd.trim() === '' ? null : Math.max(0, Number(estimatedCostUsd) || 0),
     prereqIds,
+    // QA fields are execution-only; research cards persist whatever was last
+    // set (harmless — the engine ignores them for research runs) but we send
+    // 'none'/empty so switching a card back to research reads cleanly.
+    qaProvider: taskType === 'execution' ? qaProvider : 'none',
+    qaCommand: taskType === 'execution' && qaProvider === 'custom' ? (qaCommand.trim() || null) : null,
+    acceptanceCriteria: taskType === 'execution'
+      ? acceptanceCriteria.split('\n').map((line) => line.trim()).filter((line) => line.length > 0)
+      : [],
     ...(state ? { state } : {}),
   });
 
@@ -177,6 +208,27 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
               ))}
             </select>
           </label>
+
+          <div className='flex flex-col gap-1.5'>
+            <span className={labelClass}>Task type</span>
+            <div className='flex gap-1 p-1 bg-slate-900/50 border border-slate-700/60 rounded-xl w-fit'>
+              {([
+                { value: 'research', label: 'Research', hint: 'Read-only — the agent produces a report.' },
+                { value: 'execution', label: 'Execution', hint: 'Edits files in an isolated worktree — delivers a diff + report.' },
+              ] as { value: BacklogTaskType; label: string; hint: string }[]).map((t) => (
+                <button
+                  key={t.value}
+                  onClick={() => setTaskType(t.value)}
+                  title={t.hint}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
+                    taskType === t.value ? 'bg-slate-700 text-white shadow-inner' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className='flex flex-col gap-1.5'>
             <span className={labelClass}>Risk tier</span>
@@ -276,19 +328,68 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           </div>
         )}
 
-        {/* Phase 1: present but disabled — arrives with execution tasks */}
-        <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 opacity-50'>
-          <p className='text-sm font-medium text-white'>Acceptance criteria & QA provider</p>
-          <p className='text-xs text-slate-400 mt-1'>
-            Coming with execution tasks — research cards are done when their report is attached.
-          </p>
-          <div className='mt-3 flex gap-3'>
-            <input disabled className={`${inputClass} flex-1`} placeholder='Acceptance criterion…' />
-            <select disabled className={`${inputClass} w-32`}>
-              <option>none</option>
-            </select>
+        {/* Acceptance criteria & QA provider — execution cards only */}
+        {taskType === 'execution' ? (
+          <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 flex flex-col gap-3'>
+            <div>
+              <p className='text-sm font-medium text-white'>Acceptance criteria & QA</p>
+              <p className='text-xs text-slate-400 mt-1'>
+                The executor edits files in an isolated worktree; QA runs the chosen check afterward and gates Done.
+              </p>
+            </div>
+
+            <label className='flex flex-col gap-1.5'>
+              <span className={labelClass}>Acceptance criteria</span>
+              <textarea
+                value={acceptanceCriteria}
+                onChange={(e) => setAcceptanceCriteria(e.target.value)}
+                rows={4}
+                className={`${inputClass} resize-y leading-relaxed`}
+                placeholder='One per line — injected into the executor prompt as a checklist. Not machine-checked yet.'
+              />
+            </label>
+
+            <label className='flex flex-col gap-1.5'>
+              <span className={labelClass}>QA provider</span>
+              <select
+                value={qaProvider}
+                onChange={(e) => setQaProvider(e.target.value as QaProvider)}
+                className={`${inputClass} cursor-pointer w-full sm:w-56`}
+              >
+                {QA_PROVIDERS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+                <option value='browser' disabled>Browser — coming later</option>
+              </select>
+              <span className='text-[11px] text-slate-500'>
+                {QA_PROVIDERS.find((p) => p.value === qaProvider)?.hint}
+              </span>
+            </label>
+
+            {qaProvider === 'custom' && (
+              <label className='flex flex-col gap-1.5'>
+                <span className={labelClass}>Custom QA command</span>
+                <input
+                  value={qaCommand}
+                  onChange={(e) => setQaCommand(e.target.value)}
+                  className={inputClass}
+                  placeholder='npm run e2e'
+                />
+                {qaCommand.trim() === '' && (
+                  <span className='text-[11px] text-amber-300'>
+                    Required for the custom provider — QA fails with no command to run.
+                  </span>
+                )}
+              </label>
+            )}
           </div>
-        </div>
+        ) : (
+          <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-3 opacity-50'>
+            <p className='text-xs text-slate-400'>
+              QA applies to execution tasks — research cards are done when their report is attached.
+            </p>
+          </div>
+        )}
 
         <div className='flex items-center gap-2 justify-end'>
           <button

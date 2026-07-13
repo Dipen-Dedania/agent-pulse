@@ -442,4 +442,30 @@ describe('buildSecretBlockResponse', () => {
     expect(resp.hookSpecificOutput.permissionDecision).toBe('deny');
     expect(resp.matchedRules).toContain('env');
   });
+
+  it('carries the matched rule ids and messages in the reason, like command blocks', () => {
+    const evaluation = evaluateSecretAccess('/proj/.env', { toolId: 'claude-code' });
+    const resp = buildSecretBlockResponse('claude-code', evaluation, '/proj/.env');
+    expect(resp.reason).toContain('[Agent Pulse] Blocked by env');
+    expect(resp.reason).toContain('Environment file');
+    expect(resp.hookSpecificOutput.permissionDecisionReason).toContain('Environment file');
+  });
+
+  it('falls back to the glob when a matched rule has no message', () => {
+    const evaluation = evaluateSecretAccess('/proj/token.txt', {
+      toolId: 'claude-code',
+      config: {
+        enabled: true,
+        disabledRuleIds: [],
+        customRules: [{ id: 'custom-token', glob: 'token.txt', source: 'user' }],
+        scope: 'global',
+        writeIgnoreFiles: true,
+        hookBlocking: true,
+      },
+    });
+    expect(evaluation.decision).toBe('block');
+    const resp = buildSecretBlockResponse('claude-code', evaluation, '/proj/token.txt');
+    expect(resp.reason).toContain('custom-token');
+    expect(resp.reason).toContain('token.txt');
+  });
 });

@@ -1,29 +1,18 @@
-import React, { useState } from 'react';
-import { ProjectBreakdownRange } from '../../../../common/timeline-types';
+import React from 'react';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { useProjectBreakdown } from './useAnalytics';
-import { Card, EmptyState, Segmented, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
+import { useGlobalRange } from './rangeContext';
+import { Card, EmptyState, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
 
 export const ProjectBreakdownCard: React.FC = () => {
-  const [range, setRange] = useState<ProjectBreakdownRange>('30d');
+  const range = useGlobalRange();
   const { data, loading } = useProjectBreakdown(range);
 
   return (
     <Card
       title='Project breakdown'
       subtitle='Active time per project (.git roots) across every agent.'
-      right={
-        <Segmented
-          value={range}
-          onChange={(v) => setRange(v as ProjectBreakdownRange)}
-          options={[
-            { value: '7d',  label: '7d' },
-            { value: '30d', label: '30d' },
-            { value: '90d', label: '90d' },
-          ]}
-        />
-      }
     >
       {loading && !data ? (
         <SkeletonLine width='100%' height='3rem' />

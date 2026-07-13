@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { TokensTimelineRange } from '../../../../common/timeline-types';
+import React, { useMemo, useState } from 'react';
+import { TokensTimelineBucket } from '../../../../common/timeline-types';
 import { formatUsd } from '../../../../common/pricing';
 import { useTokensTimeline } from './useAnalytics';
-import { Card, EmptyState, Segmented, SkeletonLine, formatCompactNumber } from './shared';
+import { useGlobalRange } from './rangeContext';
+import { Card, EmptyState, Segmented, SkeletonLine, formatCompactNumber, useChartTip } from './shared';
 
 const W = 600;
 const H = 140;
@@ -11,12 +12,11 @@ const PAD_TOP = 6;
 
 const FRESH_FILL   = 'rgba(96, 165, 250, 0.22)';   // blue-400
 const FRESH_STROKE = 'rgba(96, 165, 250, 0.95)';
-const CACHE_FILL   = 'rgba(148, 163, 184, 0.10)';  // slate-400, faint
-const CACHE_STROKE = 'rgba(148, 163, 184, 0.55)';
-const COST_FILL    = 'rgba(52, 211, 153, 0.20)';   // emerald-400
-const COST_STROKE  = 'rgba(52, 211, 153, 0.95)';
+const RATIO_FILL   = 'rgba(148, 163, 184, 0.12)';  // slate-400
+const RATIO_STROKE = 'rgba(148, 163, 184, 0.85)';
 
 type Metric = 'tokens' | 'cost';
+type TokenView = 'fresh' | 'ratio';
 
 interface Point { x: number; y: number; }
 
@@ -32,13 +32,23 @@ function buildLine(points: Point[]): string {
   return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
 }
 
+// Cache-read share of all input the model saw that day. 0 when the day had
+// no input at all.
+function cacheRatio(b: TokensTimelineBucket): number {
+  const denom = b.cacheRead + b.tokensIn;
+  return denom > 0 ? b.cacheRead / denom : 0;
+}
+
 export const TokensTimelineCard: React.FC = () => {
-  const [range, setRange] = useState<TokensTimelineRange>('30d');
+  const range = useGlobalRange();
   const [metric, setMetric] = useState<Metric>('tokens');
-  const [showCache, setShowCache] = useState<'on' | 'off'>('off');
+  const [tokenView, setTokenView] = useState<TokenView>('fresh');
   const { data, loading } = useTokensTimeline(range);
+  const { tipHandlers, tipOverlay } = useChartTip();
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   const isCost = metric === 'cost';
+  const isRatio = !isCost && tokenView === 'ratio';
   const n = data?.buckets.length ?? 0;
   const innerW = W - PAD_X * 2;
   const step = n > 1 ? innerW / (n - 1) : 0;
@@ -46,19 +56,50 @@ export const TokensTimelineCard: React.FC = () => {
   const yScale = (v: number, max: number) =>
     max > 0 ? H - PAD_TOP - (v / max) * (H - PAD_TOP) : H;
 
-  // Primary series: fresh tokens, or estimated cost.
-  const primaryMax = data ? (isCost ? data.maxCost : data.maxFresh) : 0;
-  const primaryFill   = isCost ? COST_FILL   : FRESH_FILL;
-  const primaryStroke = isCost ? COST_STROKE : FRESH_STROKE;
+  // Discrete bars stop being readable past ~100 buckets (the 3px gaps alone
+  // would overflow the card), so the cost view rolls long ranges up to weeks.
+  const barsAreWeekly = n > 100;
+  const costBars = useMemo<TokensTimelineBucket[]>(() => {
+    if (!data) return [];
+    if (!barsAreWeekly) return data.buckets;
+    const weeks: TokensTimelineBucket[] = [];
+    for (let i = 0; i < data.buckets.length; i += 7) {
+      const chunk = data.buckets.slice(i, i + 7);
+      const week = { date: chunk[0].date, tokensIn: 0, tokensOut: 0, cacheRead: 0, costUsd: 0 };
+      for (const b of chunk) {
+        week.tokensIn  += b.tokensIn;
+        week.tokensOut += b.tokensOut;
+        week.cacheRead += b.cacheRead;
+        week.costUsd   += b.costUsd;
+      }
+      weeks.push(week);
+    }
+    return weeks;
+  }, [data, barsAreWeekly]);
+  const costBarMax = useMemo(
+    () => costBars.reduce((max, b) => Math.max(max, b.costUsd), 0),
+    [costBars],
+  );
+
+  // Primary SVG series: fresh tokens, or the cache-read ratio on a fixed
+  // 0–100% scale (one axis — never two scales overlaid on one plot).
   const primaryPoints: Point[] = data
     ? data.buckets.map((b, i) => ({
         x: xs(i),
-        y: yScale(isCost ? b.costUsd : b.tokensIn + b.tokensOut, primaryMax),
+        y: isRatio
+          ? yScale(cacheRatio(b), 1)
+          : yScale(b.tokensIn + b.tokensOut, data.maxFresh),
       }))
     : [];
-  const cachePoints: Point[] = data
-    ? data.buckets.map((b, i) => ({ x: xs(i), y: yScale(b.cacheRead, data.maxCacheRead) }))
-    : [];
+  const stroke = isRatio ? RATIO_STROKE : FRESH_STROKE;
+  const fill   = isRatio ? RATIO_FILL   : FRESH_FILL;
+
+  const avgRatio = useMemo(() => {
+    if (!data) return 0;
+    const withInput = data.buckets.filter((b) => b.cacheRead + b.tokensIn > 0);
+    if (withInput.length === 0) return 0;
+    return withInput.reduce((s, b) => s + cacheRatio(b), 0) / withInput.length;
+  }, [data]);
 
   const axisLabels = data
     ? (() => {
@@ -73,12 +114,26 @@ export const TokensTimelineCard: React.FC = () => {
       })()
     : [];
 
+  const bucketTip = (b: TokensTimelineBucket) => (
+    <span>
+      <span className='font-semibold text-white'>
+        {isRatio ? `${(cacheRatio(b) * 100).toFixed(0)}% cache` : formatCompactNumber(b.tokensIn + b.tokensOut)}
+      </span>
+      <span className='text-slate-400'>
+        {' '}· {b.date} · in {formatCompactNumber(b.tokensIn)} / out {formatCompactNumber(b.tokensOut)}
+        {' '}· cache {formatCompactNumber(b.cacheRead)} · {formatUsd(b.costUsd)} est.
+      </span>
+    </span>
+  );
+
   return (
     <Card
-      title={isCost ? 'Spend per day' : 'Tokens per day'}
+      title={isCost ? (barsAreWeekly ? 'Spend per week' : 'Spend per day') : isRatio ? 'Cache hit ratio' : 'Tokens per day'}
       subtitle={isCost
-        ? 'Estimated API-equivalent cost by day — spot expensive days at a glance.'
-        : 'Fresh in+out tokens by day — spot heavy-spend days at a glance.'}
+        ? `Estimated API-equivalent cost by ${barsAreWeekly ? 'week' : 'day'} — spot expensive ${barsAreWeekly ? 'weeks' : 'days'} at a glance.`
+        : isRatio
+          ? 'Share of input the prompt cache served each day — higher is cheaper.'
+          : 'Fresh in+out tokens by day — spot heavy-spend days at a glance.'}
       right={
         <div className='flex gap-2 flex-wrap'>
           <Segmented
@@ -91,23 +146,14 @@ export const TokensTimelineCard: React.FC = () => {
           />
           {!isCost && (
             <Segmented
-              value={showCache}
-              onChange={(v) => setShowCache(v as 'on' | 'off')}
+              value={tokenView}
+              onChange={(v) => setTokenView(v as TokenView)}
               options={[
-                { value: 'off', label: 'Fresh' },
-                { value: 'on',  label: '+ Cache' },
+                { value: 'fresh', label: 'Fresh' },
+                { value: 'ratio', label: 'Cache %' },
               ]}
             />
           )}
-          <Segmented
-            value={range}
-            onChange={(v) => setRange(v as TokensTimelineRange)}
-            options={[
-              { value: '7d',  label: '7d' },
-              { value: '30d', label: '30d' },
-              { value: '90d', label: '90d' },
-            ]}
-          />
         </div>
       }
     >
@@ -117,42 +163,43 @@ export const TokensTimelineCard: React.FC = () => {
         <EmptyState message='No token activity in this window yet.' />
       ) : (
         <div>
+          {/* Peak/average annotation carries the scale the missing y-axis would. */}
           <div className='mb-2 flex items-center gap-4 text-[11px] text-slate-400 font-mono tabular-nums'>
             {isCost ? (
-              <span>
-                est. spend <span className='text-emerald-300'>{formatUsd(data.totalCostUsd)}</span>
-              </span>
+              <>
+                <span>est. spend <span className='text-emerald-300'>{formatUsd(data.totalCostUsd)}</span></span>
+                <span>peak <span className='text-slate-200'>{formatUsd(costBarMax)}</span>/{barsAreWeekly ? 'wk' : 'day'}</span>
+              </>
+            ) : isRatio ? (
+              <span>avg <span className='text-slate-200'>{(avgRatio * 100).toFixed(0)}%</span> of input served from cache</span>
             ) : (
               <>
-                <span>
-                  fresh <span className='text-slate-200'>{formatCompactNumber(data.totalFresh)}</span>
-                </span>
-                <span>
-                  cache <span className='text-slate-200'>{formatCompactNumber(data.totalCacheRead)}</span>
-                </span>
-                {showCache === 'on' && (
-                  <span className='text-[10px] text-slate-500'>cache scaled independently</span>
-                )}
+                <span>fresh <span className='text-slate-200'>{formatCompactNumber(data.totalFresh)}</span></span>
+                <span>cache <span className='text-slate-200'>{formatCompactNumber(data.totalCacheRead)}</span></span>
+                <span>peak <span className='text-slate-200'>{formatCompactNumber(data.maxFresh)}</span>/day</span>
               </>
             )}
           </div>
-          {/* Cost: discrete daily bars (solid CSS bars, matching the
-              Hour-of-day rhythm chart so the two read as a family). Tokens:
-              smooth SVG area+line, which suits a continuous flow. */}
           {isCost ? (
             <div className='flex items-end gap-[3px] h-36'>
-              {data.buckets.map((b) => {
+              {costBars.map((b) => {
                 const fresh = b.tokensIn + b.tokensOut;
-                // Floor a non-zero day at 4% so a tiny spend still shows a sliver.
-                const pct = b.costUsd > 0 && primaryMax > 0
-                  ? Math.max(4, (b.costUsd / primaryMax) * 100)
+                // Floor a non-zero bucket at 4% so a tiny spend still shows a sliver.
+                const pct = b.costUsd > 0 && costBarMax > 0
+                  ? Math.max(4, (b.costUsd / costBarMax) * 100)
                   : 0;
+                const bucketLabel = barsAreWeekly ? `week of ${b.date}` : b.date;
                 return (
                   <div
                     key={b.date}
-                    className='flex-1 bg-emerald-500/40 hover:bg-emerald-400/60 rounded-t transition-colors'
+                    className='flex-1 bg-emerald-500/40 hover:bg-emerald-400/70 rounded-t transition-colors'
                     style={{ height: `${pct}%` }}
-                    title={`${b.date} · ${formatUsd(b.costUsd)} est. · fresh ${fresh.toLocaleString()} tokens`}
+                    {...tipHandlers(
+                      <span>
+                        <span className='font-semibold text-white'>{formatUsd(b.costUsd)} est.</span>
+                        <span className='text-slate-400'> · {bucketLabel} · fresh {formatCompactNumber(fresh)} tokens</span>
+                      </span>,
+                    )}
                   />
                 );
               })}
@@ -162,24 +209,25 @@ export const TokensTimelineCard: React.FC = () => {
               viewBox={`0 0 ${W} ${H}`}
               preserveAspectRatio='none'
               className='w-full h-36'
+              onMouseLeave={() => setHoverIdx(null)}
             >
-              {showCache === 'on' && data.maxCacheRead > 0 && (
-                <>
-                  <path d={buildArea(cachePoints)}  fill={CACHE_FILL} />
-                  <path d={buildLine(cachePoints)}  fill='none' stroke={CACHE_STROKE} strokeWidth={1} vectorEffect='non-scaling-stroke' />
-                </>
-              )}
-              {primaryMax > 0 && (
-                <>
-                  <path d={buildArea(primaryPoints)} fill={primaryFill} />
-                  <path d={buildLine(primaryPoints)} fill='none' stroke={primaryStroke} strokeWidth={1.5} vectorEffect='non-scaling-stroke' />
-                </>
+              {/* Recessive hairline at half scale for magnitude reading. */}
+              <line x1={0} x2={W} y1={(H + PAD_TOP) / 2} y2={(H + PAD_TOP) / 2}
+                stroke='rgba(51, 65, 85, 0.5)' strokeWidth={1} vectorEffect='non-scaling-stroke' />
+              <path d={buildArea(primaryPoints)} fill={fill} />
+              <path d={buildLine(primaryPoints)} fill='none' stroke={stroke} strokeWidth={1.5} vectorEffect='non-scaling-stroke' />
+              {/* Crosshair snaps to the hovered bucket. */}
+              {hoverIdx != null && (
+                <line
+                  x1={xs(hoverIdx)} x2={xs(hoverIdx)} y1={0} y2={H}
+                  stroke='rgba(148, 163, 184, 0.5)' strokeWidth={1} vectorEffect='non-scaling-stroke'
+                />
               )}
               {/* Hover hit-targets, one per bucket */}
               {data.buckets.map((b, i) => {
-                const fresh = b.tokensIn + b.tokensOut;
                 const rectW = step > 0 ? step : innerW;
                 const rectX = step > 0 ? xs(i) - step / 2 : PAD_X;
+                const handlers = tipHandlers(bucketTip(b));
                 return (
                   <rect
                     key={b.date}
@@ -188,11 +236,9 @@ export const TokensTimelineCard: React.FC = () => {
                     width={rectW}
                     height={H}
                     fill='transparent'
-                  >
-                    <title>
-                      {`${b.date} · fresh ${fresh.toLocaleString()} (in ${b.tokensIn.toLocaleString()} / out ${b.tokensOut.toLocaleString()}) · cache ${b.cacheRead.toLocaleString()} · ${formatUsd(b.costUsd)} est.`}
-                    </title>
-                  </rect>
+                    {...handlers}
+                    onMouseEnter={(e) => { setHoverIdx(i); handlers.onMouseEnter(e); }}
+                  />
                 );
               })}
             </svg>
@@ -202,6 +248,7 @@ export const TokensTimelineCard: React.FC = () => {
               <span key={l.date}>{l.date}</span>
             ))}
           </div>
+          {tipOverlay}
         </div>
       )}
     </Card>

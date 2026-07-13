@@ -1,22 +1,29 @@
-// Backlog board + Backlog Scheduler (Phase 1: research tasks only).
-// Shared between the main process (engine, store, runner) and the renderer
-// (board tab, scheduler section) — like SchedulerStatus in types.ts.
-// See backlog.md for the product spec; Phase 1 scope is at the bottom.
+// Backlog board + Backlog Scheduler (Phase 1: research tasks; Phase 2:
+// execution tasks in isolated worktrees). Shared between the main process
+// (engine, store, runner) and the renderer (board tab, scheduler section) —
+// like SchedulerStatus in types.ts. See backlog.md for the product spec.
 
 export type BacklogCardState =
   | 'refinement'   // raw idea, not yet runnable
   | 'todo'         // refined & queued; sortable; autorun source
   | 'claimed'      // transient: atomically claimed, about to spawn
   | 'in-progress'  // executor running
-  | 'done'         // report attached
+  | 'done'         // report attached (research) / diff + QA report (execution)
   | 'blocked'      // run failed / can't proceed; needs human attention
-  | 'paused';      // killed at window end / budget; re-runs next window
+  | 'rework'       // execution succeeded but QA failed; auto-retries once
+  | 'paused';      // killed at window end / budget / usage limit; re-runs next window
 
 // Only green autoruns; amber/red are manual "Run now" only in Phase 1.
 export type RiskTier = 'green' | 'amber' | 'red';
 
-// Present-but-disabled in Phase 1 UI (schema keeps them for the execution phase).
+// 'browser' stays disabled until the browser-QA phase; the rest are live in
+// Phase 2 for execution cards (QA runs as an engine-driven command, not agent
+// Bash — see qa.ts).
 export type QaProvider = 'browser' | 'tests' | 'lint' | 'typecheck' | 'custom' | 'none';
+
+// Phase 2: research cards keep the Phase 1 read-only path; execution cards run
+// with Write/Edit in a detached git worktree and deliver an uncommitted diff.
+export type BacklogTaskType = 'research' | 'execution';
 
 export interface BacklogProject {
   id: string;          // uuid
@@ -31,13 +38,17 @@ export interface BacklogCard {
   description: string;
   projectId: string;
   state: BacklogCardState;
+  taskType: BacklogTaskType;       // research = read-only report; execution = code edits in a worktree
   riskTier: RiskTier;
   model: string | null;            // claude model id/alias for runs; null = project default
   estimatedMinutes: number | null; // drives size-fit + hard time budget
   estimatedCostUsd: number | null; // drives the forecast glance
   prereqIds: string[];             // card ids that must be done first
-  qaProvider: QaProvider;          // stored, always 'none' in Phase 1 (UI disabled)
-  acceptanceCriteria: string[];    // stored, empty in Phase 1 (UI disabled)
+  qaProvider: QaProvider;          // execution cards only; research ignores it
+  qaCommand: string | null;        // command line for qaProvider 'custom'
+  acceptanceCriteria: string[];    // injected into the prompt; not machine-checked in Phase 2
+  worktreePath: string | null;     // execution: detached worktree dir (userData/backlog-worktrees/<id>)
+  baseSha: string | null;          // execution: HEAD the worktree was created at
   sortOrder: number;               // position within Todo
   blockedReason: string | null;
   createdAt: number;
@@ -71,7 +82,10 @@ export function countUnmetPrereqs(
   return card.prereqIds.filter((id) => stateById.has(id) && stateById.get(id) !== 'done').length;
 }
 
-export type BacklogAttemptOutcome = 'success' | 'failed' | 'paused' | 'killed';
+// 'qa-failed': the run itself succeeded but the QA command failed — distinct
+// from 'failed' so the QA-fail escalation streak never mixes with run failures,
+// and from 'killed' so it never trips the budget-kill escalation.
+export type BacklogAttemptOutcome = 'success' | 'failed' | 'paused' | 'killed' | 'qa-failed';
 
 export interface BacklogAttempt {
   id: string;
@@ -86,11 +100,16 @@ export interface BacklogAttempt {
   manual: boolean;                       // true for "Run now"
 }
 
+// report = markdown (research report, or the executor's change summary);
+// diff = staged patch of the worktree (git diff --cached --binary + untracked
+// listing); qa-report = QA command output with pass/fail verdict.
+export type BacklogArtifactKind = 'report' | 'diff' | 'qa-report';
+
 export interface BacklogArtifact {
   id: string;
   cardId: string;
   attemptId: string;
-  kind: 'report';    // Phase 1: markdown research report only
+  kind: BacklogArtifactKind;
   path: string;      // absolute path under userData/backlog-artifacts
   preview: string;   // first ~500 chars for board rendering
   createdAt: number;
@@ -134,7 +153,10 @@ export interface BacklogSchedulerStatus {
   runningCardTitle: string | null;
   runningAttemptStartedAt: number | null;
   waitingForIdle: boolean;          // inside a window, gated on requireIdle
-  queueReady: number;               // green Todo cards + paused re-runs
+  queueReady: number;               // green todo/paused/rework cards, prereqs met
+  // Usage latch: auto-claims suspended until this time because the Claude
+  // 5-hour window is exhausted. Manual Run-now still works.
+  usagePausedUntil: number | null;
   lastRun: {
     at: number;
     cardId: string;

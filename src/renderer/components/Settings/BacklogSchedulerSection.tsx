@@ -165,6 +165,11 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       {/* Status glance */}
       <div className='mt-4 bg-slate-900/50 border border-slate-700/60 rounded-xl px-4 py-3'>
         <p className='text-sm text-white'>{glance}</p>
+        {status?.usagePausedUntil != null && status.usagePausedUntil > Date.now() && (
+          <p className='text-xs mt-1 text-amber-300/90'>
+            usage window exhausted · resumes ~{formatClock(status.usagePausedUntil)}
+          </p>
+        )}
         {status?.lastRun && (
           <p className='text-xs mt-1 text-slate-400'>
             Last run {formatClock(status.lastRun.at)} — {status.lastRun.cardTitle}:{' '}

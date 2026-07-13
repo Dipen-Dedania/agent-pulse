@@ -1,13 +1,14 @@
 import { ToolId } from './types';
 import { CostBreakdown } from './pricing';
 
-export type TimelineRange = '7d' | '30d' | '90d';
-export type HeatmapRange = '30d' | '90d';
-export type ToolMixRange = '7d' | '30d';
-export type ModelUsageRange = '7d' | '30d';
+export type TimelineRange = '7d' | '30d' | '90d' | '1y';
+export type HeatmapRange = TimelineRange;
+export type HourRhythmRange = TimelineRange;
+export type ToolMixRange = TimelineRange;
+export type ModelUsageRange = TimelineRange;
 export type ModelUsageMode = 'tokens' | 'sessions' | 'cost';
-export type ProjectBreakdownRange = '7d' | '30d' | '90d';
-export type TokensTimelineRange = '7d' | '30d' | '90d';
+export type ProjectBreakdownRange = TimelineRange;
+export type TokensTimelineRange = TimelineRange;
 
 export interface ToolBreakdown {
   toolId: ToolId;
@@ -69,7 +70,7 @@ export interface HeatmapPayload {
 }
 
 export interface HourRhythmPayload {
-  range: '7d' | '30d';
+  range: HourRhythmRange;
   buckets: number[];       // length 24
   queriedAt: number;
 }
@@ -160,12 +161,30 @@ export interface ProjectBreakdownPayload {
   queriedAt: number;
 }
 
+// ─── Tab-level summary (KPI hero row) ────────────────────────────────────────
+// Aggregates for the selected range plus the immediately preceding period of
+// equal length, so the UI can show period-over-period deltas.
+
+export interface SummarySlice {
+  activeMs: number;
+  sessions: number;
+  costUsd: number;                // estimated API-equivalent spend (0 if unpriced)
+  topProject: { displayName: string; activeMs: number } | null;
+}
+
+export interface AnalyticsSummaryPayload {
+  range: TimelineRange;
+  current: SummarySlice;
+  previous: SummarySlice;
+  queriedAt: number;
+}
+
 export interface AnalyticsConfig {
   redactTaskText: boolean;
   idleGapMinutes: number;
 }
 
-export type GuardrailsAnalyticsRange = '7d' | '30d';
+export type GuardrailsAnalyticsRange = TimelineRange;
 
 export interface GuardrailToolCount {
   toolId: ToolId;
@@ -187,6 +206,25 @@ export interface GuardrailsAnalyticsPayload {
   block: number;
   byTool: GuardrailToolCount[];
   byRule: GuardrailRuleCount[];
+  queriedAt: number;
+}
+
+// Secret Protection analytics — same shape family as guardrails (both are
+// warn/block event streams), plus the files most often read since "which file
+// keeps getting touched" is the question this card answers.
+export interface SecretAccessFileCount {
+  filePath: string;
+  count: number;
+}
+
+export interface SecretAccessAnalyticsPayload {
+  range: GuardrailsAnalyticsRange;
+  total: number;
+  warn: number;
+  block: number;
+  byTool: GuardrailToolCount[];
+  byRule: GuardrailRuleCount[];
+  byFile: SecretAccessFileCount[];
   queriedAt: number;
 }
 

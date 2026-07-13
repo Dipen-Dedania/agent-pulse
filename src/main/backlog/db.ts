@@ -27,7 +27,9 @@ export interface Database {
 type DatabaseConstructor = new (path: string) => Database;
 
 // v2: cards.model — per-card model override for the executor's --model flag.
-const SCHEMA_VERSION = 2;
+// v3: Phase 2 execution tasks — cards.task_type / worktree_path / base_sha /
+//     qa_command (see backlog.md → Phase 2).
+const SCHEMA_VERSION = 3;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -56,6 +58,10 @@ CREATE TABLE IF NOT EXISTS cards (
   sort_order          INTEGER NOT NULL DEFAULT 0,
   blocked_reason      TEXT,
   model               TEXT,
+  task_type           TEXT NOT NULL DEFAULT 'research',
+  worktree_path       TEXT,
+  base_sha            TEXT,
+  qa_command          TEXT,
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
 );
@@ -121,8 +127,14 @@ export function openBacklogDb(dbPath: string): Database | null {
     } else if (current !== SCHEMA_VERSION) {
       logger.info(`[Backlog] migrating schema_version ${current} → ${SCHEMA_VERSION}`);
       // CREATE TABLE IF NOT EXISTS above doesn't touch existing tables, so
-      // pre-v2 boards need the column added explicitly.
+      // pre-existing boards need each version's columns added explicitly.
       if (current < 2) db.exec('ALTER TABLE cards ADD COLUMN model TEXT');
+      if (current < 3) {
+        db.exec("ALTER TABLE cards ADD COLUMN task_type TEXT NOT NULL DEFAULT 'research'");
+        db.exec('ALTER TABLE cards ADD COLUMN worktree_path TEXT');
+        db.exec('ALTER TABLE cards ADD COLUMN base_sha TEXT');
+        db.exec('ALTER TABLE cards ADD COLUMN qa_command TEXT');
+      }
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }
 

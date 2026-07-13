@@ -2,6 +2,8 @@ import { ipcMain } from 'electron';
 import { TimelineQueries } from './queries';
 import {
   HeatmapRange,
+  HourRhythmRange,
+  TimelineRange,
   ToolMixRange,
   ModelUsageRange,
   ModelUsageMode,
@@ -40,13 +42,19 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     catch (e) { logger.warn('[Timeline/ipc] get-digest:', e); return null; }
   });
 
+  ipcMain.handle('analytics:get-summary', (_e, args: { range: TimelineRange }) => {
+    if (!queries) return null;
+    try { return queries.getSummary(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-summary:', e); return null; }
+  });
+
   ipcMain.handle('analytics:get-heatmap', (_e, args: { range: HeatmapRange; groupBy: 'tool' | 'project' | 'all' }) => {
     if (!queries) return null;
     try { return queries.getHeatmap(args.range, args.groupBy); }
     catch (e) { logger.warn('[Timeline/ipc] get-heatmap:', e); return null; }
   });
 
-  ipcMain.handle('analytics:get-hour-rhythm', (_e, args: { range: '7d' | '30d' }) => {
+  ipcMain.handle('analytics:get-hour-rhythm', (_e, args: { range: HourRhythmRange }) => {
     if (!queries) return null;
     try { return queries.getHourRhythm(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-hour-rhythm:', e); return null; }
@@ -87,6 +95,12 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     try { return queries.getGuardrails(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-guardrails:', e); return null; }
   });
+
+  ipcMain.handle('analytics:get-secret-access', (_e, args: { range: GuardrailsAnalyticsRange }) => {
+    if (!queries) return null;
+    try { return queries.getSecretAccess(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-secret-access:', e); return null; }
+  });
 }
 
 /** Called by bootTimeline when the timeline cannot start. */
@@ -107,6 +121,7 @@ export function unregisterTimelineIpc() {
     'analytics:get-project-breakdown',
     'analytics:get-tokens-timeline',
     'analytics:get-guardrails',
+    'analytics:get-secret-access',
   ]) {
     ipcMain.removeHandler(channel);
   }

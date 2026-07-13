@@ -1,29 +1,29 @@
 import React from 'react';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
-import { useGuardrailsAnalytics } from './useAnalytics';
+import { useSecretAccessAnalytics } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, SkeletonLine, formatCompactNumber } from './shared';
 
-export const GuardrailsCard: React.FC = () => {
+export const SecretProtectionCard: React.FC = () => {
   const range = useGlobalRange();
-  const { data, loading } = useGuardrailsAnalytics(range);
+  const { data, loading } = useSecretAccessAnalytics(range);
 
   return (
     <Card
-      title='Guardrail trips'
-      subtitle='Commands the engine flagged before they ran — totals, tool spread, and the rules that fired.'
+      title='Protected file reads'
+      subtitle='Reads of secret files (.env, keys, credentials) the engine flagged — totals, tool spread, and the files agents kept reaching for.'
     >
       {loading && !data ? (
         <SkeletonLine width='100%' height='4rem' />
       ) : !data || data.total === 0 ? (
-        <EmptyState message='No guardrail activity in this window.' />
+        <EmptyState message='No protected-file activity in this window.' />
       ) : (
         <div>
           <div className='grid grid-cols-3 gap-3 mb-5'>
-            <Stat label='Total trips'  value={data.total} tone='neutral' />
-            <Stat label='Warned'        value={data.warn}  tone='warn' />
-            <Stat label='Blocked'       value={data.block} tone='block' />
+            <Stat label='Total reads' value={data.total} tone='neutral' />
+            <Stat label='Observed'    value={data.warn}  tone='warn' />
+            <Stat label='Blocked'     value={data.block} tone='block' />
           </div>
 
           {data.byTool.length > 0 && (
@@ -36,15 +36,33 @@ export const GuardrailsCard: React.FC = () => {
                     <div key={t.toolId} className='flex items-center gap-3 text-xs'>
                       <span className='text-slate-300 flex-1 truncate'>{label}</span>
                       <span className='text-slate-400 font-mono tabular-nums w-10 text-right'>{t.total}</span>
-                      <span className='text-amber-300/90 font-mono tabular-nums w-12 text-right' title='Warn'>
+                      <span className='text-amber-300/90 font-mono tabular-nums w-12 text-right' title='Observed (warn)'>
                         {t.warn}w
                       </span>
-                      <span className='text-rose-300/90 font-mono tabular-nums w-12 text-right' title='Block'>
+                      <span className='text-rose-300/90 font-mono tabular-nums w-12 text-right' title='Blocked'>
                         {t.block}b
                       </span>
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {data.byFile.length > 0 && (
+            <div className='mb-5'>
+              <p className='text-[11px] uppercase tracking-wide text-slate-500 mb-2'>Top files</p>
+              <div className='space-y-1.5'>
+                {data.byFile.slice(0, 8).map((f) => (
+                  <div key={f.filePath} className='flex items-center gap-3 text-xs'>
+                    <span className='text-slate-300 flex-1 font-mono truncate' title={f.filePath}>
+                      {f.filePath}
+                    </span>
+                    <span className='text-slate-400 font-mono tabular-nums shrink-0'>
+                      {formatCompactNumber(f.count)}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

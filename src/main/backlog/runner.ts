@@ -1,30 +1,63 @@
 // Headless executor for one backlog card: spawns `claude -p` in the card's
-// project repo, feeds the prompt via STDIN, and parses the single-JSON-object
-// output. Never throws — every failure comes back as a structured result,
-// mirroring fireOpener in ../scheduler/opener.
+// project repo (research) or its detached worktree (execution), feeds the
+// prompt via STDIN, and parses the single-JSON-object output. Never throws —
+// every failure comes back as a structured result, mirroring fireOpener in
+// ../scheduler/opener.
 //
-// Safety posture (Phase 1, research tasks only):
-//  - never passes --dangerously-skip-permissions: headless mode denies
-//    permission-gated tools (Write/Edit/Bash) by default, so runs are
-//    read-only by construction;
-//  - --disallowedTools adds an explicit deny list as belt-and-braces;
+// Safety posture:
+//  - research: never passes --dangerously-skip-permissions — headless mode
+//    denies permission-gated tools (Write/Edit/Bash) by default, so runs are
+//    read-only by construction; --disallowedTools is belt-and-braces.
+//  - execution (Phase 2): --permission-mode acceptEdits auto-approves
+//    Write/Edit INSIDE the cwd only (outside prompts → dies headlessly), and
+//    Bash stays disallowed — with no Bash the agent structurally cannot run
+//    `git commit`/`git push`, so "no commits" needs no fragile command
+//    patterns. --setting-sources user stops the target repo's own
+//    .claude/settings.json from granting more than we intend. The worktree is
+//    the blast-radius limiter; QA commands are run by the ENGINE, not the agent.
 //  - the prompt goes over stdin, never argv — user text through `cmd.exe /c`
 //    is not quoting-safe (the opener's argv args are fixed constants; ours
-//    are not). The one variable argv entry, the card's model, is gated by
-//    isSafeModelId (strict charset, no cmd.exe metacharacters).
+//    are not). Variable argv entries are gated: the card's model by
+//    isSafeModelId, the resume session id by isSafeSessionId (both strict
+//    charsets, no cmd.exe metacharacters). The resume continuation prompt is
+//    a fixed constant, so argv is safe for it.
 
 import { spawn, execFile, execFileSync, ChildProcess } from 'child_process';
 import { logger } from '../../common/logger';
-import { isSafeModelId } from '../../common/backlog-types';
+import { BacklogTaskType, isSafeModelId } from '../../common/backlog-types';
 import { resolveClaudeBin, resetClaudeBinCache } from '../scheduler/opener';
 
-// Verified against the installed CLI (see plan spike): --disallowedTools takes
-// a comma-separated list; --output-format json emits one result object with
-// result/is_error/total_cost_usd/num_turns/session_id. Note: this CLI version
-// has no --max-turns — the time budget kill below is the hard cap.
-const DISALLOWED_TOOLS = 'Write,Edit,NotebookEdit,Bash';
+// Verified against the installed CLI (2.1.170, Phase 2 spike): --disallowedTools
+// takes a comma-separated list; --permission-mode acceptEdits, --setting-sources
+// and -r/--resume exist; --output-format json emits one result object with
+// result/is_error/total_cost_usd/num_turns/session_id. NO --max-turns in this
+// version — the time budget kill below is the hard cap (--max-budget-usd exists
+// but card cost estimates are forecasts, not enforcement, so it is not passed).
+const RESEARCH_DISALLOWED_TOOLS = 'Write,Edit,NotebookEdit,Bash';
+const EXECUTION_DISALLOWED_TOOLS = 'Bash,NotebookEdit';
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024; // guard against a runaway stdout
 const POSIX_SIGKILL_DELAY_MS = 5_000;
+
+// Fixed constant (argv-safe: no cmd.exe metacharacters, no quotes) used with
+// --resume — print mode takes the continuation prompt on argv, not stdin.
+const RESUME_PROMPT =
+  'Continue the task from where you left off. Re-read the current state of the working directory, finish the remaining work, and follow the same output contract as before.';
+
+// Claude session ids are uuid-shaped; anything else never reaches argv.
+const SESSION_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+export function isSafeSessionId(value: string): boolean {
+  return SESSION_ID_RE.test(value);
+}
+
+// A run that died because the subscription's usage window is exhausted is not
+// the card's fault — the engine pauses the card and latches until reset
+// instead of blocking it. Pattern-based; unmatched wordings fall back to the
+// generic failure path (one card blocked, no cascade thanks to the engine's
+// proactive gate).
+const USAGE_LIMIT_RE = /usage limit|rate.?limit|limit (?:reached|exceeded)|out of (?:credits?|quota)|exceeded.*quota|hit.*limit/i;
+export function isUsageLimitError(text: string | null | undefined): boolean {
+  return !!text && USAGE_LIMIT_RE.test(text);
+}
 
 export type RunnerOutcome = 'success' | 'failed' | 'killed';
 
@@ -33,9 +66,21 @@ export interface RunnerResult {
   report?: string;             // final markdown (on success)
   reason?: string;             // failure / kill detail
   killOutcome?: 'killed' | 'paused'; // how a kill should be recorded on the attempt
+  /** Set when a failure is a usage-window exhaustion, not the card's fault. */
+  usageLimit?: boolean;
   costUsd: number | null;
   numTurns: number | null;
   sessionId: string | null;
+}
+
+export interface ExecuteCardOptions {
+  prompt: string;
+  cwd: string;                 // project repo (research) or worktree (execution)
+  budgetMs: number;
+  taskType: BacklogTaskType;
+  model?: string | null;
+  /** Resume a paused run's session (execution cards keep their worktree). */
+  resumeSessionId?: string | null;
 }
 
 export interface RunnerHandle {
@@ -137,13 +182,17 @@ function killTreeSync(child: ChildProcess): void {
 }
 
 /**
- * Execute one research run: `claude -p` with `cwd` set to the project repo
- * and a hard time budget. `model` (the card's override) is passed as
- * `--model` when set; null falls back to the project/CLI default. The
- * returned handle's `kill` is also used by the engine for window-end grace
- * expiry and app quit.
+ * Execute one card run: `claude -p` with `cwd` set to the project repo
+ * (research) or the card's worktree (execution), under a hard time budget.
+ * `model` (the card's override) is passed as `--model` when set; null falls
+ * back to the project/CLI default. When `resumeSessionId` is set the run
+ * continues a paused session in place (fixed continuation prompt on argv);
+ * an unusable session id degrades to a fresh run — the worktree still holds
+ * the partial work. The returned handle's `kill` is also used by the engine
+ * for window-end grace expiry and app quit.
  */
-export function executeCard(prompt: string, cwd: string, budgetMs: number, model?: string | null): RunnerHandle {
+export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
+  const { prompt, cwd, budgetMs, taskType, model, resumeSessionId } = opts;
   let killInfo: { reason: string; attemptOutcome: 'killed' | 'paused' } | null = null;
   let child: ChildProcess | null = null;
 
@@ -159,16 +208,30 @@ export function executeCard(prompt: string, cwd: string, budgetMs: number, model
 
     // Windows npm shims are .cmd files spawn can't launch directly — route
     // through cmd.exe (same as the opener). The bin path comes from `where`,
-    // and all argv entries are fixed constants; the untrusted prompt goes
-    // over stdin.
+    // and all argv entries are fixed constants or strict-charset-gated; the
+    // untrusted prompt goes over stdin.
     const isWin = process.platform === 'win32';
     const file = isWin ? (process.env.ComSpec || 'cmd.exe') : bin;
-    const baseArgs = ['-p', '--output-format', 'json', '--disallowedTools', DISALLOWED_TOOLS];
+    const baseArgs = taskType === 'execution'
+      ? ['-p', '--output-format', 'json', '--permission-mode', 'acceptEdits',
+         '--disallowedTools', EXECUTION_DISALLOWED_TOOLS, '--setting-sources', 'user']
+      : ['-p', '--output-format', 'json', '--disallowedTools', RESEARCH_DISALLOWED_TOOLS];
     if (model) {
       // Store normalization should have rejected unsafe values already —
       // re-check here since this string reaches cmd.exe argv.
       if (isSafeModelId(model)) baseArgs.push('--model', model);
       else logger.warn(`[Backlog/runner] ignoring unsafe model id ${JSON.stringify(model)} — using default`);
+    }
+    let resuming = false;
+    if (resumeSessionId) {
+      if (isSafeSessionId(resumeSessionId)) {
+        // Print mode takes the continuation prompt on argv, not stdin; both
+        // entries are safe (gated id + fixed constant).
+        baseArgs.push('--resume', resumeSessionId, RESUME_PROMPT);
+        resuming = true;
+      } else {
+        logger.warn('[Backlog/runner] unsafe session id — starting a fresh run instead of resuming');
+      }
     }
     const args = isWin ? ['/c', bin, ...baseArgs] : baseArgs;
 
@@ -233,19 +296,27 @@ export function executeCard(prompt: string, cwd: string, budgetMs: number, model
       }
       if (code !== 0 && !parsed.ok) {
         const detail = stderr.trim().split(/\r?\n/).slice(-3).join(' ').slice(0, 500);
-        settle(failed(`claude exited with code ${code}${detail ? `: ${detail}` : ''}`));
+        settle({
+          ...failed(`claude exited with code ${code}${detail ? `: ${detail}` : ''}`),
+          usageLimit: isUsageLimitError(detail),
+        });
         return;
       }
       if (!parsed.ok) {
-        settle({ outcome: 'failed', reason: parsed.reason, costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId });
+        settle({
+          outcome: 'failed', reason: parsed.reason,
+          usageLimit: isUsageLimitError(parsed.reason),
+          costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId,
+        });
         return;
       }
       settle({ outcome: 'success', report: parsed.report, costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId });
     });
 
-    // Feed the prompt and close stdin so -p reads it as the full input.
+    // Feed the prompt and close stdin so -p reads it as the full input. On
+    // resume the prompt already went on argv — just close stdin.
     proc.stdin?.on('error', () => { /* EPIPE if the child died early — close handler reports it */ });
-    proc.stdin?.write(prompt, 'utf8');
+    if (!resuming) proc.stdin?.write(prompt, 'utf8');
     proc.stdin?.end();
   });
 

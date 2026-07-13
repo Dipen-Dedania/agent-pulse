@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from 'react';
 import {
   DigestPayload,
   HeatmapPayload,
   HeatmapRange,
   HourRhythmPayload,
+  HourRhythmRange,
   ToolMixPayload,
   ToolMixRange,
   ModelUsagePayload,
@@ -15,7 +16,10 @@ import {
   TokensTimelineRange,
   GuardrailsAnalyticsPayload,
   GuardrailsAnalyticsRange,
+  SecretAccessAnalyticsPayload,
   WindowValuePayload,
+  AnalyticsSummaryPayload,
+  TimelineRange,
 } from '../../../../common/timeline-types';
 
 const TTL_MS = 30_000;
@@ -27,6 +31,24 @@ interface CacheEntry<T> {
 
 const cache = new Map<string, CacheEntry<unknown>>();
 
+// Freshness + manual refresh. `lastFetchedAt` tracks the newest real IPC
+// round-trip (not cache hits); bumping `reloadVersion` makes every mounted
+// query re-run, so a refresh reaches all cards at once.
+let lastFetchedAt: number | null = null;
+let reloadVersion = 0;
+const reloadListeners = new Set<() => void>();
+
+function notifyReload() {
+  for (const l of reloadListeners) l();
+}
+
+function useReloadVersion(): number {
+  return useSyncExternalStore(
+    (cb) => { reloadListeners.add(cb); return () => reloadListeners.delete(cb); },
+    () => reloadVersion,
+  );
+}
+
 async function fetchAnalytics<T>(channel: string, args?: object): Promise<T | null> {
   const key = channel + JSON.stringify(args ?? {});
   const cached = cache.get(key);
@@ -37,6 +59,7 @@ async function fetchAnalytics<T>(channel: string, args?: object): Promise<T | nu
     const result = await window.electron.invoke(channel, args);
     if (result == null) return null;
     cache.set(key, { data: result, fetchedAt: Date.now() });
+    lastFetchedAt = Date.now();
     return result as T;
   } catch {
     return null;
@@ -45,6 +68,25 @@ async function fetchAnalytics<T>(channel: string, args?: object): Promise<T | nu
 
 export function bustCache() {
   cache.clear();
+}
+
+// Drop the cache and make every mounted card refetch immediately.
+export function refreshAnalytics() {
+  cache.clear();
+  reloadVersion++;
+  notifyReload();
+}
+
+// Timestamp of the newest fetch, re-evaluated on refresh and every 10s so a
+// "updated Ns ago" label stays roughly current without per-second churn.
+export function useAnalyticsFreshness(): number | null {
+  useReloadVersion();
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => bump((n) => n + 1), 10_000);
+    return () => clearInterval(t);
+  }, []);
+  return lastFetchedAt;
 }
 
 function useAnalyticsQuery<T>(
@@ -56,6 +98,8 @@ function useAnalyticsQuery<T>(
   const [loading, setLoading] = useState(true);
   const versionRef = useRef(0);
 
+  const reload = useReloadVersion();
+
   const load = useCallback(() => {
     setLoading(true);
     const v = ++versionRef.current;
@@ -65,7 +109,7 @@ function useAnalyticsQuery<T>(
       setLoading(false);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel, argsKey]);
+  }, [channel, argsKey, reload]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -76,11 +120,15 @@ export function useDigest() {
   return useAnalyticsQuery<DigestPayload>('analytics:get-digest', undefined, '');
 }
 
+export function useSummary(range: TimelineRange) {
+  return useAnalyticsQuery<AnalyticsSummaryPayload>('analytics:get-summary', { range }, range);
+}
+
 export function useHeatmap(range: HeatmapRange, groupBy: 'tool' | 'project' | 'all') {
   return useAnalyticsQuery<HeatmapPayload>('analytics:get-heatmap', { range, groupBy }, `${range}/${groupBy}`);
 }
 
-export function useHourRhythm(range: '7d' | '30d') {
+export function useHourRhythm(range: HourRhythmRange) {
   return useAnalyticsQuery<HourRhythmPayload>('analytics:get-hour-rhythm', { range }, range);
 }
 
@@ -106,4 +154,8 @@ export function useTokensTimeline(range: TokensTimelineRange) {
 
 export function useGuardrailsAnalytics(range: GuardrailsAnalyticsRange) {
   return useAnalyticsQuery<GuardrailsAnalyticsPayload>('analytics:get-guardrails', { range }, range);
+}
+
+export function useSecretAccessAnalytics(range: GuardrailsAnalyticsRange) {
+  return useAnalyticsQuery<SecretAccessAnalyticsPayload>('analytics:get-secret-access', { range }, range);
 }

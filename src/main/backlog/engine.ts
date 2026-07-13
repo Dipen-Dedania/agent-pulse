@@ -10,6 +10,7 @@ import path from 'path';
 import { BrowserWindow, powerMonitor } from 'electron';
 import { logger } from '../../common/logger';
 import {
+  BacklogArtifactKind,
   BacklogAttemptOutcome,
   BacklogCard,
   BacklogSchedulerConfig,
@@ -17,9 +18,11 @@ import {
   countUnmetPrereqs,
 } from '../../common/backlog-types';
 import { BacklogStore } from './store';
-import { activeWindow, nextWindowStart, pickNextCard, cardBudgetMs, forecastNextWindow } from './timing';
-import { buildResearchPrompt } from './prompt';
-import { executeCard, RunnerHandle } from './runner';
+import { activeWindow, nextWindowStart, pickNextCard, cardBudgetMs, forecastNextWindow, isPickableState } from './timing';
+import { buildExecutionPrompt, buildResearchPrompt } from './prompt';
+import { executeCard, RunnerHandle, RunnerResult } from './runner';
+import { captureDiff, createWorktree, reconcileWorktrees } from './worktree';
+import { runQa } from './qa';
 
 // Grace period a still-running card gets after its window closes.
 const GRACE_MS = 10 * 60_000;
@@ -31,12 +34,22 @@ const IDLE_RECHECK_MS = 60_000;
 // paused → re-picked first → killed again, silently burning credit every
 // window. After this many back-to-back budget kills it escalates to Blocked.
 const MAX_CONSECUTIVE_BUDGET_KILLS = 2;
+// Same shape for QA: one bounded auto-retry via Rework, then Blocked.
+const MAX_CONSECUTIVE_QA_FAILS = 2;
 const ARTIFACT_PREVIEW_CHARS = 500;
+// Proactive usage gate: don't claim a card when the 5-hour window is already
+// nearly spent — the run would die mid-task.
+const USAGE_GATE_UTILIZATION = 95;
+// When the usage snapshot can't say when the window resets, re-check on this cadence.
+const USAGE_RECHECK_FALLBACK_MS = 30 * 60_000;
 
 export interface BacklogEngineDeps {
   store: BacklogStore;
   usagePoller: { refreshNow: () => void };
-  artifactsDir: string; // userData/backlog-artifacts
+  artifactsDir: string;  // userData/backlog-artifacts
+  worktreesDir: string;  // userData/backlog-worktrees
+  /** Claude 5-hour window snapshot for the usage latch; null = unknown. */
+  getUsage?: () => { utilization: number; resetsAt: number } | null;
   /** Injectable for tests; defaults to Electron's powerMonitor. */
   getIdleSeconds?: () => number;
 }
@@ -54,17 +67,26 @@ export class BacklogEngine {
   private readonly store: BacklogStore;
   private readonly usagePoller: { refreshNow: () => void };
   private readonly artifactsDir: string;
+  private readonly worktreesDir: string;
+  private readonly getUsage: () => { utilization: number; resetsAt: number } | null;
   private readonly getIdleSeconds: () => number;
 
   private edgeTimer: NodeJS.Timeout | null = null;   // next window start/end
   private graceTimer: NodeJS.Timeout | null = null;  // window-end grace kill
   private idleTimer: NodeJS.Timeout | null = null;   // requireIdle recheck
+  private usageTimer: NodeJS.Timeout | null = null;  // usage-latch expiry recheck
   private running: RunningCard | null = null;
+  // Guards the async gap in runCard (worktree creation) — `running` is only
+  // set after the spawn, so without this two claims could interleave.
+  private claiming = false;
   // Cards the user stopped mid-window. Paused cards are picked FIRST, so
   // without this a just-stopped card would be re-claimed immediately by the
   // next tryClaimNext. Cleared at window end; manual Run-now ignores it.
   private stoppedThisWindow = new Set<string>();
   private waitingForIdle = false;
+  // Usage latch: a run died on (or the snapshot shows) an exhausted 5-hour
+  // usage window — no auto-claims until this timestamp. Manual Run-now bypasses.
+  private usageExhaustedUntil: number | null = null;
   private lastRun: BacklogSchedulerStatus['lastRun'] = null;
   private stopped = true;
 
@@ -73,6 +95,8 @@ export class BacklogEngine {
     this.store = deps.store;
     this.usagePoller = deps.usagePoller;
     this.artifactsDir = deps.artifactsDir;
+    this.worktreesDir = deps.worktreesDir;
+    this.getUsage = deps.getUsage ?? (() => null);
     this.getIdleSeconds = deps.getIdleSeconds ?? (() => powerMonitor.getSystemIdleTime());
   }
 
@@ -80,6 +104,13 @@ export class BacklogEngine {
     if (!this.stopped) return;
     this.stopped = false;
     logger.info(`[Backlog] engine starting, enabled=${this.config.enabled}, slots=${this.config.slots.length}`);
+    // Crash cleanup: worktree dirs no card references anymore (crash between
+    // create and card update, or cards deleted while the app was closed).
+    const referenced = new Set(
+      this.store.listCards().map((c) => c.worktreePath).filter((p): p is string => !!p),
+    );
+    void reconcileWorktrees(this.worktreesDir, referenced, this.store.listProjects().map((p) => p.path))
+      .catch((e) => logger.warn('[Backlog] worktree reconciliation failed:', e?.message ?? e));
     this.reschedule();
   }
 
@@ -119,16 +150,19 @@ export class BacklogEngine {
   }
 
   /**
-   * Manual "Run now": any tier, any time (no window required). The card must
-   * be in Todo or Paused — the atomic claim enforces that.
+   * Manual "Run now": any tier, any time (no window required; bypasses the
+   * usage latch — the user is explicitly spending). The card must be in
+   * Todo, Paused, or Rework — the atomic claim enforces that.
    */
-  public runNow(cardId: string): { ok: boolean; reason?: string } {
-    if (this.stopped) return { ok: false, reason: 'engine is not running' };
-    if (this.running) return { ok: false, reason: `"${this.running.cardTitle}" is already running — one card at a time` };
+  public runNow(cardId: string): Promise<{ ok: boolean; reason?: string }> {
+    if (this.stopped) return Promise.resolve({ ok: false, reason: 'engine is not running' });
+    if (this.running || this.claiming) {
+      return Promise.resolve({ ok: false, reason: `"${this.running?.cardTitle ?? 'another card'}" is already running — one card at a time` });
+    }
     const card = this.store.getCard(cardId);
-    if (!card) return { ok: false, reason: 'card not found' };
-    if (card.state !== 'todo' && card.state !== 'paused') {
-      return { ok: false, reason: 'only Todo or Paused cards can be run — move it to Todo first' };
+    if (!card) return Promise.resolve({ ok: false, reason: 'card not found' });
+    if (!isPickableState(card.state)) {
+      return Promise.resolve({ ok: false, reason: 'only Todo, Paused, or Rework cards can be run — move it to Todo first' });
     }
     return this.runCard(card, /*manual*/ true);
   }
@@ -182,9 +216,9 @@ export class BacklogEngine {
     }
   }
 
-  /** Claim and run the next fitting card, honoring the idle gate. */
+  /** Claim and run the next fitting card, honoring the idle and usage gates. */
   private tryClaimNext() {
-    if (this.stopped || !this.config.enabled || this.running) return;
+    if (this.stopped || !this.config.enabled || this.running || this.claiming) return;
     const now = Date.now();
     const win = activeWindow(this.config.slots, now);
     if (!win) return;
@@ -200,102 +234,244 @@ export class BacklogEngine {
     }
     this.waitingForIdle = false;
 
+    // Usage latch: a previous run died on an exhausted usage window.
+    if (this.usageExhaustedUntil !== null) {
+      if (now < this.usageExhaustedUntil) {
+        this.broadcast();
+        return;
+      }
+      this.usageExhaustedUntil = null;
+    }
+    // Proactive gate: don't start a card the exhausted window would kill anyway.
+    const usage = this.getUsage();
+    if (usage && usage.utilization >= USAGE_GATE_UTILIZATION) {
+      this.engageUsageLatch(`5-hour window at ${Math.round(usage.utilization)}% — waiting for reset`);
+      return;
+    }
+
     const candidates = this.store.listCards().filter((c) => !this.stoppedThisWindow.has(c.id));
     const card = pickNextCard(candidates, win.end - now);
     if (!card) {
       this.broadcast();
       return;
     }
-    const res = this.runCard(card, /*manual*/ false);
-    if (!res.ok) logger.warn(`[Backlog] failed to start "${card.title}": ${res.reason}`);
+    void this.runCard(card, /*manual*/ false).then((res) => {
+      if (!res.ok) logger.warn(`[Backlog] failed to start "${card.title}": ${res.reason}`);
+    });
   }
 
-  /** Claim → spawn → track. Shared by the window loop and manual Run-now. */
-  private runCard(card: BacklogCard, manual: boolean): { ok: boolean; reason?: string } {
-    if (!this.store.claimCard(card.id)) {
-      return { ok: false, reason: 'card was already claimed or moved' };
-    }
-    const project = this.store.listProjects().find((p) => p.id === card.projectId);
-    if (!project) {
-      this.store.setCardState(card.id, 'blocked', 'project no longer registered');
-      this.broadcastChanged();
-      return { ok: false, reason: 'project no longer registered' };
-    }
-
-    const attempt = this.store.insertAttempt(card.id, manual);
-    this.store.setCardState(card.id, 'in-progress');
-    const handle = executeCard(buildResearchPrompt(card), project.path, cardBudgetMs(card), card.model);
-    this.running = {
-      cardId: card.id,
-      cardTitle: card.title,
-      attemptId: attempt.id,
-      startedAt: attempt.startedAt,
-      handle,
-    };
-    logger.info(`[Backlog] running "${card.title}" (${manual ? 'manual' : 'scheduled'}) in ${project.path}`);
+  /**
+   * Stop auto-claiming until the usage window resets (plus a small buffer so
+   * the poller has re-polled by the time we retry). Falls back to a periodic
+   * recheck when the snapshot can't say when that is.
+   */
+  private engageUsageLatch(logReason: string) {
+    const now = Date.now();
+    const usage = this.getUsage();
+    const until = usage && usage.resetsAt > now ? usage.resetsAt + 60_000 : now + USAGE_RECHECK_FALLBACK_MS;
+    this.usageExhaustedUntil = until;
+    logger.info(`[Backlog] usage latch engaged (${logReason}) — resuming ${new Date(until).toLocaleTimeString()}`);
+    this.usagePoller.refreshNow();
+    if (this.usageTimer) clearTimeout(this.usageTimer);
+    this.usageTimer = setTimeout(() => {
+      this.usageTimer = null;
+      this.usageExhaustedUntil = null;
+      this.tryClaimNext();
+    }, until - now);
+    this.usageTimer.unref?.();
     this.broadcast();
-    this.broadcastChanged();
+  }
 
-    void handle.promise.then((result) => {
-      // stop() may have already finalized the rows and cleared `running`.
-      if (this.running?.attemptId !== attempt.id) return;
-      this.running = null;
-      this.clearGraceTimer();
-
-      let outcome: BacklogAttemptOutcome;
-      if (result.outcome === 'success') {
-        outcome = 'success';
-        try {
-          const reportPath = this.writeReport(card.id, attempt.id, result.report!);
-          this.store.insertArtifact({
-            cardId: card.id,
-            attemptId: attempt.id,
-            path: reportPath,
-            preview: result.report!.slice(0, ARTIFACT_PREVIEW_CHARS),
-          });
-          this.store.setCardState(card.id, 'done');
-        } catch (e: any) {
-          // Report write failed — don't lose the run silently.
-          outcome = 'failed';
-          result.reason = `report write failed: ${e?.message ?? e}`;
-          this.store.setCardState(card.id, 'blocked', result.reason);
-        }
-      } else if (result.outcome === 'killed') {
-        outcome = result.killOutcome ?? 'killed';
-        // 'killed' = budget overrun; user stops / window-end grace record
-        // 'paused' and never escalate. The current attempt isn't finished yet,
-        // so +1 accounts for it.
-        if (outcome === 'killed' && this.store.countConsecutiveKills(card.id) + 1 >= MAX_CONSECUTIVE_BUDGET_KILLS) {
-          this.store.setCardState(
-            card.id, 'blocked',
-            `time budget exceeded in ${MAX_CONSECUTIVE_BUDGET_KILLS} consecutive runs — raise the estimate or split the card`,
-          );
-        } else {
-          this.store.setCardState(card.id, 'paused');
-        }
-      } else {
-        outcome = 'failed';
-        this.store.setCardState(card.id, 'blocked', result.reason ?? 'run failed');
+  /** Claim → (worktree) → spawn → track. Shared by the window loop and manual Run-now. */
+  private async runCard(card: BacklogCard, manual: boolean): Promise<{ ok: boolean; reason?: string }> {
+    if (this.claiming || this.running) return { ok: false, reason: 'another card is already starting or running' };
+    this.claiming = true;
+    try {
+      if (!this.store.claimCard(card.id)) {
+        return { ok: false, reason: 'card was already claimed or moved' };
+      }
+      const project = this.store.listProjects().find((p) => p.id === card.projectId);
+      if (!project) {
+        this.store.setCardState(card.id, 'blocked', 'project no longer registered');
+        this.broadcastChanged();
+        return { ok: false, reason: 'project no longer registered' };
       }
 
-      this.store.finishAttempt(attempt.id, {
-        outcome,
-        reason: result.reason ?? null,
-        costUsd: result.costUsd,
-        numTurns: result.numTurns,
-        sessionId: result.sessionId,
-      });
-      this.lastRun = { at: Date.now(), cardId: card.id, cardTitle: card.title, outcome };
-      logger.info(`[Backlog] "${card.title}" finished: ${outcome}${result.reason ? ` (${result.reason})` : ''}`);
+      let cwd = project.path;
+      let resumeSessionId: string | null = null;
+      if (card.taskType === 'execution') {
+        const wt = await createWorktree(project.path, this.worktreesDir, card.id);
+        if (!wt.ok) {
+          this.store.setCardState(card.id, 'blocked', wt.reason);
+          this.broadcastChanged();
+          return { ok: false, reason: wt.reason };
+        }
+        this.store.setWorktree(card.id, wt.worktreePath, wt.baseSha);
+        cwd = wt.worktreePath;
+        if (wt.reused) {
+          // Paused run with partial work in place — continue its session.
+          resumeSessionId = this.store.listAttempts(card.id).find((a) => a.sessionId)?.sessionId ?? null;
+        }
+      }
 
-      // The run spent real window credit — refresh usage promptly.
-      this.usagePoller.refreshNow();
+      const attempt = this.store.insertAttempt(card.id, manual);
+      this.store.setCardState(card.id, 'in-progress');
+      const prompt = card.taskType === 'execution' ? buildExecutionPrompt(card) : buildResearchPrompt(card);
+      const handle = executeCard({
+        prompt, cwd, budgetMs: cardBudgetMs(card),
+        taskType: card.taskType, model: card.model, resumeSessionId,
+      });
+      this.running = {
+        cardId: card.id,
+        cardTitle: card.title,
+        attemptId: attempt.id,
+        startedAt: attempt.startedAt,
+        handle,
+      };
+      logger.info(`[Backlog] running "${card.title}" (${card.taskType}, ${manual ? 'manual' : 'scheduled'}${resumeSessionId ? ', resumed' : ''}) in ${cwd}`);
       this.broadcast();
       this.broadcastChanged();
-      this.tryClaimNext();
-    });
 
-    return { ok: true };
+      void handle.promise.then(async (result) => {
+        // stop() may have already finalized the rows and cleared `running`.
+        if (this.running?.attemptId !== attempt.id) return;
+        this.running = null;
+        this.clearGraceTimer();
+
+        let outcome: BacklogAttemptOutcome;
+        let reason = result.reason ?? null;
+        if (result.outcome === 'success') {
+          const finalized = await this.finalizeSuccess(card, attempt.id, cwd, result);
+          outcome = finalized.outcome;
+          reason = finalized.reason ?? reason;
+        } else if (result.outcome === 'killed') {
+          outcome = result.killOutcome ?? 'killed';
+          // 'killed' = budget overrun; user stops / window-end grace record
+          // 'paused' and never escalate. The current attempt isn't finished yet,
+          // so +1 accounts for it.
+          if (outcome === 'killed' && this.store.countConsecutiveKills(card.id) + 1 >= MAX_CONSECUTIVE_BUDGET_KILLS) {
+            this.store.setCardState(
+              card.id, 'blocked',
+              `time budget exceeded in ${MAX_CONSECUTIVE_BUDGET_KILLS} consecutive runs — raise the estimate or split the card`,
+            );
+          } else {
+            this.store.setCardState(card.id, 'paused');
+          }
+        } else if (result.usageLimit) {
+          // The usage window is exhausted — not the card's fault. Recorded as
+          // 'paused' (like a window-end grace kill) so it can't trip either
+          // escalation streak, and picked first once the latch clears.
+          outcome = 'paused';
+          this.store.setCardState(card.id, 'paused');
+          this.engageUsageLatch(reason ?? 'usage limit reached');
+        } else {
+          outcome = 'failed';
+          this.store.setCardState(card.id, 'blocked', reason ?? 'run failed');
+        }
+
+        this.store.finishAttempt(attempt.id, {
+          outcome,
+          reason,
+          costUsd: result.costUsd,
+          numTurns: result.numTurns,
+          sessionId: result.sessionId,
+        });
+        this.lastRun = { at: Date.now(), cardId: card.id, cardTitle: card.title, outcome };
+        logger.info(`[Backlog] "${card.title}" finished: ${outcome}${reason ? ` (${reason})` : ''}`);
+
+        // The run spent real window credit — refresh usage promptly.
+        this.usagePoller.refreshNow();
+        this.broadcast();
+        this.broadcastChanged();
+        this.tryClaimNext();
+      });
+
+      return { ok: true };
+    } finally {
+      this.claiming = false;
+    }
+  }
+
+  /**
+   * Successful run → artifacts → final state. Research: report → Done.
+   * Execution: summary report + captured diff, then QA — pass/skip → Done,
+   * fail → qa-report + Rework (Blocked after MAX_CONSECUTIVE_QA_FAILS).
+   */
+  private async finalizeSuccess(
+    card: BacklogCard,
+    attemptId: string,
+    cwd: string,
+    result: RunnerResult,
+  ): Promise<{ outcome: BacklogAttemptOutcome; reason?: string }> {
+    try {
+      const reportPath = this.writeArtifactFile(card.id, attemptId, 'report', result.report!);
+      this.store.insertArtifact({
+        cardId: card.id, attemptId, kind: 'report',
+        path: reportPath, preview: result.report!.slice(0, ARTIFACT_PREVIEW_CHARS),
+      });
+    } catch (e: any) {
+      // Report write failed — don't lose the run silently.
+      const reason = `report write failed: ${e?.message ?? e}`;
+      this.store.setCardState(card.id, 'blocked', reason);
+      return { outcome: 'failed', reason };
+    }
+
+    if (card.taskType !== 'execution') {
+      this.store.setCardState(card.id, 'done');
+      return { outcome: 'success' };
+    }
+
+    // Execution: the dirty worktree is the deliverable — capture it as a patch.
+    const cap = await captureDiff(cwd);
+    if (!cap.ok) {
+      const reason = `diff capture failed: ${cap.reason}`;
+      this.store.setCardState(card.id, 'blocked', reason);
+      return { outcome: 'failed', reason };
+    }
+    try {
+      const patchBody = cap.diff.truncated
+        ? `${cap.diff.patch}\n\n# PATCH TRUNCATED — review the worktree directly`
+        : cap.diff.patch;
+      const diffPath = this.writeArtifactFile(card.id, attemptId, 'diff', patchBody);
+      this.store.insertArtifact({
+        cardId: card.id, attemptId, kind: 'diff',
+        path: diffPath,
+        preview: cap.diff.statusSummary.slice(0, ARTIFACT_PREVIEW_CHARS) || '(no changes)',
+      });
+    } catch (e: any) {
+      const reason = `diff write failed: ${e?.message ?? e}`;
+      this.store.setCardState(card.id, 'blocked', reason);
+      return { outcome: 'failed', reason };
+    }
+
+    const qa = await runQa(card, cwd);
+    if (qa.verdict !== 'skipped') {
+      try {
+        const qaBody = `# QA: ${qa.verdict.toUpperCase()}\ncommand: ${qa.command}\nexit code: ${qa.exitCode ?? 'n/a'}\n\n${qa.output}`;
+        const qaPath = this.writeArtifactFile(card.id, attemptId, 'qa-report', qaBody);
+        this.store.insertArtifact({
+          cardId: card.id, attemptId, kind: 'qa-report',
+          path: qaPath, preview: qaBody.slice(0, ARTIFACT_PREVIEW_CHARS),
+        });
+      } catch (e: any) {
+        logger.warn(`[Backlog] qa-report write failed: ${e?.message ?? e}`);
+      }
+    }
+    if (qa.verdict === 'failed') {
+      // The current attempt isn't finished yet, so +1 accounts for it.
+      if (this.store.countConsecutiveQaFails(card.id) + 1 >= MAX_CONSECUTIVE_QA_FAILS) {
+        this.store.setCardState(
+          card.id, 'blocked',
+          `QA failed in ${MAX_CONSECUTIVE_QA_FAILS} consecutive runs (${qa.command}) — review the QA report`,
+        );
+      } else {
+        this.store.setCardState(card.id, 'rework');
+      }
+      return { outcome: 'qa-failed', reason: `QA failed: ${qa.command} (exit ${qa.exitCode ?? 'n/a'})` };
+    }
+
+    this.store.setCardState(card.id, 'done');
+    return { outcome: 'success' };
   }
 
   /** Window closed: no new claims; a running card gets a grace period. */
@@ -314,12 +490,13 @@ export class BacklogEngine {
     this.reschedule(); // arms the next window-start edge and broadcasts
   }
 
-  private writeReport(cardId: string, attemptId: string, report: string): string {
+  private writeArtifactFile(cardId: string, attemptId: string, kind: BacklogArtifactKind, content: string): string {
     const dir = path.join(this.artifactsDir, cardId);
     fs.mkdirSync(dir, { recursive: true });
-    const reportPath = path.join(dir, `${attemptId}.md`);
-    fs.writeFileSync(reportPath, report, 'utf8');
-    return reportPath;
+    const ext = kind === 'diff' ? 'patch' : kind === 'qa-report' ? 'qa.txt' : 'md';
+    const filePath = path.join(dir, `${attemptId}.${ext}`);
+    fs.writeFileSync(filePath, content, 'utf8');
+    return filePath;
   }
 
   private computeStatus(): BacklogSchedulerStatus {
@@ -335,12 +512,13 @@ export class BacklogEngine {
       runningCardTitle: this.running?.cardTitle ?? null,
       runningAttemptStartedAt: this.running?.startedAt ?? null,
       waitingForIdle: this.waitingForIdle,
-      // Runnable = what the picker would actually consider: green todo/paused
-      // with all prereqs done. Prereq-gated cards aren't "ready".
+      // Runnable = what the picker would actually consider: green
+      // todo/paused/rework with all prereqs done. Prereq-gated cards aren't "ready".
       queueReady: cards.filter((c) =>
-        (c.state === 'todo' || c.state === 'paused') &&
+        isPickableState(c.state) &&
         c.riskTier === 'green' &&
         countUnmetPrereqs(c, cards) === 0).length,
+      usagePausedUntil: this.usageExhaustedUntil,
       lastRun: this.lastRun,
       forecast: this.config.enabled ? forecastNextWindow(cards, this.config.slots, now) : null,
     };
@@ -376,6 +554,7 @@ export class BacklogEngine {
     this.clearEdgeTimer();
     this.clearGraceTimer();
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+    if (this.usageTimer) { clearTimeout(this.usageTimer); this.usageTimer = null; }
   }
 
   private broadcast() {

@@ -10,6 +10,7 @@ import { BacklogCardState, BacklogState, BacklogTemplate } from '../../common/ba
 import { BacklogStore, CreateCardInput, UpdateCardPatch } from './store';
 import { BacklogEngine } from './engine';
 import { resolveProjectDefaultModel, ProjectDefaultModel } from './claude-settings';
+import { removeWorktree } from './worktree';
 
 export interface BacklogIpcDeps {
   store: BacklogStore | null;
@@ -135,6 +136,26 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
   ipcMain.handle('backlog:stop-run', () => {
     if (!engine) return { ok: false, reason: 'backlog storage unavailable' };
     return engine.stopCurrent();
+  });
+
+  // Explicit user action from the card ("Remove worktree") — the worktree is
+  // dirty by design, so this discards the uncommitted work. The path comes
+  // from the DB (engine-written), never from the renderer.
+  ipcMain.handle('backlog:remove-worktree', async (_e, args: { cardId: string }) => {
+    if (!store) return { ok: false, reason: 'backlog storage unavailable' };
+    const card = store.getCard(args?.cardId);
+    if (!card) return { ok: false, reason: 'card not found' };
+    if (!card.worktreePath) return { ok: false, reason: 'card has no worktree' };
+    if (engine?.getStatus().runningCardId === card.id) {
+      return { ok: false, reason: 'card is running — stop it first' };
+    }
+    const project = store.listProjects().find((p) => p.id === card.projectId);
+    const res = await removeWorktree(project?.path ?? card.worktreePath, card.worktreePath);
+    if (res.ok) {
+      store.clearWorktree(card.id);
+      broadcastChanged();
+    }
+    return res;
   });
 
   ipcMain.handle('backlog:get-attempts', (_e, args: { cardId: string }) => {

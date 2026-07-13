@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AnalyticsConfig } from '../../../common/timeline-types';
+import { AnalyticsConfig, TimelineRange } from '../../../common/timeline-types';
 import { logger } from '../../../common/logger';
 import { DigestCard } from './analytics/DigestCard';
 import { WindowValueCard } from './analytics/WindowValueCard';
@@ -10,8 +10,11 @@ import { ModelUsageCard } from './analytics/ModelUsageCard';
 import { ProjectBreakdownCard } from './analytics/ProjectBreakdownCard';
 import { TokensTimelineCard } from './analytics/TokensTimelineCard';
 import { GuardrailsCard } from './analytics/GuardrailsCard';
-import { Card } from './analytics/shared';
-import { bustCache } from './analytics/useAnalytics';
+import { SecretProtectionCard } from './analytics/SecretProtectionCard';
+import { SummaryHeroCard } from './analytics/SummaryHeroCard';
+import { Card, Segmented } from './analytics/shared';
+import { refreshAnalytics, useAnalyticsFreshness } from './analytics/useAnalytics';
+import { AnalyticsRangeProvider, RANGE_OPTIONS } from './analytics/rangeContext';
 import { usePricingSync } from '../../pricing-sync';
 
 interface TimelineStatus {
@@ -44,12 +47,56 @@ interface Props {
   onConfigChange: (partial: Partial<AnalyticsConfig>) => void;
 }
 
+// "updated 12s ago ↻" — freshness of the newest fetch plus a manual refresh
+// that re-queries every mounted card at once.
+const FreshnessControl: React.FC = () => {
+  const fetchedAt = useAnalyticsFreshness();
+  const ago = fetchedAt != null ? Math.max(0, Math.round((Date.now() - fetchedAt) / 1000)) : null;
+  const label = ago == null ? 'loading…' : ago < 5 ? 'just now' : ago < 90 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
+  return (
+    <div className='flex items-center gap-1.5 text-[11px] text-slate-500'>
+      <span>updated {label}</span>
+      <button
+        onClick={refreshAnalytics}
+        aria-label='Refresh analytics'
+        title='Refresh'
+        className='w-6 h-6 rounded-md border border-slate-700/60 bg-slate-800/60 text-slate-400 hover:text-white hover:border-slate-500/70 transition-colors cursor-pointer'
+      >
+        ↻
+      </button>
+    </div>
+  );
+};
+
 const PrivacyAndSettings: React.FC<Props> = ({ config, onConfigChange }) => {
   const [gap, setGap] = useState<number>(config.idleGapMinutes);
+  const [open, setOpen] = useState(false);
   useEffect(() => { setGap(config.idleGapMinutes); }, [config.idleGapMinutes]);
 
+  // Collapsed by default: settings are visited rarely and shouldn't sit in the
+  // middle of the reading flow between analytics cards and the footer.
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className='w-full mb-5 bg-slate-800/40 border border-slate-700/50 rounded-2xl px-5 py-3 flex items-center justify-between text-left cursor-pointer hover:border-slate-600/70 transition-colors'
+      >
+        <span className='text-sm font-medium text-slate-300'>Analytics settings</span>
+        <span className='text-xs text-slate-500'>Redaction · idle gap · show ▾</span>
+      </button>
+    );
+  }
+
   return (
-    <Card title='Settings' subtitle='Local-only. None of this leaves your machine.'>
+    <Card
+      title='Settings'
+      subtitle='Local-only. None of this leaves your machine.'
+      right={
+        <button onClick={() => setOpen(false)} className='text-xs text-slate-500 hover:text-white cursor-pointer'>
+          hide ▴
+        </button>
+      }
+    >
       <div className='flex items-center justify-between gap-4 mb-4'>
         <div className='flex-1'>
           <p className='font-medium text-white text-sm leading-tight'>Redact task text</p>
@@ -99,10 +146,13 @@ const PrivacyAndSettings: React.FC<Props> = ({ config, onConfigChange }) => {
 };
 
 export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ config, onConfigChange, status }) => {
-  // Bust the renderer cache when the user changes settings so subsequent
-  // queries reflect new redaction / idle-gap behavior immediately.
+  // One range scopes every range-aware card below the filter row.
+  const [range, setRange] = useState<TimelineRange>('30d');
+
+  // Refresh (cache-drop + refetch) when the user changes settings so queries
+  // reflect new redaction / idle-gap behavior immediately.
   const handleConfigChange = (partial: Partial<AnalyticsConfig>) => {
-    bustCache();
+    refreshAnalytics();
     onConfigChange(partial);
   };
 
@@ -114,27 +164,43 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
       : `updated ${pricing.lastUpdated}`;
 
   return (
-    <div>
-      {!status.available && (
-        <UnavailableBanner reason={status.reason ?? 'Pulse Timeline is currently unavailable.'} />
-      )}
-      <DigestCard />
-      <WindowValueCard />
-      <HeatmapCard />
-      <TokensTimelineCard />
-      <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
-        <HourRhythmCard />
-        <ToolMixCard />
+    <AnalyticsRangeProvider value={range}>
+      <div>
+        {!status.available && (
+          <UnavailableBanner reason={status.reason ?? 'Pulse Timeline is currently unavailable.'} />
+        )}
+
+        {/* Filter row: the range scopes every card below it (the digest and
+            trailing-window cards keep their intrinsic windows and say so). */}
+        <div className='mb-4 flex items-center justify-between gap-3 flex-wrap'>
+          <Segmented
+            value={range}
+            onChange={(v) => setRange(v as TimelineRange)}
+            options={RANGE_OPTIONS}
+          />
+          <FreshnessControl />
+        </div>
+
+        <SummaryHeroCard />
+        <DigestCard />
+        <WindowValueCard />
+        <HeatmapCard />
+        <TokensTimelineCard />
+        <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
+          <HourRhythmCard />
+          <ToolMixCard />
+        </div>
+        <ModelUsageCard />
+        <ProjectBreakdownCard />
+        <GuardrailsCard />
+        <SecretProtectionCard />
+        <PrivacyAndSettings config={config} onConfigChange={handleConfigChange} />
+        <p className='text-[11px] text-slate-500 text-center mt-1 mb-3'>
+          Costs are estimates at public API list prices ({priceProvenance}), not your actual plan billing.
+          Only agents that expose token usage can be priced.
+        </p>
       </div>
-      <ModelUsageCard />
-      <ProjectBreakdownCard />
-      <GuardrailsCard />
-      <PrivacyAndSettings config={config} onConfigChange={handleConfigChange} />
-      <p className='text-[11px] text-slate-500 text-center mt-1 mb-3'>
-        Costs are estimates at public API list prices ({priceProvenance}), not your actual plan billing.
-        Only agents that expose token usage can be priced.
-      </p>
-    </div>
+    </AnalyticsRangeProvider>
   );
 };
 

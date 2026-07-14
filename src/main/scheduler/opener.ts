@@ -92,6 +92,37 @@ export function resetClaudeBinCache(): void {
 }
 
 /**
+ * Build the argv for launching a `.cmd`/`.bat` shim through cmd.exe.
+ *
+ * Why not `['/c', bin, ...args]` and let Node quote spaced entries? cmd.exe's
+ * quote handling depends on HOW MANY quote characters end up on the line:
+ * with exactly two (a spaced bin path, no spaced args) it keeps them, but the
+ * moment a second spaced argument appears (e.g. the resume continuation
+ * prompt) cmd falls back to stripping the FIRST and LAST quote — the bin path
+ * loses its opening quote and `C:\Program Files\...` dies as
+ * `'C:\Program' is not recognized`. Verified empirically; see the backlog
+ * runner's resume path for the argv that triggered it.
+ *
+ * `/s /c "<line>"` pins the sane rule instead: cmd strips exactly the outer
+ * quotes and executes the rest verbatim, regardless of how many inner quotes
+ * exist. Callers MUST spawn with `windowsVerbatimArguments: true` so Node
+ * passes the line through untouched (its own re-quoting would break it).
+ *
+ * Every arg is quote-wrapped when it contains whitespace. Embedded `"` are
+ * stripped defensively — no legitimate arg has them (bin comes from `where`,
+ * the rest are fixed constants or strict-charset-gated), and cmd has no safe
+ * escape for them anyway.
+ */
+export function buildCmdShimArgs(bin: string, args: string[]): string[] {
+  const quote = (a: string) => {
+    const clean = a.replace(/"/g, '');
+    return /\s/.test(clean) ? `"${clean}"` : clean;
+  };
+  const line = [bin, ...args].map(quote).join(' ');
+  return ['/d', '/s', '/c', `"${line}"`];
+}
+
+/**
  * Fire one opener ping. Never throws — every failure is returned as a
  * structured result so the engine/UI can surface it. Resolves once the child
  * process exits (or the timeout kills it).
@@ -105,18 +136,18 @@ export function fireOpener(): Promise<OpenerResult> {
     }
 
     // On Windows, npm shims are `.cmd` files that execFile can't launch
-    // directly — route through cmd.exe. Args are fixed constants (no user
-    // input), so this is injection-safe; Node quotes a spaced path for us.
+    // directly — route through cmd.exe via buildCmdShimArgs (handles a spaced
+    // bin path like `C:\Program Files\...` safely). Args are fixed constants
+    // (no user input), so this is injection-safe.
     const isWin = process.platform === 'win32';
     const file = isWin ? (process.env.ComSpec || 'cmd.exe') : bin;
-    const args = isWin
-      ? ['/c', bin, '-p', PROMPT, '--model', 'haiku']
-      : ['-p', PROMPT, '--model', 'haiku'];
+    const claudeArgs = ['-p', PROMPT, '--model', 'haiku'];
+    const args = isWin ? buildCmdShimArgs(bin, claudeArgs) : claudeArgs;
 
     execFile(
       file,
       args,
-      { timeout: OPENER_TIMEOUT_MS, windowsHide: true },
+      { timeout: OPENER_TIMEOUT_MS, windowsHide: true, windowsVerbatimArguments: isWin },
       (err: ExecFileException | null) => {
         if (err) {
           const reason = err.killed

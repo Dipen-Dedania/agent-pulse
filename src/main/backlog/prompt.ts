@@ -1,5 +1,32 @@
 import { BacklogCard } from '../../common/backlog-types';
 
+export interface PromptAttachment {
+  filename: string;
+  content: string;
+}
+
+/**
+ * Render attached files as a markdown section for the executor prompt. Each
+ * file is fenced with a backtick run longer than any run inside its content, so
+ * a file that itself contains ``` can't break out of its block. Returns an
+ * empty array (no lines) when there are no attachments.
+ */
+function attachmentLines(attachments: PromptAttachment[]): string[] {
+  if (!attachments || attachments.length === 0) return [];
+  const lines: string[] = [
+    '',
+    '## Attached files',
+    'These files are attached to this card as authoritative input. Use their',
+    'contents directly — they may not exist on disk in your working directory.',
+  ];
+  for (const att of attachments) {
+    const longestTick = (att.content.match(/`+/g) ?? []).reduce((m, s) => Math.max(m, s.length), 0);
+    const fence = '`'.repeat(Math.max(3, longestTick + 1));
+    lines.push('', `### ${att.filename}`, fence, att.content, fence);
+  }
+  return lines;
+}
+
 // Phase 1 contract: research only. The runner never grants write permissions
 // (headless `claude -p` denies Write/Edit/Bash by default and we add
 // --disallowedTools as belt-and-braces), so this instruction is the third
@@ -10,15 +37,25 @@ do not run commands that change state. Investigate using read-only tools only.
 
 Output your findings as a complete, self-contained markdown report as your
 final message. The final message IS the deliverable — include all sections,
-details, and file references in it.`;
+details, and file references in it.
+
+Finish your final message with a status line on its own line, exactly one of:
+  STATUS: completed  — the task is fully answered
+  STATUS: partial    — useful findings, but the task is not fully answered
+  STATUS: blocked    — you could not proceed (explain why above, e.g. a needed
+                       file or context was unavailable). Do not guess.`;
 
 /** Build the headless executor prompt for a research card. */
-export function buildResearchPrompt(card: Pick<BacklogCard, 'title' | 'description'>): string {
+export function buildResearchPrompt(
+  card: Pick<BacklogCard, 'title' | 'description'>,
+  attachments: PromptAttachment[] = [],
+): string {
   const description = card.description.trim();
   return [
     `# Research task: ${card.title.trim()}`,
     '',
     description.length > 0 ? description : 'No further description was provided — interpret the title.',
+    ...attachmentLines(attachments),
     '',
     RESEARCH_CONTRACT,
   ].join('\n');
@@ -39,11 +76,19 @@ Rules:
 
 When done, output a concise markdown summary as your final message: what
 changed and why, file-by-file notes, and anything a reviewer should verify.
-The summary is stored on the card next to the captured diff.`;
+The summary is stored on the card next to the captured diff.
+
+Finish your final message with a status line on its own line, exactly one of:
+  STATUS: completed  — the change is fully implemented
+  STATUS: partial    — real progress, but not everything was finished
+  STATUS: blocked    — you could not proceed and changed nothing (explain why
+                       above, e.g. a needed file or context was unavailable).
+                       Do not guess at an implementation you cannot verify.`;
 
 /** Build the headless executor prompt for an execution card. */
 export function buildExecutionPrompt(
   card: Pick<BacklogCard, 'title' | 'description' | 'acceptanceCriteria'>,
+  attachments: PromptAttachment[] = [],
 ): string {
   const description = card.description.trim();
   const criteria = card.acceptanceCriteria.filter((c) => c.trim().length > 0);
@@ -54,6 +99,7 @@ export function buildExecutionPrompt(
     ...(criteria.length > 0
       ? ['', '## Acceptance criteria', ...criteria.map((c, i) => `${i + 1}. ${c.trim()}`)]
       : []),
+    ...attachmentLines(attachments),
     '',
     EXECUTION_CONTRACT,
   ].join('\n');

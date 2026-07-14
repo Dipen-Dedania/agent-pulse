@@ -6,7 +6,14 @@
 import fs from 'fs';
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { logger } from '../../common/logger';
-import { BacklogCardState, BacklogState, BacklogTemplate } from '../../common/backlog-types';
+import {
+  ATTACHMENT_MAX_FILE_BYTES,
+  AttachmentIntent,
+  BacklogCardState,
+  BacklogState,
+  BacklogTemplate,
+  PendingAttachment,
+} from '../../common/backlog-types';
 import { BacklogStore, CreateCardInput, UpdateCardPatch } from './store';
 import { BacklogEngine } from './engine';
 import { resolveProjectDefaultModel, ProjectDefaultModel } from './claude-settings';
@@ -207,5 +214,55 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
       logger.warn('[Backlog] failed to read artifact file:', e?.message ?? e);
       return { content: artifact.preview, path: artifact.path, truncated: true };
     }
+  });
+
+  ipcMain.handle('backlog:list-attachments', (_e, args: { cardId: string }) => {
+    if (!store || typeof args?.cardId !== 'string') return { attachments: [] };
+    return { attachments: store.listAttachments(args.cardId) };
+  });
+
+  // Open the OS file picker, read + validate the chosen files, and return their
+  // text content for the editor to hold until save. Reads happen in main (the
+  // renderer has no filesystem access) but NOTHING is persisted here — that is
+  // set-card-attachments' job, so a cancelled edit leaves no trace.
+  ipcMain.handle(
+    'backlog:pick-attachments',
+    async (): Promise<{ items: PendingAttachment[]; skipped: { filename: string; reason: string }[] }> => {
+      const result = await dialog.showOpenDialog({
+        title: 'Attach files to card',
+        properties: ['openFile', 'multiSelections'],
+      });
+      if (result.canceled) return { items: [], skipped: [] };
+
+      const items: PendingAttachment[] = [];
+      const skipped: { filename: string; reason: string }[] = [];
+      for (const filePath of result.filePaths) {
+        const filename = filePath.split(/[\\/]/).pop() || filePath;
+        try {
+          const buf = fs.readFileSync(filePath);
+          if (buf.byteLength > ATTACHMENT_MAX_FILE_BYTES) {
+            skipped.push({ filename, reason: `too large (max ${Math.round(ATTACHMENT_MAX_FILE_BYTES / 1024)} KB)` });
+            continue;
+          }
+          // A NUL byte means it isn't UTF-8 text — inlining binary into the
+          // prompt is meaningless, so reject it with a clear reason.
+          if (buf.includes(0)) {
+            skipped.push({ filename, reason: 'not a text file' });
+            continue;
+          }
+          items.push({ filename, content: buf.toString('utf8'), bytes: buf.byteLength });
+        } catch (e: any) {
+          skipped.push({ filename, reason: `could not read (${e?.message ?? e})` });
+        }
+      }
+      return { items, skipped };
+    },
+  );
+
+  ipcMain.handle('backlog:set-card-attachments', (_e, args: { cardId: string; intent: AttachmentIntent }) => {
+    if (!store || typeof args?.cardId !== 'string') return { attachments: [] };
+    const attachments = store.setCardAttachments(args.cardId, args.intent ?? { keepIds: [], add: [] });
+    broadcastChanged();
+    return { attachments };
   });
 }

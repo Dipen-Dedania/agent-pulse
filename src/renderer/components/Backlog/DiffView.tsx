@@ -219,7 +219,7 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
 
       <div className='flex gap-3 h-[68vh]'>
         {/* File rail */}
-        <div className='w-56 shrink-0 overflow-y-auto apple-scroll flex flex-col gap-0.5 pr-1'>
+        <div className='w-56 shrink-0 overflow-y-auto overflow-x-hidden apple-scroll flex flex-col gap-0.5 pr-1'>
           {files.map((file, i) => {
             const s = fileStats(file);
             const status = STATUS[file.type] ?? STATUS.modify;
@@ -234,9 +234,10 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
                 className='group flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-slate-700/40 transition-colors'
               >
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dot}`} aria-label={status.label} />
-                <span className='flex-1 min-w-0 text-xs leading-tight'>
-                  <span className='text-slate-500'>{dir}</span>
-                  <span className='text-slate-200 font-medium'>{base}</span>
+                {/* Dir truncates first (shrinkable); filename stays visible, capped at rail width. */}
+                <span className='flex-1 min-w-0 flex text-xs leading-tight'>
+                  {dir && <span className='truncate text-slate-500'>{dir}</span>}
+                  <span className='truncate shrink-0 max-w-full text-slate-200 font-medium'>{base}</span>
                 </span>
                 <span className='shrink-0 text-[10px] font-mono tabular-nums'>
                   <span className='text-emerald-300'>+{s.additions}</span>{' '}

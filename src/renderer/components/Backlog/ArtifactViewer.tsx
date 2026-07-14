@@ -4,6 +4,7 @@ import { logger } from '../../../common/logger';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { appAlert, appConfirm } from '../Dialog/AppDialog';
 import { DiffView } from './DiffView';
+import { Markdown } from './Markdown';
 
 // Card detail: attempt history + artifacts (research report / execution diff
 // + QA report) +, for execution cards, the worktree the diff came from.
@@ -32,11 +33,30 @@ const OUTCOME_COLOR: Record<string, string> = {
   paused: 'text-amber-300',
   killed: 'text-amber-300',
   'qa-failed': 'text-orange-300',
+  'no-changes': 'text-amber-300',
+  blocked: 'text-rose-300',
 };
 
 const OUTCOME_LABEL: Record<string, string> = {
   'qa-failed': 'QA failed',
+  'no-changes': 'no changes',
+  blocked: 'blocked',
 };
+
+/**
+ * First ~2 meaningful lines of a report preview, for the at-a-glance attempt
+ * summary. Drops blank lines, markdown heading hashes, and the trailing STATUS
+ * marker so the reader sees the agent's own opening sentences.
+ */
+function attemptSummary(preview: string | undefined): string | null {
+  if (!preview) return null;
+  const lines = preview
+    .split('\n')
+    .map((l) => l.trim().replace(/^#+\s*/, ''))
+    .filter((l) => l.length > 0 && !/^STATUS:\s*(completed|partial|blocked)\b/i.test(l));
+  const text = lines.slice(0, 2).join(' ');
+  return text.length > 0 ? text : null;
+}
 
 // report = markdown summary, diff = git patch (rendered monospace, no wrap),
 // qa-report = QA command output (first line carries the pass/fail verdict).
@@ -215,20 +235,48 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
               {attempts.length === 0 ? (
                 <p className='text-sm text-slate-400'>No runs yet.</p>
               ) : (
-                <div className='flex flex-col gap-1'>
-                  {attempts.map((a) => (
-                    <div key={a.id} className='flex items-center gap-3 text-xs flex-wrap'>
-                      <span className='text-slate-400 w-32 shrink-0'>{formatWhen(a.startedAt)}</span>
-                      <span className={`font-medium ${OUTCOME_COLOR[a.outcome ?? ''] ?? 'text-slate-300'}`}>
-                        {OUTCOME_LABEL[a.outcome ?? ''] ?? a.outcome ?? 'running…'}
-                      </span>
-                      {formatDuration(a) && <span className='text-slate-500'>{formatDuration(a)}</span>}
-                      {a.costUsd != null && <span className='text-slate-500'>${a.costUsd.toFixed(2)}</span>}
-                      {a.numTurns != null && <span className='text-slate-500'>{a.numTurns} turns</span>}
-                      {a.manual && <span className='text-slate-500'>manual</span>}
-                      {a.reason && <span className='text-slate-500 truncate max-w-64' title={a.reason}>{a.reason}</span>}
-                    </div>
-                  ))}
+                <div className='flex flex-col gap-2'>
+                  {attempts.map((a) => {
+                    const report = artifacts.find((x) => x.attemptId === a.id && x.kind === 'report');
+                    const diff = artifacts.find((x) => x.attemptId === a.id && x.kind === 'diff');
+                    const summary = attemptSummary(report?.preview);
+                    // A saved diff whose status listing is empty ⇒ the run changed
+                    // nothing. Flag it even on older attempts recorded as 'success'
+                    // before honest-outcome classification existed.
+                    const noChanges = diff != null && diff.preview.trim() === '(no changes)';
+                    return (
+                      <div key={a.id} className='flex flex-col gap-0.5'>
+                        <div className='flex items-center gap-3 text-xs flex-wrap'>
+                          <span className='text-slate-400 w-32 shrink-0'>{formatWhen(a.startedAt)}</span>
+                          <span className={`font-medium ${OUTCOME_COLOR[a.outcome ?? ''] ?? 'text-slate-300'}`}>
+                            {OUTCOME_LABEL[a.outcome ?? ''] ?? a.outcome ?? 'running…'}
+                          </span>
+                          {noChanges && a.outcome !== 'no-changes' && (
+                            <span className='px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-semibold uppercase tracking-wide'>
+                              no file changes
+                            </span>
+                          )}
+                          {formatDuration(a) && <span className='text-slate-500'>{formatDuration(a)}</span>}
+                          {a.costUsd != null && <span className='text-slate-500'>${a.costUsd.toFixed(2)}</span>}
+                          {a.numTurns != null && <span className='text-slate-500'>{a.numTurns} turns</span>}
+                          {a.manual && <span className='text-slate-500'>manual</span>}
+                          {/* reason only when there's no richer report summary (failed/killed
+                              runs write no report) — avoids showing the same line twice. */}
+                          {a.reason && !summary && (
+                            <span className='text-slate-500 truncate max-w-64' title={a.reason}>{a.reason}</span>
+                          )}
+                        </div>
+                        {summary && (
+                          <p
+                            className='text-slate-400 leading-snug line-clamp-2 pl-[8.75rem] text-xs'
+                            title={report?.preview}
+                          >
+                            {summary}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -280,6 +328,22 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                     <p className='text-sm text-slate-400'>Loading diff…</p>
                   ) : (
                     <DiffView patch={content} truncated={contentTruncated} />
+                  )
+                ) : selected?.kind === 'report' ? (
+                  // Summary reports are plain markdown — render a formatted
+                  // preview instead of raw source. Falls back to the ~500-char
+                  // preview when the artifact file couldn't be read.
+                  content == null ? (
+                    <p className='text-sm text-slate-400'>Loading…</p>
+                  ) : (
+                    <div className='max-h-96 overflow-y-auto apple-scroll'>
+                      <Markdown content={content} />
+                      {contentTruncated && (
+                        <p className='mt-2 text-[11px] text-slate-500 italic'>
+                          Preview truncated — use “Open file” to read the full report.
+                        </p>
+                      )}
+                    </div>
                   )
                 ) : (
                   <pre className='whitespace-pre-wrap text-xs text-slate-200 leading-relaxed font-mono max-h-96 overflow-y-auto apple-scroll'>

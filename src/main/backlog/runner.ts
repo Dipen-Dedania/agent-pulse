@@ -25,7 +25,7 @@
 import { spawn, execFile, execFileSync, ChildProcess } from 'child_process';
 import { logger } from '../../common/logger';
 import { BacklogTaskType, isSafeModelId } from '../../common/backlog-types';
-import { resolveClaudeBin, resetClaudeBinCache } from '../scheduler/opener';
+import { buildCmdShimArgs, resolveClaudeBin, resetClaudeBinCache } from '../scheduler/opener';
 
 // Verified against the installed CLI (2.1.170, Phase 2 spike): --disallowedTools
 // takes a comma-separated list; --permission-mode acceptEdits, --setting-sources
@@ -61,9 +61,35 @@ export function isUsageLimitError(text: string | null | undefined): boolean {
 
 export type RunnerOutcome = 'success' | 'failed' | 'killed';
 
+// The executor is asked (by prompt.ts) to end its final message with a
+// `STATUS: completed|partial|blocked` line. This is how a clean CLI exit that
+// is actually a "couldn't proceed" gets distinguished from a real success —
+// the CLI's own exit code says nothing about whether the task was done.
+export type SelfReportedStatus = 'completed' | 'partial' | 'blocked';
+const SELF_STATUS_RE = /^STATUS:\s*(completed|partial|blocked)\b/i;
+
+/**
+ * Pull the executor's self-reported status out of its final markdown. The
+ * marker is expected on its own line at the end, so we scan from the bottom
+ * and take the last match (a mid-report mention of the word loses to the real
+ * footer). Returns null when the agent omitted it — callers fall back to the
+ * deterministic empty-diff check.
+ */
+export function parseSelfReportedStatus(report: string | undefined | null): SelfReportedStatus | null {
+  if (!report) return null;
+  const lines = report.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = SELF_STATUS_RE.exec(lines[i].trim());
+    if (m) return m[1].toLowerCase() as SelfReportedStatus;
+  }
+  return null;
+}
+
 export interface RunnerResult {
   outcome: RunnerOutcome;
   report?: string;             // final markdown (on success)
+  /** Executor's self-reported status parsed from the report's STATUS line. */
+  selfStatus?: SelfReportedStatus | null;
   reason?: string;             // failure / kill detail
   killOutcome?: 'killed' | 'paused'; // how a kill should be recorded on the attempt
   /** Set when a failure is a usage-window exhaustion, not the card's fault. */
@@ -207,8 +233,12 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
     }
 
     // Windows npm shims are .cmd files spawn can't launch directly — route
-    // through cmd.exe (same as the opener). The bin path comes from `where`,
-    // and all argv entries are fixed constants or strict-charset-gated; the
+    // through cmd.exe via buildCmdShimArgs + windowsVerbatimArguments (same as
+    // the opener). A bare `['/c', bin, ...]` breaks the moment a SECOND spaced
+    // argv entry appears (the resume prompt): cmd then strips the first/last
+    // quote and a spaced bin path like `C:\Program Files\...` dies as
+    // `'C:\Program' is not recognized`. The bin path comes from `where`, and
+    // all argv entries are fixed constants or strict-charset-gated; the
     // untrusted prompt goes over stdin.
     const isWin = process.platform === 'win32';
     const file = isWin ? (process.env.ComSpec || 'cmd.exe') : bin;
@@ -233,11 +263,14 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
         logger.warn('[Backlog/runner] unsafe session id — starting a fresh run instead of resuming');
       }
     }
-    const args = isWin ? ['/c', bin, ...baseArgs] : baseArgs;
+    const args = isWin ? buildCmdShimArgs(bin, baseArgs) : baseArgs;
 
     let proc: ChildProcess;
     try {
-      proc = spawn(file, args, { cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      proc = spawn(file, args, {
+        cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+        windowsVerbatimArguments: isWin,
+      });
     } catch (e: any) {
       resolve(failed(`failed to spawn claude: ${e?.message ?? e}`));
       return;
@@ -310,7 +343,12 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
         });
         return;
       }
-      settle({ outcome: 'success', report: parsed.report, costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId });
+      settle({
+        outcome: 'success',
+        report: parsed.report,
+        selfStatus: parseSelfReportedStatus(parsed.report),
+        costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId,
+      });
     });
 
     // Feed the prompt and close stdin so -p reads it as the full input. On

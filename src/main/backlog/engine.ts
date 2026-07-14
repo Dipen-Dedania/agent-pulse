@@ -43,6 +43,22 @@ const USAGE_GATE_UTILIZATION = 95;
 // When the usage snapshot can't say when the window resets, re-check on this cadence.
 const USAGE_RECHECK_FALLBACK_MS = 30 * 60_000;
 
+/**
+ * First human-meaningful line of a report, for the attempt's one-line `reason`.
+ * Skips blank lines, markdown heading hashes / bold, and the STATUS marker so
+ * the reason reads as the agent's own opening sentence.
+ */
+function firstReportLine(report: string | undefined): string | null {
+  if (!report) return null;
+  for (const raw of report.split(/\r?\n/)) {
+    const line = raw.trim().replace(/^#+\s*/, '').replace(/^\*\*|\*\*$/g, '');
+    if (!line) continue;
+    if (/^STATUS:\s*(completed|partial|blocked)\b/i.test(line)) continue;
+    return line.slice(0, 200);
+  }
+  return null;
+}
+
 export interface BacklogEngineDeps {
   store: BacklogStore;
   usagePoller: { refreshNow: () => void };
@@ -316,7 +332,12 @@ export class BacklogEngine {
 
       const attempt = this.store.insertAttempt(card.id, manual);
       this.store.setCardState(card.id, 'in-progress');
-      const prompt = card.taskType === 'execution' ? buildExecutionPrompt(card) : buildResearchPrompt(card);
+      // Inline any attached files into the prompt so the card can carry context
+      // that isn't in the repo (the detached worktree only sees committed files).
+      const attachments = this.store.listAttachmentContents(card.id);
+      const prompt = card.taskType === 'execution'
+        ? buildExecutionPrompt(card, attachments)
+        : buildResearchPrompt(card, attachments);
       const handle = executeCard({
         prompt, cwd, budgetMs: cardBudgetMs(card),
         taskType: card.taskType, model: card.model, resumeSessionId,
@@ -416,9 +437,21 @@ export class BacklogEngine {
       return { outcome: 'failed', reason };
     }
 
+    // The CLI exiting cleanly with a final message is NOT the same as the task
+    // being done. Honor the executor's self-reported STATUS (prompt.ts) and,
+    // for execution cards, the deterministic empty-diff check, so a "couldn't
+    // proceed" or a no-op never silently lands the card in Done.
+    const selfStatus = result.selfStatus ?? null;
+    const blockedLike = selfStatus === 'blocked';
+
     if (card.taskType !== 'execution') {
+      if (blockedLike) {
+        const reason = firstReportLine(result.report) ?? 'agent reported it was blocked';
+        this.store.setCardState(card.id, 'blocked', reason);
+        return { outcome: 'blocked', reason };
+      }
       this.store.setCardState(card.id, 'done');
-      return { outcome: 'success' };
+      return { outcome: 'success', reason: selfStatus === 'partial' ? 'agent reported partial completion' : undefined };
     }
 
     // Execution: the dirty worktree is the deliverable — capture it as a patch.
@@ -442,6 +475,23 @@ export class BacklogEngine {
       const reason = `diff write failed: ${e?.message ?? e}`;
       this.store.setCardState(card.id, 'blocked', reason);
       return { outcome: 'failed', reason };
+    }
+
+    // An execution card whose worktree is empty delivered nothing — this is the
+    // exact case that used to read as a green "success" with a +0/−0 diff. Never
+    // mark it Done; surface it for a human with the agent's own explanation.
+    const hasChanges = cap.diff.statusSummary.trim().length > 0;
+    if (!hasChanges) {
+      const reason = blockedLike
+        ? (firstReportLine(result.report) ?? 'agent reported it was blocked and made no changes')
+        : 'run finished but produced no file changes — see the summary';
+      this.store.setCardState(card.id, 'blocked', reason);
+      return { outcome: 'no-changes', reason };
+    }
+    if (blockedLike) {
+      const reason = firstReportLine(result.report) ?? 'agent reported it was blocked';
+      this.store.setCardState(card.id, 'blocked', reason);
+      return { outcome: 'blocked', reason };
     }
 
     const qa = await runQa(card, cwd);
@@ -471,7 +521,7 @@ export class BacklogEngine {
     }
 
     this.store.setCardState(card.id, 'done');
-    return { outcome: 'success' };
+    return { outcome: 'success', reason: selfStatus === 'partial' ? 'agent reported partial completion' : undefined };
   }
 
   /** Window closed: no new claims; a running card gets a grace period. */

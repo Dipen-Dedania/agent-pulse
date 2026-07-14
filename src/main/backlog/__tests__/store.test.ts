@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openBacklogDb, Database } from '../db';
 import { BacklogStore } from '../store';
+import { ATTACHMENT_MAX_COUNT, ATTACHMENT_MAX_FILE_BYTES } from '../../../common/backlog-types';
 
 // better-sqlite3 is rebuilt against Electron's ABI (`npm run rebuild:native`),
 // so it may not load under vitest's plain Node — same coverage nuance as the
@@ -248,8 +249,66 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
   });
 });
 
-describe.skipIf(!dbAvailable)('backlog schema migration v2 → v3', () => {
-  it('adds the Phase 2 columns to an existing v2 board', () => {
+describe.skipIf(!dbAvailable)('BacklogStore attachments', () => {
+  let db: Database;
+  let store: BacklogStore;
+  let cardId: string;
+
+  beforeEach(() => {
+    db = openBacklogDb(':memory:')!;
+    store = new BacklogStore(db);
+    const projectId = store.addProject('E:/repos/demo').id;
+    cardId = store.createCard({ title: 'card', projectId }).id;
+  });
+
+  it('adds, lists (metadata only), and exposes content for the prompt', () => {
+    const rows = store.setCardAttachments(cardId, {
+      keepIds: [],
+      add: [{ filename: 'plan.md', content: '# Plan\n\ndetails', bytes: 15 }],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].filename).toBe('plan.md');
+    // Metadata list carries no content; the engine fetches content separately.
+    expect((rows[0] as any).content).toBeUndefined();
+    expect(store.listAttachmentContents(cardId)).toEqual([{ filename: 'plan.md', content: '# Plan\n\ndetails' }]);
+    // bytes is recomputed from content, not trusted from the caller.
+    expect(rows[0].bytes).toBe(Buffer.byteLength('# Plan\n\ndetails', 'utf8'));
+  });
+
+  it('replace-all: keeps listed ids, drops the rest, appends new files', () => {
+    const first = store.setCardAttachments(cardId, {
+      keepIds: [],
+      add: [{ filename: 'a.md', content: 'a', bytes: 1 }, { filename: 'b.md', content: 'b', bytes: 1 }],
+    });
+    const keepId = first.find((a) => a.filename === 'a.md')!.id;
+    const after = store.setCardAttachments(cardId, {
+      keepIds: [keepId],
+      add: [{ filename: 'c.md', content: 'c', bytes: 1 }],
+    });
+    expect(after.map((a) => a.filename).sort()).toEqual(['a.md', 'c.md']);
+  });
+
+  it('drops files over the per-file byte cap', () => {
+    const big = 'x'.repeat(ATTACHMENT_MAX_FILE_BYTES + 1);
+    const rows = store.setCardAttachments(cardId, { keepIds: [], add: [{ filename: 'big.txt', content: big, bytes: big.length }] });
+    expect(rows).toHaveLength(0);
+  });
+
+  it('stops adding once the count cap is reached', () => {
+    const add = Array.from({ length: ATTACHMENT_MAX_COUNT + 3 }, (_, i) => ({ filename: `f${i}.md`, content: 'x', bytes: 1 }));
+    const rows = store.setCardAttachments(cardId, { keepIds: [], add });
+    expect(rows).toHaveLength(ATTACHMENT_MAX_COUNT);
+  });
+
+  it('cascades on card delete', () => {
+    store.setCardAttachments(cardId, { keepIds: [], add: [{ filename: 'a.md', content: 'a', bytes: 1 }] });
+    store.deleteCard(cardId);
+    expect(store.listAttachments(cardId)).toEqual([]);
+  });
+});
+
+describe.skipIf(!dbAvailable)('backlog schema migration v2 → v4', () => {
+  it('adds the Phase 2 columns and the attachments table to an existing v2 board', () => {
     const fs = require('fs') as typeof import('fs');
     const os = require('os') as typeof import('os');
     const path = require('path') as typeof import('path');
@@ -292,7 +351,11 @@ describe.skipIf(!dbAvailable)('backlog schema migration v2 → v3', () => {
       expect(card.baseSha).toBeNull();
       expect(card.qaCommand).toBeNull();
       const version = migrated.prepare('SELECT version FROM schema_version').get() as { version: number };
-      expect(version.version).toBe(3);
+      expect(version.version).toBe(4);
+      // v4: the attachments table exists and is usable on a migrated board.
+      expect(store.listAttachments('c1')).toEqual([]);
+      store.setCardAttachments('c1', { keepIds: [], add: [{ filename: 'note.md', content: 'hi', bytes: 2 }] });
+      expect(store.listAttachments('c1')).toHaveLength(1);
       migrated.close();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

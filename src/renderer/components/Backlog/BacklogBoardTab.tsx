@@ -201,11 +201,17 @@ export const BacklogBoardTab: React.FC = () => {
     void store.reorderTodo(ordered);
   };
 
-  const handleSave = async (input: Parameters<Parameters<typeof CardEditorModal>[0]['onSave']>[0]) => {
-    if (editor.card) {
-      await store.updateCard(editor.card.id, input);
-    } else {
-      await store.createCard(input);
+  const handleSave = async (
+    input: Parameters<Parameters<typeof CardEditorModal>[0]['onSave']>[0],
+    attachments: Parameters<Parameters<typeof CardEditorModal>[0]['onSave']>[1],
+  ) => {
+    const saved = editor.card
+      ? await store.updateCard(editor.card.id, input)
+      : await store.createCard(input);
+    // Persist attachments once the card id is known (new cards have none until
+    // create resolves). Skip when there's nothing to change on a fresh card.
+    if (saved && (attachments.keepIds.length > 0 || attachments.add.length > 0 || editor.card)) {
+      await store.setCardAttachments(saved.id, attachments);
     }
     setEditor({ open: false, card: null });
   };
@@ -400,7 +406,7 @@ export const BacklogBoardTab: React.FC = () => {
           projects={store.projects}
           templates={store.templates}
           cards={store.cards}
-          onSave={(input) => void handleSave(input)}
+          onSave={(input, attachments) => void handleSave(input, attachments)}
           onClose={() => setEditor({ open: false, card: null })}
         />
       )}

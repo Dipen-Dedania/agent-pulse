@@ -520,6 +520,15 @@ class AgentPulseApp {
       await shell.openPath(filePath);
     });
 
+    // Opens http(s) links (e.g. from a rendered markdown report) in the user's
+    // default browser. Restricted to web schemes so a report can't invoke an
+    // arbitrary protocol handler via shell.openExternal.
+    ipcMain.handle('open-external', async (_event, url: string) => {
+      if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+        await shell.openExternal(url);
+      }
+    });
+
     ipcMain.handle('usage:update-config', (_event, partial: Partial<UsageConfig>) => {
       this.userConfig.usage = { ...this.userConfig.usage, ...partial };
       saveConfig(this.userConfig);

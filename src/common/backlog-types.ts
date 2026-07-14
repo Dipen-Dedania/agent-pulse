@@ -85,7 +85,13 @@ export function countUnmetPrereqs(
 // 'qa-failed': the run itself succeeded but the QA command failed — distinct
 // from 'failed' so the QA-fail escalation streak never mixes with run failures,
 // and from 'killed' so it never trips the budget-kill escalation.
-export type BacklogAttemptOutcome = 'success' | 'failed' | 'paused' | 'killed' | 'qa-failed';
+// 'no-changes': an execution run finished cleanly but the worktree diff was
+// empty — nothing was delivered, so it must never read as a green success.
+// 'blocked': the agent reported it could not proceed (STATUS: blocked). Both
+// new outcomes route the card to the 'blocked' state for a human rather than
+// silently going Done — see engine.finalizeSuccess.
+export type BacklogAttemptOutcome =
+  | 'success' | 'failed' | 'paused' | 'killed' | 'qa-failed' | 'no-changes' | 'blocked';
 
 export interface BacklogAttempt {
   id: string;
@@ -113,6 +119,41 @@ export interface BacklogArtifact {
   path: string;      // absolute path under userData/backlog-artifacts
   preview: string;   // first ~500 chars for board rendering
   createdAt: number;
+}
+
+// Card attachments: text files attached to a card and inlined verbatim into the
+// executor prompt. This lets a card carry context that isn't committed to the
+// repo — the exact gap that makes an untracked plan file invisible to the
+// detached execution worktree. Stored as durable copies (content in the DB),
+// so they survive edits/deletion of the source file.
+export const ATTACHMENT_MAX_FILE_BYTES = 256 * 1024;   // per file
+export const ATTACHMENT_MAX_TOTAL_BYTES = 512 * 1024;  // summed across a card
+export const ATTACHMENT_MAX_COUNT = 10;
+
+// List/UI payload — content is fetched separately (only the engine needs it, at
+// prompt-build time), so the board and editor never carry the full text around.
+export interface BacklogAttachment {
+  id: string;
+  cardId: string;
+  filename: string;
+  bytes: number;      // UTF-8 byte length of the content
+  createdAt: number;
+}
+
+// A file the user just picked but hasn't persisted yet — content travels over
+// IPC once, on save.
+export interface PendingAttachment {
+  filename: string;
+  content: string;
+  bytes: number;
+}
+
+// The desired final attachment set for a card, sent on save: keep these existing
+// rows (by id), add these newly-picked files. Anything not in `keepIds` is
+// deleted. Replace-all semantics keep create and edit paths identical.
+export interface AttachmentIntent {
+  keepIds: string[];
+  add: PendingAttachment[];
 }
 
 // Quick-task templates: pre-written prompts that pre-fill a new card.

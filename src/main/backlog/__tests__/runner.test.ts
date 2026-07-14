@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseClaudeJsonOutput, isUsageLimitError, isSafeSessionId } from '../runner';
+import { parseClaudeJsonOutput, isUsageLimitError, isSafeSessionId, parseSelfReportedStatus } from '../runner';
 import { buildResearchPrompt, buildExecutionPrompt } from '../prompt';
+import { buildCmdShimArgs } from '../../scheduler/opener';
 
 // Shape captured from a real `claude -p --output-format json` run (see plan spike).
 const SUCCESS_JSON = JSON.stringify({
@@ -50,6 +51,30 @@ describe('parseClaudeJsonOutput', () => {
   });
 });
 
+describe('parseSelfReportedStatus', () => {
+  it('reads the trailing STATUS marker in each variant', () => {
+    expect(parseSelfReportedStatus('done\n\nSTATUS: completed')).toBe('completed');
+    expect(parseSelfReportedStatus('some progress\nSTATUS: partial')).toBe('partial');
+    expect(parseSelfReportedStatus('I could not read the plan.\nSTATUS: blocked')).toBe('blocked');
+  });
+
+  it('is case-insensitive and tolerates trailing text/whitespace', () => {
+    expect(parseSelfReportedStatus('x\nstatus:   Blocked — no plan file')).toBe('blocked');
+  });
+
+  it('takes the LAST marker when the word also appears earlier in prose', () => {
+    expect(parseSelfReportedStatus('I was blocked at first.\nThen finished.\nSTATUS: completed')).toBe('completed');
+  });
+
+  it('returns null when no marker is present or input is empty', () => {
+    expect(parseSelfReportedStatus('just a normal report, no footer')).toBeNull();
+    expect(parseSelfReportedStatus('')).toBeNull();
+    expect(parseSelfReportedStatus(undefined)).toBeNull();
+    // Bare mention without the STATUS: prefix must not match.
+    expect(parseSelfReportedStatus('the task is completed')).toBeNull();
+  });
+});
+
 describe('buildResearchPrompt', () => {
   it('carries the card title/description and the read-only report contract', () => {
     const prompt = buildResearchPrompt({ title: 'Audit the bridge', description: 'Look at port 4242 handling.' });
@@ -57,6 +82,7 @@ describe('buildResearchPrompt', () => {
     expect(prompt).toContain('port 4242');
     expect(prompt).toContain('READ-ONLY');
     expect(prompt).toContain('markdown report');
+    expect(prompt).toContain('STATUS: blocked');
   });
 
   it('handles an empty description', () => {
@@ -78,11 +104,94 @@ describe('buildExecutionPrompt', () => {
     expect(prompt).toContain('2. tests pass');
     expect(prompt).toContain('uncommitted');
     expect(prompt).toContain('diff is your deliverable');
+    expect(prompt).toContain('STATUS: blocked');
   });
 
   it('omits the criteria section when the card has none', () => {
     const prompt = buildExecutionPrompt({ title: 'T', description: 'd', acceptanceCriteria: [] });
     expect(prompt).not.toContain('Acceptance criteria');
+  });
+});
+
+describe('prompt attachments', () => {
+  it('inlines attached files verbatim under an Attached files section', () => {
+    const prompt = buildResearchPrompt(
+      { title: 'T', description: 'd' },
+      [{ filename: 'plan.md', content: '# Plan\nline two' }],
+    );
+    expect(prompt).toContain('## Attached files');
+    expect(prompt).toContain('### plan.md');
+    expect(prompt).toContain('# Plan\nline two');
+  });
+
+  it('omits the section entirely when there are no attachments', () => {
+    expect(buildResearchPrompt({ title: 'T', description: 'd' }, [])).not.toContain('Attached files');
+    expect(buildExecutionPrompt({ title: 'T', description: 'd', acceptanceCriteria: [] })).not.toContain('Attached files');
+  });
+
+  it('fences content longer than any internal backtick run so it cannot break out', () => {
+    // Content contains a ``` fence — the wrapper must use a longer fence.
+    const content = 'here is code:\n```\nconst x = 1;\n```\ndone';
+    const prompt = buildExecutionPrompt(
+      { title: 'T', description: 'd', acceptanceCriteria: [] },
+      [{ filename: 'snippet.md', content }],
+    );
+    expect(prompt).toContain('````'); // 4+ backticks wrap the 3-backtick content
+    expect(prompt).toContain(content);
+  });
+});
+
+describe('buildCmdShimArgs', () => {
+  it('wraps the whole command in one outer quote pair for /s /c', () => {
+    const args = buildCmdShimArgs('C:\\Program Files\\nodejs\\claude.cmd', ['-p', '--output-format', 'json']);
+    expect(args).toEqual(['/d', '/s', '/c', '""C:\\Program Files\\nodejs\\claude.cmd" -p --output-format json"']);
+  });
+
+  it('quotes each spaced arg — the resume-prompt case that broke /c', () => {
+    const args = buildCmdShimArgs('C:\\Program Files\\nodejs\\claude.cmd', ['--resume', 'abc-123', 'Continue the task.']);
+    expect(args[3]).toBe('""C:\\Program Files\\nodejs\\claude.cmd" --resume abc-123 "Continue the task.""');
+  });
+
+  it('leaves an unspaced bin and args unquoted inside the line', () => {
+    const args = buildCmdShimArgs('C:\\npm\\claude.cmd', ['-p']);
+    expect(args).toEqual(['/d', '/s', '/c', '"C:\\npm\\claude.cmd -p"']);
+  });
+
+  it('strips embedded double quotes defensively', () => {
+    const args = buildCmdShimArgs('C:\\npm\\claude.cmd', ['a"b']);
+    expect(args[3]).toBe('"C:\\npm\\claude.cmd ab"');
+  });
+});
+
+// The string shape above is asserted exactly; this proves the shape actually
+// survives cmd.exe on a real Windows box — a fake .cmd shim in a spaced dir
+// echoes its argv back. Skipped on POSIX (no cmd.exe).
+describe.skipIf(process.platform !== 'win32')('buildCmdShimArgs through real cmd.exe', () => {
+  it('spaced bin + spaced arg both arrive intact', async () => {
+    const fs = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const { spawn } = await import('child_process');
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pulse cmd '));
+    const bin = path.join(dir, 'fakeclaude.cmd');
+    fs.writeFileSync(bin, '@echo off\r\necho ARGS=[%*]\r\n');
+    try {
+      const out = await new Promise<string>((resolve, reject) => {
+        const proc = spawn(
+          process.env.ComSpec || 'cmd.exe',
+          buildCmdShimArgs(bin, ['-p', '--resume', 'abc-123', 'Continue the task from where you left off.']),
+          { windowsHide: true, windowsVerbatimArguments: true },
+        );
+        let stdout = '';
+        proc.stdout.on('data', (d) => (stdout += d));
+        proc.on('close', (code) => (code === 0 ? resolve(stdout) : reject(new Error(`exit ${code}: ${stdout}`))));
+        proc.on('error', reject);
+      });
+      expect(out).toContain('ARGS=[-p --resume abc-123 "Continue the task from where you left off."]');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1,9 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import {
-  BacklogCard, BacklogProject, BacklogTaskType, BacklogTemplate, QaProvider, RiskTier, isSafeModelId,
+  AttachmentIntent, BacklogAttachment, BacklogCard, BacklogProject, BacklogTaskType,
+  BacklogTemplate, PendingAttachment, QaProvider, RiskTier, isSafeModelId,
 } from '../../../common/backlog-types';
+import { useBacklogStore } from '../../store/useBacklogStore';
+import { appAlert } from '../Dialog/AppDialog';
 import { TIER_META } from './CardTile';
 import { TemplateManagerModal } from './TemplateManagerModal';
+
+function formatBytes(n: number): string {
+  return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+}
 
 // Create/edit a card. Research cards stay read-only (report only); execution
 // cards edit files in an isolated worktree and gain the acceptance-criteria +
@@ -14,19 +21,22 @@ interface Props {
   projects: BacklogProject[];
   templates: BacklogTemplate[];
   cards: BacklogCard[];         // prereq candidates (all board cards)
-  onSave: (input: {
-    title: string; description: string; projectId: string;
-    taskType: BacklogTaskType;
-    riskTier: RiskTier;
-    model: string | null;
-    estimatedMinutes: number | null;
-    estimatedCostUsd: number | null;
-    prereqIds: string[];
-    qaProvider: QaProvider;
-    qaCommand: string | null;
-    acceptanceCriteria: string[];
-    state?: 'refinement' | 'todo';
-  }) => void;
+  onSave: (
+    input: {
+      title: string; description: string; projectId: string;
+      taskType: BacklogTaskType;
+      riskTier: RiskTier;
+      model: string | null;
+      estimatedMinutes: number | null;
+      estimatedCostUsd: number | null;
+      prereqIds: string[];
+      qaProvider: QaProvider;
+      qaCommand: string | null;
+      acceptanceCriteria: string[];
+      state?: 'refinement' | 'todo';
+    },
+    attachments: AttachmentIntent,
+  ) => void;
   onClose: () => void;
 }
 
@@ -76,6 +86,51 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   );
   const [projectDefaultModel, setProjectDefaultModel] = useState<string | null>(null);
   const [managingTemplates, setManagingTemplates] = useState(false);
+
+  // Attachments: existing rows (edit mode) minus any the user removed, plus
+  // newly-picked files not yet persisted. The final set is sent on save.
+  const listAttachments = useBacklogStore((s) => s.listAttachments);
+  const pickAttachments = useBacklogStore((s) => s.pickAttachments);
+  const [existingAttachments, setExistingAttachments] = useState<BacklogAttachment[]>([]);
+  const [removedIds, setRemovedIds] = useState<string[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [picking, setPicking] = useState(false);
+
+  useEffect(() => {
+    if (!card?.id) return;
+    let cancelled = false;
+    void listAttachments(card.id).then((rows) => {
+      if (!cancelled) setExistingAttachments(rows);
+    });
+    return () => { cancelled = true; };
+  }, [card?.id, listAttachments]);
+
+  const keptExisting = existingAttachments.filter((a) => !removedIds.includes(a.id));
+
+  const handlePickAttachments = async () => {
+    setPicking(true);
+    try {
+      const { items, skipped } = await pickAttachments();
+      if (items.length > 0) {
+        // De-dupe by filename against what's already staged (last pick wins).
+        const staged = new Set([...keptExisting.map((a) => a.filename), ...pendingAttachments.map((a) => a.filename)]);
+        setPendingAttachments((prev) => [...prev, ...items.filter((i) => !staged.has(i.filename))]);
+      }
+      if (skipped.length > 0) {
+        void appAlert(
+          `Some files were not attached:\n${skipped.map((s) => `• ${s.filename} — ${s.reason}`).join('\n')}`,
+          'Attachments',
+        );
+      }
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  const attachmentIntent = (): AttachmentIntent => ({
+    keepIds: keptExisting.map((a) => a.id),
+    add: pendingAttachments,
+  });
 
   // Resolve what "Project default" means for the selected project (its
   // .claude/settings.json chain) so the picker's default option says which
@@ -197,6 +252,59 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             placeholder='The prompt the executor runs. Be specific — the output is a markdown report.'
           />
         </label>
+
+        {/* Attachments — text files inlined verbatim into the prompt, so a card
+            can carry context that isn't committed to the repo (an isolated
+            worktree only sees committed files). */}
+        <div className='flex flex-col gap-1.5'>
+          <div className='flex items-center gap-2'>
+            <span className={labelClass}>Attachments</span>
+            <button
+              type='button'
+              onClick={() => void handlePickAttachments()}
+              disabled={picking}
+              className='px-2 py-0.5 rounded-md text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors disabled:opacity-50'
+            >
+              {picking ? 'Choosing…' : '+ Attach files'}
+            </button>
+          </div>
+          {keptExisting.length === 0 && pendingAttachments.length === 0 ? (
+            <p className='text-xs text-slate-500'>
+              Attach text files (specs, plans) to inline them into the prompt — useful for uncommitted files a worktree can’t see.
+            </p>
+          ) : (
+            <div className='flex flex-wrap gap-1.5'>
+              {keptExisting.map((a) => (
+                <span key={a.id} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-800/70 border border-slate-700/60 text-xs text-slate-200'>
+                  <span className='truncate max-w-48' title={a.filename}>{a.filename}</span>
+                  <span className='text-slate-500'>{formatBytes(a.bytes)}</span>
+                  <button
+                    type='button'
+                    onClick={() => setRemovedIds((prev) => [...prev, a.id])}
+                    className='text-slate-500 hover:text-red-300 cursor-pointer'
+                    aria-label={`Remove ${a.filename}`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              {pendingAttachments.map((a, i) => (
+                <span key={`pending-${a.filename}-${i}`} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-200'>
+                  <span className='truncate max-w-48' title={a.filename}>{a.filename}</span>
+                  <span className='text-emerald-400/70'>{formatBytes(a.bytes)} · new</span>
+                  <button
+                    type='button'
+                    onClick={() => setPendingAttachments((prev) => prev.filter((_, j) => j !== i))}
+                    className='text-emerald-400/70 hover:text-red-300 cursor-pointer'
+                    aria-label={`Remove ${a.filename}`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
           <label className='flex flex-col gap-1.5'>
@@ -400,7 +508,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           </button>
           {card ? (
             <button
-              onClick={() => valid && onSave(buildInput())}
+              onClick={() => valid && onSave(buildInput(), attachmentIntent())}
               disabled={!valid}
               className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 text-white transition-colors cursor-pointer'
             >
@@ -409,14 +517,14 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           ) : (
             <>
               <button
-                onClick={() => valid && onSave(buildInput('refinement'))}
+                onClick={() => valid && onSave(buildInput('refinement'), attachmentIntent())}
                 disabled={!valid}
                 className='px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 disabled:bg-slate-700/40 disabled:text-slate-500 text-slate-200 transition-colors cursor-pointer'
               >
                 Save to Refinement
               </button>
               <button
-                onClick={() => valid && onSave(buildInput('todo'))}
+                onClick={() => valid && onSave(buildInput('todo'), attachmentIntent())}
                 disabled={!valid}
                 className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 text-white transition-colors cursor-pointer'
               >

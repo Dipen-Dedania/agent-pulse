@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import { useEffect } from 'react';
 import {
+  AttachmentIntent,
+  BacklogAttachment,
   BacklogCard,
   BacklogCardState,
   BacklogProject,
   BacklogSchedulerStatus,
   BacklogState,
   BacklogTemplate,
+  PendingAttachment,
 } from '../../common/backlog-types';
 import { logger } from '../../common/logger';
 
@@ -53,6 +56,10 @@ interface BacklogStore {
   applyWorktree: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; conflicted?: boolean; dirtyTarget?: boolean; changedFiles?: string[] }>;
   applyWorktreeStashed: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; stashed?: boolean; stashConflicted?: boolean; changedFiles?: string[] }>;
   updateTemplates: (templates: BacklogTemplate[]) => Promise<BacklogTemplate[] | null>;
+
+  listAttachments: (cardId: string) => Promise<BacklogAttachment[]>;
+  pickAttachments: () => Promise<{ items: PendingAttachment[]; skipped: { filename: string; reason: string }[] }>;
+  setCardAttachments: (cardId: string, intent: AttachmentIntent) => Promise<BacklogAttachment[]>;
 }
 
 export const useBacklogStore = create<BacklogStore>((set, get) => ({
@@ -234,6 +241,36 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
     } catch (e) {
       logger.error('[useBacklogStore] stopRun failed', e);
       return { ok: false, reason: String(e) };
+    }
+  },
+
+  listAttachments: async (cardId) => {
+    try {
+      const res = await window.electron.invoke('backlog:list-attachments', { cardId });
+      return Array.isArray(res?.attachments) ? res.attachments : [];
+    } catch (e) {
+      logger.error('[useBacklogStore] listAttachments failed', e);
+      return [];
+    }
+  },
+
+  pickAttachments: async () => {
+    try {
+      const res = await window.electron.invoke('backlog:pick-attachments');
+      return { items: res?.items ?? [], skipped: res?.skipped ?? [] };
+    } catch (e) {
+      logger.error('[useBacklogStore] pickAttachments failed', e);
+      return { items: [], skipped: [] };
+    }
+  },
+
+  setCardAttachments: async (cardId, intent) => {
+    try {
+      const res = await window.electron.invoke('backlog:set-card-attachments', { cardId, intent });
+      return Array.isArray(res?.attachments) ? res.attachments : [];
+    } catch (e) {
+      logger.error('[useBacklogStore] setCardAttachments failed', e);
+      return [];
     }
   },
 }));

@@ -1,8 +1,13 @@
 ﻿import { randomUUID } from 'crypto';
 import path from 'path';
 import {
+  ATTACHMENT_MAX_COUNT,
+  ATTACHMENT_MAX_FILE_BYTES,
+  ATTACHMENT_MAX_TOTAL_BYTES,
+  AttachmentIntent,
   BacklogArtifact,
   BacklogArtifactKind,
+  BacklogAttachment,
   BacklogAttempt,
   BacklogAttemptOutcome,
   BacklogCard,
@@ -449,5 +454,68 @@ export class BacklogStore {
     return r
       ? { id: r.id, cardId: r.card_id, attemptId: r.attempt_id, kind: r.kind, path: r.path, preview: r.preview, createdAt: r.created_at }
       : null;
+  }
+
+  // ─── Attachments ──────────────────────────────────────────────────────────
+
+  /** Metadata only (no content) — for the editor list and any UI. */
+  listAttachments(cardId: string): BacklogAttachment[] {
+    const rows = this.db
+      .prepare('SELECT id, card_id, filename, bytes, created_at FROM card_attachments WHERE card_id = ? ORDER BY created_at ASC')
+      .all(cardId) as any[];
+    return rows.map((r) => ({
+      id: r.id, cardId: r.card_id, filename: r.filename, bytes: r.bytes, createdAt: r.created_at,
+    }));
+  }
+
+  /** filename + content, in stable order — used by the engine at prompt build. */
+  listAttachmentContents(cardId: string): { filename: string; content: string }[] {
+    const rows = this.db
+      .prepare('SELECT filename, content FROM card_attachments WHERE card_id = ? ORDER BY created_at ASC')
+      .all(cardId) as any[];
+    return rows.map((r) => ({ filename: r.filename, content: r.content }));
+  }
+
+  /**
+   * Apply the desired attachment set for a card in one transaction: delete any
+   * existing rows not in `keepIds`, then insert the newly-picked files. Enforces
+   * the per-file / total-size / count caps defensively (the IPC layer also
+   * checks, with user-facing messages). Returns the resulting metadata list.
+   */
+  setCardAttachments(cardId: string, intent: AttachmentIntent): BacklogAttachment[] {
+    const keep = new Set(Array.isArray(intent?.keepIds) ? intent.keepIds : []);
+    const add = Array.isArray(intent?.add) ? intent.add : [];
+
+    const apply = this.db.transaction(() => {
+      // Delete rows the user removed (anything for this card not kept).
+      const existing = this.db.prepare('SELECT id FROM card_attachments WHERE card_id = ?').all(cardId) as { id: string }[];
+      for (const row of existing) {
+        if (!keep.has(row.id)) {
+          this.db.prepare('DELETE FROM card_attachments WHERE id = ?').run(row.id);
+        }
+      }
+
+      let total = (this.db.prepare('SELECT COALESCE(SUM(bytes), 0) AS n FROM card_attachments WHERE card_id = ?').get(cardId) as { n: number }).n;
+      let count = (this.db.prepare('SELECT COUNT(*) AS n FROM card_attachments WHERE card_id = ?').get(cardId) as { n: number }).n;
+
+      for (const item of add) {
+        if (typeof item?.filename !== 'string' || typeof item?.content !== 'string') continue;
+        const bytes = Buffer.byteLength(item.content, 'utf8');
+        if (bytes > ATTACHMENT_MAX_FILE_BYTES) continue;          // per-file cap
+        if (count + 1 > ATTACHMENT_MAX_COUNT) break;              // count cap
+        if (total + bytes > ATTACHMENT_MAX_TOTAL_BYTES) break;    // total cap
+        this.db.prepare(`
+          INSERT INTO card_attachments (id, card_id, filename, content, bytes, created_at)
+          VALUES (@id, @cardId, @filename, @content, @bytes, @createdAt)
+        `).run({
+          id: randomUUID(), cardId, filename: item.filename.slice(0, 255),
+          content: item.content, bytes, createdAt: Date.now(),
+        });
+        total += bytes;
+        count += 1;
+      }
+    });
+    apply();
+    return this.listAttachments(cardId);
   }
 }

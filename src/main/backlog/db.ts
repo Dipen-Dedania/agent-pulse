@@ -29,7 +29,10 @@ type DatabaseConstructor = new (path: string) => Database;
 // v2: cards.model — per-card model override for the executor's --model flag.
 // v3: Phase 2 execution tasks — cards.task_type / worktree_path / base_sha /
 //     qa_command (see backlog.md → Phase 2).
-const SCHEMA_VERSION = 3;
+// v4: card_attachments — text files attached to a card, inlined into the
+//     executor prompt so a card can carry uncommitted context (e.g. a plan
+//     that isn't in the repo yet, invisible to the detached worktree).
+const SCHEMA_VERSION = 4;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -95,6 +98,17 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_artifacts_card ON artifacts (card_id, created_at);
+
+CREATE TABLE IF NOT EXISTS card_attachments (
+  id          TEXT PRIMARY KEY,
+  card_id     TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  filename    TEXT NOT NULL,
+  content     TEXT NOT NULL,
+  bytes       INTEGER NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_card ON card_attachments (card_id, created_at);
 `;
 
 /**
@@ -134,6 +148,11 @@ export function openBacklogDb(dbPath: string): Database | null {
         db.exec('ALTER TABLE cards ADD COLUMN worktree_path TEXT');
         db.exec('ALTER TABLE cards ADD COLUMN base_sha TEXT');
         db.exec('ALTER TABLE cards ADD COLUMN qa_command TEXT');
+      }
+      if (current < 4) {
+        // CREATE TABLE IF NOT EXISTS in SCHEMA_SQL already ran above, so the
+        // table exists — this branch only advances the version marker for
+        // pre-existing boards. Kept explicit for parity with other versions.
       }
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }

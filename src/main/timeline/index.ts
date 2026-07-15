@@ -49,7 +49,10 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     (opts.idleGapMinutes ? opts.idleGapMinutes * 60_000 : DEFAULT_IDLE_GAP_MS),
   );
   const quotaWriter = new QuotaWriter(db);
-  const transcriptReader = new TranscriptReader(eventsWriter, sessionsDeriver);
+  const transcriptReader = new TranscriptReader(eventsWriter, sessionsDeriver, {
+    loadAll: () => db.loadTranscriptOffsets(),
+    save: (row) => db.saveTranscriptOffset(row),
+  });
   const queries = new TimelineQueries(db);
   const prune = new PruneScheduler(db);
 
@@ -59,7 +62,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     // events-writer attaches it to the row being written. Codex is triggered
     // even without a hook-supplied path — the reader resolves its rollout file
     // from the sessionId under ~/.codex/sessions.
-    if (event.payload.sessionId && (event.payload.transcriptPath || event.toolId === 'openai-codex')) {
+    if (event.payload.sessionId && (event.payload.transcriptPath || event.toolId === 'openai-codex' || event.toolId === 'grok')) {
       transcriptReader.onTranscriptEvent(event.payload.transcriptPath, event.payload.sessionId, event.toolId);
     }
     // Take the staged delta (if any) to also feed the session rollup, then

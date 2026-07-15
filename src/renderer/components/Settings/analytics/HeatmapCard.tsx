@@ -19,7 +19,9 @@ function bgFor(alpha: number): string {
   return `rgba(96, 165, 250, ${alpha.toFixed(2)})`; // blue-400-ish
 }
 
-const EMPTY_BG = 'rgb(30 41 59 / 0.6)';
+// Lighter than the slate-800/60 card so days with no activity still read as
+// filled cells — otherwise weekend rows vanish and the grid looks Mon–Fri only.
+const EMPTY_BG = 'rgb(71 85 105 / 0.45)';
 
 function seriesLabel(key: string, displayName: string): string {
   // For toolId series we already have a display name from TOOL_META.
@@ -103,9 +105,15 @@ const CalendarGrid: React.FC<{
         ))}
       </div>
       <div className='flex'>
-        <div className='flex flex-col justify-between shrink-0 pr-1.5 py-px' style={{ width: 26, height: 7 * col - GAP }}>
-          {['Mon', 'Wed', 'Fri'].map((d) => (
-            <span key={d} className='text-[9px] text-slate-500 leading-none'>{d}</span>
+        <div className='relative shrink-0 pr-1.5' style={{ width: 26, height: 7 * col - GAP }}>
+          {([['Mon', 1], ['Wed', 3], ['Fri', 5]] as const).map(([d, row]) => (
+            <span
+              key={d}
+              className='absolute right-1.5 flex items-center text-[9px] text-slate-500 leading-none'
+              style={{ top: row * col, height: cellPx }}
+            >
+              {d}
+            </span>
           ))}
         </div>
         <div className='flex' style={{ gap: GAP }}>
@@ -172,11 +180,14 @@ const SeriesRow: React.FC<{
 export const HeatmapCard: React.FC = () => {
   const range = useGlobalRange();
   const [groupBy, setGroupBy] = useState<'tool' | 'project' | 'all'>('all');
-  const { data, loading } = useHeatmap(range, groupBy);
+  // The calendar always shows a full trailing year (GitHub contribution style)
+  // regardless of the global range; grouped strips follow the global range.
+  const effectiveRange = groupBy === 'all' ? '1y' : range;
+  const { data, loading } = useHeatmap(effectiveRange, groupBy);
   const { tipHandlers, tipOverlay } = useChartTip();
 
   // Grouped strips roll a year up to weeks; the calendar grid stays daily.
-  const stripWeekly = range === '1y' && groupBy !== 'all';
+  const stripWeekly = effectiveRange === '1y' && groupBy !== 'all';
   const displaySeries = useMemo(() => {
     if (!data) return [];
     return data.series.map((s) => ({
@@ -195,12 +206,17 @@ export const HeatmapCard: React.FC = () => {
     return max;
   }, [displaySeries]);
 
-  const calendarCellPx = range === '1y' ? 9 : range === '90d' ? 13 : 15;
+  // A full year of weeks needs the compact cell so ~53 columns fit the strip.
+  const calendarCellPx = 11;
 
   return (
     <Card
       title='Activity heatmap'
-      subtitle='Active minutes per day. Hover a cell for details.'
+      subtitle={
+        groupBy === 'all'
+          ? 'Active minutes per day over the past year. Hover a cell for details.'
+          : 'Active minutes per day. Hover a cell for details.'
+      }
       right={
         <Segmented
           value={groupBy}

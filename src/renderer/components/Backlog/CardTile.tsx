@@ -58,11 +58,13 @@ interface Props {
   onStop: () => void;
   onReorder: (direction: -1 | 1) => void;
   onViewDetail: () => void;
+  /** Blocked execution cards: discard the worktree, then re-run from a clean checkout. */
+  onRestart: () => void;
 }
 
 export const CardTile: React.FC<Props> = ({
   card, projectName, projectDefaultModel, isRunning, unmetPrereqs, canMoveUp, canMoveDown,
-  onEdit, onDelete, onMove, onRunNow, onStop, onReorder, onViewDetail,
+  onEdit, onDelete, onMove, onRunNow, onStop, onReorder, onViewDetail, onRestart,
 }) => {
   const tier = TIER_META[card.riskTier];
   const age = isRunning ? null : formatAge(card.updatedAt);
@@ -120,7 +122,9 @@ export const CardTile: React.FC<Props> = ({
       </div>
 
       {card.state === 'blocked' && card.blockedReason && (
-        <p className='text-[11px] text-red-300/90 leading-snug break-words'>{card.blockedReason}</p>
+        <p className='text-[11px] text-red-300/90 leading-snug break-words' title={card.blockedReason}>
+          {card.blockedReason}
+        </p>
       )}
       {card.state === 'paused' && (
         <p className='text-[11px] text-amber-300/80'>Interrupted — re-runs first in the next window.</p>
@@ -152,7 +156,30 @@ export const CardTile: React.FC<Props> = ({
           </>
         )}
         {card.state === 'blocked' && (
-          <ActionButton onClick={() => onMove('todo')} title='Retry — back to Todo'>↻ Retry</ActionButton>
+          <>
+            <ActionButton onClick={onViewDetail} title='Open the latest run’s summary, diff, and history — start here to see why it blocked'>
+              📄 Report
+            </ActionButton>
+            <ActionButton
+              onClick={onRunNow}
+              title={
+                card.taskType === 'execution' && card.worktreePath
+                  ? 'Retry — re-run now in the existing worktree. Partial file changes are kept, and the agent gets the full prompt again (description, criteria, attachments).'
+                  : 'Retry — re-run now with the full prompt (description and attachments).'
+              }
+            >
+              ↻ Retry
+            </ActionButton>
+            {card.taskType === 'execution' && card.worktreePath && (
+              <ActionButton
+                onClick={onRestart}
+                title='Restart — discard the worktree and re-run from a fresh checkout of the project. Any partial file changes are lost.'
+                danger
+              >
+                ⟲ Restart
+              </ActionButton>
+            )}
+          </>
         )}
         {card.state === 'rework' && (
           <>
@@ -174,7 +201,8 @@ export const CardTile: React.FC<Props> = ({
 
         {card.state !== 'in-progress' && card.state !== 'claimed' && (
           <span className='ml-auto flex items-center gap-1'>
-            {(card.state !== 'done') && (
+            {/* Done and Blocked already surface an explicit Report button. */}
+            {card.state !== 'done' && card.state !== 'blocked' && (
               <ActionButton onClick={onViewDetail} title='History'>🕘</ActionButton>
             )}
             <ActionButton onClick={onEdit} title='Edit card'>✎</ActionButton>

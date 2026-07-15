@@ -39,7 +39,7 @@ export interface ModelRate {
   /** Canonical label shown in the UI (not the raw model id). */
   label: string;
   /** Provider, for grouping / icons. */
-  provider: 'anthropic' | 'openai' | 'google';
+  provider: 'anthropic' | 'openai' | 'google' | 'xai';
   input: number;       // fresh input (prompt) tokens
   output: number;      // generated tokens
   cacheWrite: number;  // tokens written to the prompt cache
@@ -108,6 +108,17 @@ const TABLE: RateEntry[] = [
   { match: ['gemini', 'flash', 'lite'], source: 'gemini-2.5-flash-lite', rate: { label: 'Gemini Flash-Lite', provider: 'google', input: 0.1, output: 0.4, cacheWrite: 0.1, cacheRead: 0.025 } },
   { match: ['gemini', 'flash'], source: 'gemini-2.5-flash', rate: { label: 'Gemini Flash', provider: 'google', input: 0.3, output: 2.5, cacheWrite: 0.3, cacheRead: 0.075 } },
   { match: ['gemini'],          source: 'gemini-2.5-pro', rate: { label: 'Gemini',      provider: 'google', input: 1.25, output: 10, cacheWrite: 1.25, cacheRead: 0.31 } },
+
+  // ── xAI — Grok ────────────────────────────────────────────────────────────
+  // Public xAI list prices (USD per 1M): grok-4 / grok-4.5 are $3 in / $15 out
+  // with cached-input reads discounted to $0.75; grok-code-fast is the cheap
+  // coding tier. xAI has no separate cache-WRITE charge, so cacheWrite = input.
+  // `source` keys carry the `xai/` prefix LiteLLM uses for its feed entries;
+  // rows whose source is missing from the feed keep these bundled numbers.
+  { match: ['grok', 'code'], source: 'xai/grok-code-fast-1', rate: { label: 'Grok Code', provider: 'xai', input: 0.2, output: 1.5, cacheWrite: 0.2, cacheRead: 0.02 } },
+  { match: ['grok', '4.5'],  source: 'xai/grok-4.5',         rate: { label: 'Grok 4.5',  provider: 'xai', input: 3, output: 15, cacheWrite: 3, cacheRead: 0.75 } },
+  { match: ['grok', '4'],    source: 'xai/grok-4',           rate: { label: 'Grok 4',    provider: 'xai', input: 3, output: 15, cacheWrite: 3, cacheRead: 0.75 } },
+  { match: ['grok'],         source: 'xai/grok-4',           rate: { label: 'Grok',      provider: 'xai', input: 3, output: 15, cacheWrite: 3, cacheRead: 0.75 } },
 ];
 
 const PER_MILLION = 1_000_000;
@@ -204,6 +215,10 @@ const FALLBACK_PROVIDERS: Record<string, ModelRate['provider']> = {
   anthropic: 'anthropic',
   openai: 'openai',
   gemini: 'google',
+  // Without this, LiteLLM's `grok-*` entries (litellm_provider: 'xai') are
+  // dropped before they can become fallback rates, and unknown Grok models
+  // would price at $0 instead of list price.
+  xai: 'xai',
 };
 
 /**

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { aggregateAssistantTurns, aggregateCodexTokenCounts } from '../transcript-reader';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { aggregateAssistantTurns, aggregateCodexTokenCounts, aggregateGrokTurnCompleted, TranscriptReader } from '../transcript-reader';
 
 const codexMeta = (model?: string) =>
   JSON.stringify({ type: 'session_meta', payload: { id: 's1', model: model ?? null } });
@@ -140,5 +143,107 @@ describe('aggregateCodexTokenCounts', () => {
     const text = `not json\n${codexTokens({ input_tokens: 7, cached_input_tokens: 2, output_tokens: 3 })}\n`;
     const { delta } = aggregateCodexTokenCounts(text, undefined);
     expect(delta).toEqual({ model: undefined, tokensIn: 5, tokensOut: 3, cacheRead: 2, cacheWrite: 0 });
+  });
+});
+
+// ── Grok updates.jsonl (per-turn usage; SUM turns, unlike Codex) ────────────────
+
+const grokTurn = (usage: object) => JSON.stringify({
+  method: '_x.ai/session/update',
+  params: { sessionId: 's', update: { sessionUpdate: 'turn_completed', usage } },
+});
+
+describe('aggregateGrokTurnCompleted', () => {
+  it('maps a single turn_completed to a TokenDelta', () => {
+    const text = grokTurn({
+      inputTokens: 15276, outputTokens: 99, cachedReadTokens: 128, reasoningTokens: 40,
+      modelUsage: { 'grok-4.5': { inputTokens: 15276, outputTokens: 99 } },
+    });
+    // reasoningTokens are NOT added to outputTokens (already counted in it).
+    expect(aggregateGrokTurnCompleted(text)).toEqual({
+      model: 'grok-4.5', tokensIn: 15276, tokensOut: 99, cacheRead: 128, cacheWrite: 0,
+    });
+  });
+
+  it('SUMS successive turns in the slice (per-turn, not cumulative)', () => {
+    const text = [
+      grokTurn({ inputTokens: 15276, outputTokens: 99, cachedReadTokens: 128 }),
+      grokTurn({ inputTokens: 56112, outputTokens: 210, cachedReadTokens: 300 }),
+    ].join('\n');
+    expect(aggregateGrokTurnCompleted(text)).toEqual({
+      model: undefined, tokensIn: 71388, tokensOut: 309, cacheRead: 428, cacheWrite: 0,
+    });
+  });
+
+  it('tolerates the update nested directly (no params wrapper)', () => {
+    const text = JSON.stringify({ update: { sessionUpdate: 'turn_completed', usage: { inputTokens: 5, outputTokens: 2 } } });
+    expect(aggregateGrokTurnCompleted(text)).toEqual({ model: undefined, tokensIn: 5, tokensOut: 2, cacheRead: 0, cacheWrite: 0 });
+  });
+
+  it('ignores non-turn_completed updates and malformed lines', () => {
+    const text = [
+      'not json',
+      JSON.stringify({ params: { update: { sessionUpdate: 'agent_message_chunk' } } }),
+      grokTurn({ inputTokens: 7, outputTokens: 3 }),
+    ].join('\n');
+    expect(aggregateGrokTurnCompleted(text)).toEqual({ model: undefined, tokensIn: 7, tokensOut: 3, cacheRead: 0, cacheWrite: 0 });
+  });
+
+  it('returns null when no completed turn is present', () => {
+    expect(aggregateGrokTurnCompleted('{"params":{"update":{"sessionUpdate":"tool_call"}}}')).toBeNull();
+  });
+});
+
+describe('TranscriptReader offset persistence', () => {
+  const makeStore = () => {
+    const rows = new Map<string, any>();
+    return {
+      rows,
+      loadAll: () => [...rows.values()],
+      save: (r: any) => { rows.set(r.path, r); },
+    };
+  };
+  const line = (i: number, o: number) => JSON.stringify({
+    type: 'assistant', sessionId: 's1',
+    message: { model: 'm', usage: { input_tokens: i, output_tokens: o } },
+  });
+
+  it('resumes from the persisted offset after a restart instead of re-reading (no double-count)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ap-offsets-'));
+    const file = path.join(dir, 'transcript.jsonl');
+    try {
+      fs.writeFileSync(file, `${line(100, 50)}\n${line(200, 80)}\n`);
+
+      const store = makeStore();
+      const staged: any[] = [];
+      const eventsWriter: any = { stageTokenDelta: (_s: string, d: any) => staged.push(d) };
+      const sessionsDeriver: any = {};
+
+      // First run reads the whole file once and persists the offset.
+      const reader1 = new TranscriptReader(eventsWriter, sessionsDeriver, store);
+      reader1.onTranscriptEvent(file, 's1', 'claude-code');
+      expect(staged).toHaveLength(1);
+      expect(staged[0]).toMatchObject({ tokensIn: 300, tokensOut: 130 });
+      expect(store.rows.size).toBe(1);
+
+      // Simulate a restart: a fresh reader loads the persisted offset and must
+      // NOT re-read the history (this was the token double-count bug).
+      const staged2: any[] = [];
+      const reader2 = new TranscriptReader(
+        { stageTokenDelta: (_s: string, d: any) => staged2.push(d) } as any,
+        sessionsDeriver,
+        store,
+      );
+      reader2.onTranscriptEvent(file, 's1', 'claude-code');
+      expect(staged2).toHaveLength(0);
+
+      // A newly appended turn is still picked up as a fresh delta only.
+      fs.appendFileSync(file, `${line(10, 5)}\n`);
+      reader2.onTranscriptEvent(file, 's1', 'claude-code');
+      expect(staged2).toHaveLength(1);
+      expect(staged2[0]).toMatchObject({ tokensIn: 10, tokensOut: 5 });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

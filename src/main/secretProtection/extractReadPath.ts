@@ -102,7 +102,9 @@ export function extractReadPath(
   if (!data || typeof data !== 'object') return null;
 
   // 1. Structured read tools.
-  const toolName = data.toolCall?.name ?? data.tool_name;
+  // Grok sends camelCase `toolName` (e.g. read_file); Antigravity nests under
+  // toolCall; the rest use snake_case tool_name.
+  const toolName = data.toolCall?.name ?? data.tool_name ?? data.toolName;
   if (isReadTool(toolName)) {
     const path = pickString(data, [
       'tool_input.file_path',
@@ -111,6 +113,8 @@ export function extractReadPath(
       'tool_input.filename',
       'toolInput.file_path',
       'toolInput.path',
+      'toolInput.target_file',
+      'toolInput.filename',
       'input.file_path',
       'input.path',
       'parameters.file_path',

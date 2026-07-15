@@ -37,6 +37,14 @@ describe('rateForModel', () => {
     expect(rateForModel('gemini-2.5-flash')?.label).toBe('Gemini Flash');
   });
 
+  it('matches xAI Grok families (most specific wins)', () => {
+    expect(rateForModel('grok-code-fast-1')?.label).toBe('Grok Code');
+    expect(rateForModel('grok-4.5')?.label).toBe('Grok 4.5');
+    expect(rateForModel('grok-4')?.label).toBe('Grok 4');
+    expect(rateForModel('grok-3')?.label).toBe('Grok');
+    expect(rateForModel('grok-4.5')?.provider).toBe('xai');
+  });
+
   it('returns null for unknown / empty models', () => {
     expect(rateForModel('some-random-model')).toBeNull();
     expect(rateForModel('')).toBeNull();
@@ -86,6 +94,16 @@ describe('estimateCost', () => {
   it('treats missing token fields as zero', () => {
     const { costUsd } = estimateCost('claude-opus-4-7', { tokensOut: 1_000_000 });
     expect(costUsd).toBeCloseTo(25, 6);
+  });
+
+  it('prices Grok 4.5 at $3/$15 with cached-read discount', () => {
+    const { costUsd, priced } = estimateCost('grok-4.5', {
+      tokensIn: 1_000_000,
+      tokensOut: 1_000_000,
+      cacheRead: 1_000_000,
+    });
+    expect(priced).toBe(true);
+    expect(costUsd).toBeCloseTo(3 + 15 + 0.75, 6);
   });
 
   it('returns unpriced zero for unknown models', () => {
@@ -187,12 +205,20 @@ describe('buildFallbackRates', () => {
       input_cost_per_token: 0.13e-6,
       output_cost_per_token: 0.13e-6,
     },
-    // Provider we don't render → excluded.
+    // xAI is a rendered provider (FALLBACK_PROVIDERS has `xai`) → auto-added.
+    // Without that entry unknown Grok models would price at $0.
     'grok-5': {
       litellm_provider: 'xai',
       mode: 'chat',
       input_cost_per_token: 3e-6,
       output_cost_per_token: 15e-6,
+    },
+    // Provider we don't render → excluded.
+    'mistral-large-latest': {
+      litellm_provider: 'mistral',
+      mode: 'chat',
+      input_cost_per_token: 2e-6,
+      output_cost_per_token: 6e-6,
     },
     // Missing output cost → excluded (can't price generation).
     'claude-input-only': {
@@ -206,7 +232,8 @@ describe('buildFallbackRates', () => {
 
   it('keeps chat models from rendered providers, per-1M, id as label', () => {
     const map = buildFallbackRates(feed);
-    expect(Object.keys(map).sort()).toEqual(['claude-next-9', 'gemini-9-flash']);
+    expect(Object.keys(map).sort()).toEqual(['claude-next-9', 'gemini-9-flash', 'grok-5']);
+    expect(map['grok-5'].provider).toBe('xai');
     expect(map['claude-next-9']).toEqual({
       label: 'claude-next-9',
       provider: 'anthropic',

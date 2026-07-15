@@ -167,6 +167,42 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
       ],
     },
   },
+  'grok': {
+    label: 'Grok',
+    badges: ['CLI', 'TUI'],
+    icon: './assets/grok.png',
+    hookInfo: {
+      mechanism: 'Shell Hook',
+      configFile: '~/.grok/hooks/agent-pulse.json',
+      description:
+        'Agent Pulse writes a dedicated global hook file at ~/.grok/hooks/agent-pulse.json plus a small ' +
+        'hook script (agent-pulse.sh / .ps1). Grok’s SSRF protection rejects http:// URLs for native ' +
+        'HTTP hooks, so the script POSTs event JSON to the bridge instead, on SessionStart, ' +
+        'UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, Stop, StopFailure, SessionEnd, and ' +
+        'Notification. Global hooks are always trusted, and uninstalling only removes the Agent Pulse ' +
+        'file/scripts so other Grok hooks stay intact.',
+      snippet: JSON.stringify({
+        hooks: {
+          SessionStart:       [{ hooks: [{ type: 'command', command: '~/.grok/hooks/agent-pulse.sh', timeout: 10 }] }],
+          UserPromptSubmit:   [{ hooks: [{ type: 'command', command: '~/.grok/hooks/agent-pulse.sh', timeout: 10 }] }],
+          PreToolUse:         [{ matcher: '.*', hooks: [{ type: 'command', command: '~/.grok/hooks/agent-pulse.sh', timeout: 10 }] }],
+          PostToolUse:        [{ matcher: '.*', hooks: [{ type: 'command', command: '~/.grok/hooks/agent-pulse.sh', timeout: 10 }] }],
+          PostToolUseFailure: [{ matcher: '.*', hooks: [{ type: 'command', command: '~/.grok/hooks/agent-pulse.sh', timeout: 10 }] }],
+          Stop:               [{ hooks: [{ type: 'command', command: '~/.grok/hooks/agent-pulse.sh', timeout: 10 }] }],
+          StopFailure:        [{ hooks: [{ type: 'command', command: '~/.grok/hooks/agent-pulse.sh', timeout: 10 }] }],
+          SessionEnd:         [{ hooks: [{ type: 'command', command: '~/.grok/hooks/agent-pulse.sh', timeout: 10 }] }],
+          Notification:       [{ matcher: '.*', hooks: [{ type: 'command', command: '~/.grok/hooks/agent-pulse.sh', timeout: 10 }] }],
+        },
+      }, null, 2),
+      troubleshooting: [
+        'Start a new Grok session — hooks are only loaded when the CLI/TUI starts.',
+        'Open ~/.grok/hooks/agent-pulse.json and confirm the command hook entries are present.',
+        'Verify ~/.grok/hooks/agent-pulse.sh (or agent-pulse.ps1 on Windows) exists and is executable.',
+        'If you set GROK_HOME, the hook files live under $GROK_HOME/hooks/ instead of ~/.grok/hooks/.',
+        ...COMMON_TROUBLESHOOTING,
+      ],
+    },
+  },
   'openai-codex': {
     label: 'OpenAI Codex',
     icon: './assets/codex.png',

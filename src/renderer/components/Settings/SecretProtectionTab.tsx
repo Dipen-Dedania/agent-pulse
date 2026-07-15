@@ -15,6 +15,9 @@ const COVERAGE: Record<ToolId, { ignoreFile: boolean; hookBlock: boolean; badge:
   'vscode-copilot':  { ignoreFile: true,  hookBlock: false, badge: 'Not applied in agent mode',tone: 'bypass' },
   'openai-codex':    { ignoreFile: true,  hookBlock: false, badge: 'Sandbox (built-in)',      tone: 'hard' },
   'kiro':            { ignoreFile: false, hookBlock: false, badge: 'Unsupported',             tone: 'none' },
+  // Grok: no Agent Pulse ignore-file writer yet; blocking rides the native HTTP
+  // PreToolUse deny (Claude-compatible response shape).
+  'grok':            { ignoreFile: false, hookBlock: true,  badge: 'Hook deny (soft)',        tone: 'soft' },
 };
 
 const TONE_CLS: Record<BadgeTone, string> = {

@@ -27,6 +27,7 @@ export class ToolDetector {
       'openai-codex': this.detectOpenAICodex(),
       'kiro': this.detectKiro(),
       'antigravity-cli': this.detectAntigravityCli(),
+      'grok': this.detectGrok(),
     };
   }
 
@@ -208,6 +209,18 @@ export class ToolDetector {
     if (found) return { installed: true, location: found };
 
     const cliPath = this.whichCommand('kiro');
+    if (cliPath) return { installed: true, location: cliPath };
+    return { installed: false };
+  }
+
+  private detectGrok(): ToolDetection {
+    // Grok stores its config under ~/.grok (overridable via GROK_HOME). Prefer
+    // that dir; fall back to a `grok` binary on PATH for CLI-only installs.
+    const home = os.homedir();
+    const configDir = process.env['GROK_HOME'] || path.join(home, '.grok');
+    if (existsSync(configDir)) return { installed: true, location: configDir };
+
+    const cliPath = this.whichCommand('grok');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }

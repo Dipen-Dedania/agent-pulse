@@ -177,8 +177,11 @@ export class BacklogEngine {
     }
     const card = this.store.getCard(cardId);
     if (!card) return Promise.resolve({ ok: false, reason: 'card not found' });
-    if (!isPickableState(card.state)) {
-      return Promise.resolve({ ok: false, reason: 'only Todo, Paused, or Rework cards can be run — move it to Todo first' });
+    // Blocked is manual-run-only: a human just addressed the blocker and wants
+    // an immediate retry. It stays out of PICKABLE_RANK so autorun never
+    // claims a card that needs attention.
+    if (!isPickableState(card.state) && card.state !== 'blocked') {
+      return Promise.resolve({ ok: false, reason: 'only Todo, Paused, Rework, or Blocked cards can be run — move it to Todo first' });
     }
     return this.runCard(card, /*manual*/ true);
   }
@@ -325,8 +328,19 @@ export class BacklogEngine {
         this.store.setWorktree(card.id, wt.worktreePath, wt.baseSha);
         cwd = wt.worktreePath;
         if (wt.reused) {
-          // Paused run with partial work in place — continue its session.
-          resumeSessionId = this.store.listAttempts(card.id).find((a) => a.sessionId)?.sessionId ?? null;
+          // Resume ONLY a conversation that is worth continuing: a QA rework
+          // (the work landed, the gate failed) or a usage-limit pause (cut off
+          // mid-task). A run that CONCLUDED — blocked / no-changes / failed —
+          // must start fresh instead: resuming replays the old "can't proceed"
+          // context, and the resume path never delivers the rebuilt prompt
+          // (with updated description/attachments) — the continuation constant
+          // goes on argv and stdin stays closed. Picking "any attempt with a
+          // session id" used to resurrect stale sessions from before an
+          // intermediate failure for exactly that losing trade.
+          const lastFinished = this.store.listAttempts(card.id).find((a) => a.outcome !== null);
+          if (lastFinished?.sessionId && (lastFinished.outcome === 'qa-failed' || lastFinished.outcome === 'paused')) {
+            resumeSessionId = lastFinished.sessionId;
+          }
         }
       }
 

@@ -76,6 +76,7 @@ In-progress builds for any commit on `main` are also available as workflow artif
 | OpenAI Codex             | CLI           | Shell hook (`~/.codex/hooks.json`)                                            |
 | Kiro                     | IDE           | Shell hook (`.kiro/hooks/agent-pulse.kiro.hook`)                              |
 | Antigravity              | **CLI + IDE** | Shell hook (`~/.gemini/config/hooks.json`) — one install covers both surfaces |
+| Grok                     | CLI / TUI     | HTTP hook (`~/.grok/hooks/agent-pulse.json`) — dedicated global file          |
 
 Want a tool that isn't listed? Open a [tool support request](https://github.com/Dipen-Dedania/agent-pulse/issues/new?template=tool_support_request.yml) — or better, [add it yourself](CONTRIBUTING.md#adding-support-for-a-new-tool).
 

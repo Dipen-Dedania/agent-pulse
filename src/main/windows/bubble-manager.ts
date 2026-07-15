@@ -95,6 +95,8 @@ const TOOL_APP_NAME: Record<ToolId, { mac: string | null; linux: string | null }
   // agy ships with the Antigravity IDE — activate/launch that, not a bare terminal.
   'antigravity-cli':{ mac: 'Antigravity',         linux: 'antigravity' },
   'kiro':           { mac: 'Kiro',                linux: 'kiro' },
+  // Grok is a CLI/TUI — terminal-only, nothing to activate/launch by app name.
+  'grok':           { mac: null,                  linux: null },
 };
 
 // Last-resort click target: the tool's product page. Used only after every
@@ -108,6 +110,7 @@ const TOOL_WEB_URLS: Record<ToolId, string> = {
   'openai-codex':    'https://openai.com/codex',
   'kiro':            'https://kiro.dev',
   'antigravity-cli': 'https://antigravity.google',
+  'grok':            'https://grok.com',
 };
 
 // ─── Windows ─────────────────────────────────────────────────────────────────
@@ -137,6 +140,7 @@ const TOOL_CLI_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
   'claude-code':    ['claude'],
   'openai-codex':   ['codex'],
   'antigravity-cli':['agy'],
+  'grok':           ['grok'],
 };
 
 // URI schemes registered by GUI editors (HKCR on Windows, LaunchServices on

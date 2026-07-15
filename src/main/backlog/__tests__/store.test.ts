@@ -64,11 +64,16 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(store.getCard(card.id)!.state).toBe('claimed');
   });
 
-  it('claimCard also claims paused cards but not done/blocked/refinement', () => {
+  it('claimCard also claims paused and blocked cards but not done/refinement', () => {
     const card = store.createCard({ title: 'x', projectId, state: 'todo' });
     store.setCardState(card.id, 'paused');
     expect(store.claimCard(card.id)).toBe(true);
+    // Blocked: manual Retry/Restart claim directly (autorun never picks blocked).
+    store.setCardState(card.id, 'blocked', 'run failed');
+    expect(store.claimCard(card.id)).toBe(true);
     store.setCardState(card.id, 'done');
+    expect(store.claimCard(card.id)).toBe(false);
+    store.setCardState(card.id, 'refinement');
     expect(store.claimCard(card.id)).toBe(false);
   });
 

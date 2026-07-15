@@ -96,7 +96,27 @@ const KIRO_IDLE_EVENTS    = new Set(['postToolUse']);
 const ANTIGRAVITY_WORKING_EVENTS = new Set(['PreInvocation', 'PreToolUse', 'PostToolUse']);
 const ANTIGRAVITY_IDLE_EVENTS    = new Set(['PostInvocation', 'Stop']);
 
-const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'antigravity-cli'];
+// Grok hook event names → AgentState. Grok config uses PascalCase (Claude-
+// compatible) event names, but its runtime HTTP envelope may emit snake_case
+// (`hookEventName: "pre_tool_use"`), so both spellings are accepted. Grok is
+// detected via `workspaceRoot` (unique to Grok) or an explicit `_ap_tool`
+// marker, BEFORE the Copilot `hookEventName` branch that would otherwise
+// steal it. `Notification` maps to `waiting` only for permission-like subtypes.
+const GROK_WORKING_EVENTS = new Set([
+  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'SubagentStart',
+  'session_start', 'user_prompt_submit', 'pre_tool_use', 'subagent_start',
+]);
+const GROK_IDLE_EVENTS = new Set([
+  'PostToolUse', 'Stop', 'SessionEnd', 'SubagentStop',
+  'post_tool_use', 'stop', 'session_end', 'subagent_stop',
+]);
+const GROK_ERROR_EVENTS = new Set([
+  'PostToolUseFailure', 'StopFailure',
+  'post_tool_use_failure', 'stop_failure',
+]);
+const GROK_NOTIFICATION_WAITING_TYPES = new Set(['permission', 'permission_prompt', 'permission_request']);
+
+const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'antigravity-cli', 'grok'];
 const VALID_STATES: AgentState[] = ['working', 'waiting', 'idle', 'idle-active', 'error'];
 
 export class StatusBridgeServer {
@@ -586,6 +606,47 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
             model:       typeof data.model === 'string' ? data.model : undefined,
             errorMessage,
             ...common,
+          },
+        };
+      }
+
+      // Format 2c — Grok (native HTTP hook). MUST be checked before the Copilot
+      // branch: Grok's runtime envelope uses camelCase `hookEventName`, which
+      // the Copilot branch keys on and would otherwise steal. It also must beat
+      // the Claude fallback (PascalCase + session_id) since Grok emits the same
+      // shape. Detected via the definitive `_ap_tool` marker (if a command
+      // wrapper is ever used) or `workspaceRoot`, a field unique to Grok.
+      if (data._ap_tool === 'grok' || data.workspaceRoot !== undefined || data.grok_version !== undefined) {
+        let state: AgentState;
+        if (eventName === 'Notification' || eventName === 'notification') {
+          const notifType = data.notification_type ?? data.notificationType;
+          if (!GROK_NOTIFICATION_WAITING_TYPES.has(notifType)) {
+            logger.debug(`Ignoring non-blocking Grok notification: ${notifType}`);
+            return null;
+          }
+          state = 'waiting';
+        } else if (GROK_ERROR_EVENTS.has(eventName))   state = 'error';
+        else if (GROK_WORKING_EVENTS.has(eventName))   state = 'working';
+        else if (GROK_IDLE_EVENTS.has(eventName))      state = 'idle-active';
+        else {
+          logger.debug(`Ignoring unmapped Grok event: ${eventName}`);
+          return null;
+        }
+        // Grok uses camelCase fields (sessionId, workspaceRoot, toolName). Keep
+        // snake_case fallbacks in case the runtime envelope differs. The token
+        // reader resolves updates.jsonl from the sessionId (gated on
+        // toolId === 'grok' in timeline/index.ts), so no transcriptPath here.
+        const toolName: string | undefined = data.toolName ?? data.tool_name;
+        return {
+          toolId: 'grok',
+          state,
+          payload: {
+            sessionId:   data.sessionId ?? data.session_id,
+            taskSummary: toolName ? `Tool: ${toolName}` : undefined,
+            model:       typeof data.model === 'string' ? data.model : undefined,
+            ...common,
+            // cwd may only arrive as workspaceRoot on Grok hooks.
+            cwd: common.cwd ?? (typeof data.workspaceRoot === 'string' ? data.workspaceRoot : undefined),
           },
         };
       }

@@ -12,6 +12,8 @@ import { ToolId } from '../../common/types';
 const BASH_TOOL_NAMES = new Set([
   'bash', 'shell', 'terminal', 'run_command', 'run_in_terminal',
   'execute_command', 'bash_command', 'cli',
+  // Grok's shell tool.
+  'run_terminal_command',
 ]);
 
 function isShellTool(name: unknown): boolean {
@@ -50,6 +52,19 @@ export function extractCommand(toolId: ToolId, data: any): string | null {
       return pickString(data, [
         'tool_input.command',
         'toolInput.command',
+        'input.command',
+        'parameters.command',
+      ]);
+    }
+
+    case 'grok': {
+      // Grok uses camelCase: { toolName: 'run_terminal_command',
+      //   toolInput: { command } }. Keep snake_case fallbacks for resilience.
+      const toolName = data.toolName ?? data.tool_name;
+      if (!isShellTool(toolName)) return null;
+      return pickString(data, [
+        'toolInput.command',
+        'tool_input.command',
         'input.command',
         'parameters.command',
       ]);

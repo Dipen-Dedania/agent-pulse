@@ -76,6 +76,9 @@ export const BLOCKABLE_TOOLS: Record<ToolId, boolean> = {
   'claude-code': true,
   'antigravity-cli': true,
   'openai-codex': true,
+  // Grok uses the same native HTTP hook mechanism as Claude Code and reads a
+  // Claude-compatible deny response (hookSpecificOutput.permissionDecision).
+  'grok': true,
   'cursor': false,
   'vscode-copilot': false,
   'kiro': false,

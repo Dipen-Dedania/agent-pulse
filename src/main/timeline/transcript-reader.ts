@@ -22,6 +22,15 @@ interface OffsetEntry {
   codex?: CodexSnapshot; // last cumulative snapshot, for Codex rollout files
 }
 
+// Persistence for read offsets. Backed by the timeline DB in production; absent
+// in unit tests (offsets stay in-memory only). Without this, the in-memory map
+// resets on every app restart and the next event re-reads the whole file from
+// byte 0 — re-summing all historical usage and double-counting tokens.
+export interface TranscriptOffsetStore {
+  loadAll: () => Array<{ path: string; offset: number; sessionId?: string | null; codexSnapshot?: string | null }>;
+  save: (row: { path: string; offset: number; sessionId: string; codexSnapshot?: string }) => void;
+}
+
 /**
  * Tails Claude Code JSONL transcript files and extracts model + token usage
  * from each assistant turn. Token deltas are staged on the EventsWriter,
@@ -52,11 +61,35 @@ export class TranscriptReader {
   // sessionId → resolved Codex rollout path, so the sessions dir is walked at
   // most once per session when the hook doesn't hand us a usable path.
   private codexPathCache: Map<string, string | null> = new Map();
+  // sessionId → resolved Grok updates.jsonl path. Same rationale as Codex:
+  // Grok hooks carry no transcript_path, so we resolve from the sessionId.
+  private grokPathCache: Map<string, string | null> = new Map();
 
   constructor(
     private eventsWriter: EventsWriter,
     private sessionsDeriver: SessionsDeriver,
-  ) {}
+    private offsetStore?: TranscriptOffsetStore,
+  ) {
+    // Restore persisted offsets so reads resume where they left off across
+    // restarts instead of re-reading each file from byte 0 (which double-counts).
+    if (offsetStore) {
+      try {
+        let restored = 0;
+        for (const row of offsetStore.loadAll()) {
+          let codex: CodexSnapshot | undefined;
+          if (row.codexSnapshot) {
+            try { codex = JSON.parse(row.codexSnapshot) as CodexSnapshot; }
+            catch { /* corrupt snapshot — fall back to no snapshot */ }
+          }
+          this.offsets.set(row.path, { offset: row.offset, sessionId: row.sessionId ?? '', codex });
+          restored++;
+        }
+        if (restored > 0) logger.info(`[Timeline/transcript] restored ${restored} persisted read offset(s)`);
+      } catch (e: any) {
+        logger.warn('[Timeline/transcript] failed to load persisted offsets:', e?.message ?? e);
+      }
+    }
+  }
 
   /**
    * Called when a hook event includes a transcript_path (Claude Code) or for
@@ -77,7 +110,9 @@ export class TranscriptReader {
       const resolved =
         toolId === 'openai-codex'
           ? this.resolveCodexPath(transcriptPath, sessionId)
-          : transcriptPath;
+          : toolId === 'grok'
+            ? this.resolveGrokPath(sessionId)
+            : transcriptPath;
       if (!resolved) return;
       const delta = this.readNewTail(resolved, sessionId, toolId);
       if (!delta) return;
@@ -113,6 +148,21 @@ export class TranscriptReader {
     const found = findCodexRollout(sessionId);
     this.codexPathCache.set(sessionId, found);
     if (!found) logger.debug(`[Timeline/transcript] no Codex rollout for session ${sessionId}`);
+    return found;
+  }
+
+  /**
+   * Resolve a Grok session's updates.jsonl. Grok hooks carry no transcript
+   * path, so we locate the session directory by its id under
+   * ~/.grok/sessions/<encoded-cwd>/<sessionId>/ (GROK_HOME honored). The encoded
+   * cwd isn't reliably known here, so we do a bounded one-level walk of the
+   * per-cwd directories (Codex `findCodexRollout` precedent). Cached per session.
+   */
+  private resolveGrokPath(sessionId: string): string | null {
+    if (this.grokPathCache.has(sessionId)) return this.grokPathCache.get(sessionId) ?? null;
+    const found = findGrokUpdates(sessionId);
+    this.grokPathCache.set(sessionId, found);
+    if (!found) logger.debug(`[Timeline/transcript] no Grok session dir for ${sessionId}`);
     return found;
   }
 
@@ -175,12 +225,30 @@ export class TranscriptReader {
       const result = aggregateCodexTokenCounts(parseableText, tracked?.codex);
       delta = result.delta;
       if (result.snapshot) nextEntry.codex = result.snapshot;
+    } else if (toolId === 'grok') {
+      delta = aggregateGrokTurnCompleted(parseableText);
     } else {
       delta = aggregateAssistantTurns(parseableText, sessionId);
     }
 
-    this.offsets.set(transcriptPath, nextEntry);
+    this.setOffset(transcriptPath, nextEntry);
     return delta;
+  }
+
+  /** Update the in-memory offset and mirror it to the persistent store. */
+  private setOffset(pathKey: string, entry: OffsetEntry) {
+    this.offsets.set(pathKey, entry);
+    if (!this.offsetStore) return;
+    try {
+      this.offsetStore.save({
+        path: pathKey,
+        offset: entry.offset,
+        sessionId: entry.sessionId,
+        codexSnapshot: entry.codex ? JSON.stringify(entry.codex) : undefined,
+      });
+    } catch (e: any) {
+      logger.warn('[Timeline/transcript] failed to persist offset:', e?.message ?? e);
+    }
   }
 }
 
@@ -300,6 +368,90 @@ export function aggregateCodexTokenCounts(
     delta: { model, tokensIn, tokensOut, cacheRead, cacheWrite: 0 },
     snapshot,
   };
+}
+
+/**
+ * Parses Grok `updates.jsonl` (the ACP stream) and sums usage across every
+ * `turn_completed` update in the slice. Unlike Codex (cumulative running total)
+ * Grok reports PER-TURN usage, so summing turns is correct — same philosophy as
+ * Claude assistant turns. Returns null if no completed turn is found.
+ *
+ *   { "method": "_x.ai/session/update", "params": { "update": {
+ *       "sessionUpdate": "turn_completed",
+ *       "usage": {
+ *         "inputTokens": 15276, "outputTokens": 99,
+ *         "cachedReadTokens": 128, "reasoningTokens": 40,
+ *         "modelUsage": { "grok-4.5": { ... } } } } } }
+ *
+ * Mapped to TokenDelta: tokensIn = inputTokens, tokensOut = outputTokens,
+ * cacheRead = cachedReadTokens, cacheWrite = 0 (no cache-write observed). We do
+ * NOT add reasoningTokens to outputTokens — the samples suggest reasoning is
+ * already counted in outputTokens, and adding it would double-count. Model is
+ * the first key of `modelUsage` when present. Exported for unit tests.
+ */
+export function aggregateGrokTurnCompleted(text: string): TokenDelta | null {
+  let tokensIn = 0;
+  let tokensOut = 0;
+  let cacheRead = 0;
+  let model: string | undefined;
+  let any = false;
+
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let row: any;
+    try { row = JSON.parse(trimmed); }
+    catch { continue; }
+
+    // The update may sit at params.update (documented) or be the row itself.
+    const update = row?.params?.update ?? row?.update ?? row;
+    if (update?.sessionUpdate !== 'turn_completed') continue;
+    const usage = update.usage;
+    if (!usage) continue;
+
+    if (typeof usage.inputTokens      === 'number') tokensIn  += usage.inputTokens;
+    if (typeof usage.outputTokens     === 'number') tokensOut += usage.outputTokens;
+    if (typeof usage.cachedReadTokens === 'number') cacheRead += usage.cachedReadTokens;
+    // Prefer the per-model breakdown for attribution; latest turn wins.
+    const modelUsage = usage.modelUsage;
+    if (modelUsage && typeof modelUsage === 'object') {
+      const keys = Object.keys(modelUsage);
+      if (keys.length > 0) model = keys[0];
+    }
+    any = true;
+  }
+
+  if (!any) return null;
+  return { model, tokensIn, tokensOut, cacheRead, cacheWrite: 0 };
+}
+
+/**
+ * Locate a Grok session's updates.jsonl by sessionId. Grok stores sessions at
+ * ~/.grok/sessions/<url-encoded-cwd>/<sessionId>/updates.jsonl (GROK_HOME
+ * overrides ~/.grok). We can't reconstruct the encoded-cwd segment reliably, so
+ * we walk that single directory level looking for a child named <sessionId>
+ * that contains updates.jsonl. Bounded (one level of per-cwd dirs), mirroring
+ * the Codex rollout walk. Returns null if the sessions dir or file is absent.
+ */
+function findGrokUpdates(sessionId: string): string | null {
+  const home = process.env['GROK_HOME'] || path.join(os.homedir(), '.grok');
+  const root = path.join(home, 'sessions');
+  try {
+    if (!fs.statSync(root).isDirectory()) return null;
+  } catch {
+    return null;
+  }
+  try {
+    for (const cwdDir of fs.readdirSync(root)) {
+      const candidate = path.join(root, cwdDir, sessionId, 'updates.jsonl');
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch { /* not here — keep scanning */ }
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**

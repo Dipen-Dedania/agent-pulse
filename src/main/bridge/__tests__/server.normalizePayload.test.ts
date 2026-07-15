@@ -389,6 +389,80 @@ describe('Antigravity CLI events', () => {
   });
 });
 
+// ── Grok ──────────────────────────────────────────────────────────────────────
+
+// Grok's native HTTP hook envelope: camelCase fields (sessionId, workspaceRoot,
+// toolName) with either PascalCase or snake_case event names. Detected via the
+// unique `workspaceRoot` field (or an explicit `_ap_tool`).
+const grok = (hookEventName: string, extra: object = {}) => ({
+  hookEventName,
+  sessionId: 'sess-grok',
+  workspaceRoot: '/workspace/proj',
+  cwd: '/workspace/proj',
+  ...extra,
+});
+
+describe('Grok events', () => {
+  it('SessionStart → working', () => {
+    const r = normalizePayload(grok('SessionStart'));
+    expect(r?.toolId).toBe('grok');
+    expect(r?.state).toBe('working');
+  });
+
+  it('PreToolUse → working (and captures toolName)', () => {
+    const r = normalizePayload(grok('PreToolUse', { toolName: 'run_terminal_command' }));
+    expect(r?.state).toBe('working');
+    expect(r?.payload.taskSummary).toBe('Tool: run_terminal_command');
+  });
+
+  it('snake_case pre_tool_use → working', () => {
+    expect(normalizePayload(grok('pre_tool_use'))?.state).toBe('working');
+  });
+
+  it('PostToolUse → idle-active', () => {
+    expect(normalizePayload(grok('PostToolUse'))?.state).toBe('idle-active');
+  });
+
+  it('Stop / SessionEnd → idle-active', () => {
+    expect(normalizePayload(grok('Stop'))?.state).toBe('idle-active');
+    expect(normalizePayload(grok('SessionEnd'))?.state).toBe('idle-active');
+  });
+
+  it('PostToolUseFailure / StopFailure → error', () => {
+    expect(normalizePayload(grok('PostToolUseFailure'))?.state).toBe('error');
+    expect(normalizePayload(grok('StopFailure'))?.state).toBe('error');
+    expect(normalizePayload(grok('stop_failure'))?.state).toBe('error');
+  });
+
+  it('permission-like Notification → waiting; other notifications → null', () => {
+    expect(normalizePayload(grok('Notification', { notification_type: 'permission' }))?.state).toBe('waiting');
+    expect(normalizePayload(grok('Notification', { notification_type: 'info' }))).toBeNull();
+  });
+
+  it('resolves sessionId and cwd (falling back to workspaceRoot)', () => {
+    const r = normalizePayload({ hookEventName: 'PreToolUse', sessionId: 'grok-1', workspaceRoot: '/w' });
+    expect(r?.payload.sessionId).toBe('grok-1');
+    expect(r?.payload.cwd).toBe('/w');
+  });
+
+  it('with camelCase hookEventName is NOT misidentified as VS Code Copilot', () => {
+    // Copilot keys on `hookEventName` — the Grok branch (workspaceRoot) must win.
+    const r = normalizePayload(grok('PreToolUse'));
+    expect(r?.toolId).toBe('grok');
+    expect(r?.toolId).not.toBe('vscode-copilot');
+  });
+
+  it('Claude-shaped Grok payload (via _ap_tool) is NOT misidentified as Claude Code', () => {
+    const r = normalizePayload({ hook_event_name: 'PreToolUse', session_id: 'g-2', _ap_tool: 'grok' });
+    expect(r?.toolId).toBe('grok');
+    expect(r?.toolId).not.toBe('claude-code');
+  });
+
+  it('unknown Grok event → null', () => {
+    expect(normalizePayload(grok('WhoKnows'))).toBeNull();
+  });
+});
+
 // ── Format 1: Explicit toolId + state ────────────────────────────────────────
 
 describe('Explicit format (Format 1)', () => {

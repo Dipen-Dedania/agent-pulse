@@ -116,6 +116,27 @@ export const BacklogBoardTab: React.FC = () => {
     if (!res.ok && res.reason) void appAlert(res.reason, 'Backlog');
   };
 
+  // Restart = discard the card's worktree, then re-run from a clean checkout.
+  // The next run finds no worktree, creates a fresh one at current HEAD, and
+  // sends the full prompt (no session resume) — a true from-scratch attempt.
+  const handleRestart = async (card: BacklogCard) => {
+    const ok = await appConfirm({
+      title: `Restart "${card.title}" from scratch?`,
+      message:
+        'This deletes the card’s worktree — any uncommitted file changes from previous runs are discarded — and re-runs the task on a fresh checkout of the project. Saved reports and diffs stay on the card.',
+      confirmLabel: 'Discard & restart',
+      danger: true,
+    });
+    if (!ok) return;
+    const rm = await store.removeWorktree(card.id);
+    if (!rm.ok) {
+      if (rm.reason) void appAlert(rm.reason, 'Backlog');
+      return;
+    }
+    const res = await store.runNow(card.id);
+    if (!res.ok && res.reason) void appAlert(res.reason, 'Backlog');
+  };
+
   const handleStop = async (card: BacklogCard) => {
     const ok = await appConfirm({
       title: `Stop "${card.title}"?`,
@@ -268,6 +289,7 @@ export const BacklogBoardTab: React.FC = () => {
           onStop={() => void handleStop(card)}
           onReorder={(dir) => handleReorder(card, dir)}
           onViewDetail={() => setDetailCard(card)}
+          onRestart={() => void handleRestart(card)}
         />
       </div>
     );

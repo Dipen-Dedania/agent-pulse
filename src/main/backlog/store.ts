@@ -311,8 +311,12 @@ export class BacklogStore {
    * card was already claimed, moved, or deleted.
    */
   claimCard(id: string): boolean {
+    // 'blocked' is claimable so the card tile's manual Retry/Restart can run it
+    // directly. Autorun still never reaches a blocked card — pickNextCard only
+    // returns PICKABLE_RANK states — so this widens the manual path only; the
+    // atomic UPDATE's job (no double-claim race) is unchanged.
     const info = this.db.prepare(
-      "UPDATE cards SET state = 'claimed', updated_at = ? WHERE id = ? AND state IN ('todo', 'paused', 'rework')",
+      "UPDATE cards SET state = 'claimed', updated_at = ? WHERE id = ? AND state IN ('todo', 'paused', 'rework', 'blocked')",
     ).run([Date.now(), id]);
     return Number(info.changes) === 1;
   }

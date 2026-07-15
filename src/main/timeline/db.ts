@@ -23,7 +23,7 @@ interface Database {
 }
 type DatabaseConstructor = new (path: string) => Database;
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -117,6 +117,19 @@ CREATE TABLE IF NOT EXISTS secret_access_events (
 
 CREATE INDEX IF NOT EXISTS idx_secret_access_ts      ON secret_access_events (ts);
 CREATE INDEX IF NOT EXISTS idx_secret_access_tool_ts ON secret_access_events (tool_id, ts);
+
+-- Persisted transcript read offsets. The TranscriptReader tracks how far it has
+-- read each transcript/rollout file so reruns only consume the new tail.
+-- Without persistence the in-memory map resets on every app restart, and the
+-- first event after restart re-reads the whole file from byte 0 — re-summing
+-- all historical usage and double-counting tokens. Persisting the offset makes
+-- reads resume where they left off across restarts.
+CREATE TABLE IF NOT EXISTS transcript_offsets (
+  path           TEXT PRIMARY KEY,
+  offset         INTEGER NOT NULL,
+  session_id     TEXT,
+  codex_snapshot TEXT
+);
 `;
 
 export interface EventRow {
@@ -185,12 +198,21 @@ export interface SecretAccessEventRow {
   ruleMessages: string;  // JSON-encoded [{ ruleId, message }]
 }
 
+export interface TranscriptOffsetRow {
+  path: string;
+  offset: number;
+  sessionId?: string | null;
+  codexSnapshot?: string | null; // JSON-encoded CodexSnapshot, or null
+}
+
 export interface TimelineDb {
   insertEvent: (row: EventRow) => void;
   insertSession: (row: SessionRow) => number;
   insertQuotaSample: (row: QuotaSampleRow) => void;
   insertGuardrailEvent: (row: GuardrailEventRow) => void;
   insertSecretAccessEvent: (row: SecretAccessEventRow) => void;
+  loadTranscriptOffsets: () => TranscriptOffsetRow[];
+  saveTranscriptOffset: (row: TranscriptOffsetRow) => void;
   prune: (
     eventsOlderThanMs: number,
     quotaOlderThanMs: number,
@@ -295,6 +317,18 @@ export function initTimelineDb(): TimelineDb | null {
     )
   `);
 
+  const selectOffsetsStmt: Statement = db.prepare(
+    'SELECT path, offset, session_id AS sessionId, codex_snapshot AS codexSnapshot FROM transcript_offsets',
+  );
+  const upsertOffsetStmt: Statement = db.prepare(`
+    INSERT INTO transcript_offsets (path, offset, session_id, codex_snapshot)
+    VALUES (@path, @offset, @sessionId, @codexSnapshot)
+    ON CONFLICT(path) DO UPDATE SET
+      offset         = excluded.offset,
+      session_id     = excluded.session_id,
+      codex_snapshot = excluded.codex_snapshot
+  `);
+
   const pruneEventsStmt: Statement    = db.prepare('DELETE FROM events WHERE timestamp < ?');
   const pruneQuotaStmt: Statement     = db.prepare('DELETE FROM quota_samples WHERE sampled_at < ?');
   const pruneGuardrailStmt: Statement = db.prepare('DELETE FROM guardrail_events WHERE ts < ?');
@@ -333,6 +367,14 @@ export function initTimelineDb(): TimelineDb | null {
     insertSecretAccessEvent: (row) => {
       try { insertSecretAccessStmt.run(normalize(row)); }
       catch (e: any) { logger.warn('[Timeline] insertSecretAccessEvent failed:', e?.message ?? e); }
+    },
+    loadTranscriptOffsets: () => {
+      try { return selectOffsetsStmt.all() as TranscriptOffsetRow[]; }
+      catch (e: any) { logger.warn('[Timeline] loadTranscriptOffsets failed:', e?.message ?? e); return []; }
+    },
+    saveTranscriptOffset: (row) => {
+      try { upsertOffsetStmt.run(normalize(row)); }
+      catch (e: any) { logger.warn('[Timeline] saveTranscriptOffset failed:', e?.message ?? e); }
     },
     prune: (eventsOlderThanMs, quotaOlderThanMs, guardrailOlderThanMs, secretOlderThanMs) => {
       try {

@@ -22,6 +22,8 @@ export class ConfigWriter {
         return this.isKiroHookInstalled(projectPath);
       case 'antigravity-cli':
         return this.isAntigravityCliHookInstalled(projectPath);
+      case 'grok':
+        return this.isGrokHookInstalled();
       default:
         return false;
     }
@@ -41,6 +43,8 @@ export class ConfigWriter {
         return this.writeKiroHook(projectPath);
       case 'antigravity-cli':
         return this.writeAntigravityCliHook(projectPath);
+      case 'grok':
+        return this.writeGrokHook();
       default:
         throw new Error(`Hook installation for ${toolId} not yet implemented`);
     }
@@ -142,6 +146,36 @@ export class ConfigWriter {
 
     return ['PreToolUse', 'Stop', 'StopFailure'].every((event) =>
       this.hookArrayHasAgentPulseHttp(settings.hooks[event]),
+    );
+  }
+
+  // Grok home dir, honoring the documented GROK_HOME override (falls back to
+  // ~/.grok). Grok hooks are installed globally so no project trust is needed.
+  private grokHome(): string {
+    return process.env['GROK_HOME'] || path.join(os.homedir(), '.grok');
+  }
+
+  private grokHookPath(): string {
+    return path.join(this.grokHome(), 'hooks', 'agent-pulse.json');
+  }
+
+  private isGrokHookInstalled(): boolean {
+    const config = this.readJson(this.grokHookPath());
+    if (!config?.hooks) return false;
+
+    // Grok uses COMMAND hooks (its SSRF protection blocks our http:// bridge),
+    // so the scripts must also exist for the hook to actually fire.
+    const hooksDir = path.join(this.grokHome(), 'hooks');
+    const scriptsExist = this.hasAllFiles([
+      path.join(hooksDir, 'agent-pulse.sh'),
+      path.join(hooksDir, 'agent-pulse.ps1'),
+    ]);
+    if (!scriptsExist) return false;
+
+    // Require the core lifecycle events so a half-written file doesn't read as
+    // installed. Grok merges this global file with any project/compat hooks.
+    return ['SessionStart', 'PreToolUse', 'Stop', 'StopFailure'].every((event) =>
+      this.hookArrayHasAgentPulseCommand(config.hooks[event]),
     );
   }
 
@@ -868,7 +902,168 @@ exit 0
     return { success: true, path: settingsPath };
   }
 
+  private writeGrokHook() {
+    // Grok CANNOT use native HTTP hooks against our bridge: its hook runner has
+    // SSRF protection that rejects `http://` URLs ("only https:// URLs are
+    // allowed for HTTP hooks"), and the bridge only serves plain HTTP on
+    // localhost. So we use a COMMAND hook instead — a bash/PowerShell script
+    // that POSTs to the bridge via curl/Invoke-WebRequest. No `http://` URL is
+    // ever handed to Grok, so SSRF protection never triggers. The script
+    // injects `_ap_tool: "grok"`, the definitive marker the bridge keys on.
+    //
+    // We still write a DEDICATED global file (~/.grok/hooks/agent-pulse.json)
+    // rather than merging into ~/.claude/settings.json: global Grok hooks are
+    // always trusted, and uninstall then only removes our file/scripts —
+    // never touching the user's other Grok plugins/hooks.
+    const hooksDir = path.join(this.grokHome(), 'hooks');
+    if (!fs.existsSync(hooksDir)) {
+      fs.mkdirSync(hooksDir, { recursive: true });
+    }
+
+    // Write the hook scripts alongside the config (both inject _ap_tool:"grok").
+    const shPath  = path.join(hooksDir, 'agent-pulse.sh');
+    const ps1Path = path.join(hooksDir, 'agent-pulse.ps1');
+    fs.writeFileSync(shPath, this.buildGrokShellScript(), { mode: 0o755 });
+    fs.writeFileSync(ps1Path, this.buildGrokPowerShellScript());
+
+    // On Windows a bare `.sh` can't be executed; point at the PowerShell wrapper.
+    const isWindows = process.platform === 'win32';
+    const command = isWindows
+      ? `powershell -ExecutionPolicy Bypass -File "${ps1Path}"`
+      : shPath;
+
+    const cmdHook = { type: 'command', command, timeout: 10 };
+    // Grok's matcher is a regex (docs), so use '.*' rather than Claude's '*'.
+    const matched = [{ matcher: '.*', hooks: [cmdHook] }];
+    const flat = [{ hooks: [cmdHook] }];
+    const config = {
+      hooks: {
+        SessionStart:       flat,
+        UserPromptSubmit:   flat,
+        PreToolUse:         matched,
+        PostToolUse:        matched,
+        PostToolUseFailure: matched,
+        Stop:               flat,
+        StopFailure:        flat,
+        SessionEnd:         flat,
+        Notification:       matched,
+      },
+    };
+
+    const hookPath = this.grokHookPath();
+    fs.writeFileSync(hookPath, JSON.stringify(config, null, 2));
+    return { success: true, path: hookPath };
+  }
+
+  /**
+   * Bash script for Grok: injects `_ap_tool: "grok"` + cwd + agent_pid before
+   * forwarding the stdin event JSON to the bridge. Fail-open on any error.
+   */
+  private buildGrokShellScript(): string {
+    return `#!/usr/bin/env bash
+# Agent Pulse — Grok hook script (bash)
+# Reads event JSON from stdin, injects identifier + cwd + agent_pid, forwards to
+# the bridge, and relays a guardrail deny verdict back to Grok via stdout.
+# Grok's HTTP hooks are blocked by its SSRF protection (http:// not allowed), so
+# we POST from a command hook instead. Fail-open: any bridge error leaves the
+# command allowed.
+BODY=$(cat)
+CWD_ESCAPED=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+CHAIN_PIDS="$PPID"
+_CUR=$PPID
+for _i in 1 2 3 4 5 6 7; do
+  _PARENT=$(ps -o ppid= -p "$_CUR" 2>/dev/null | tr -d ' ')
+  if [ -z "$_PARENT" ] || [ "$_PARENT" -le 1 ] 2>/dev/null; then break; fi
+  CHAIN_PIDS="$CHAIN_PIDS,$_PARENT"
+  _CUR=$_PARENT
+done
+# Token analytics resolve the Grok session dir from sessionId. Grok's stdin
+# envelope carries it, but as belt-and-suspenders we also inject session_id from
+# the GROK_SESSION_ID env var (snake_case, so a stdin camelCase sessionId still
+# wins in normalizePayload). Guarantees the timeline can find updates.jsonl.
+SID_INJECT=""
+if [ -n "$GROK_SESSION_ID" ]; then SID_INJECT='"session_id":"'"$GROK_SESSION_ID"'",'; fi
+INJECT='"_ap_tool":"grok",'"$SID_INJECT"'"cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"',"agent_pid_chain":['"$CHAIN_PIDS"'],'
+BODY=$(printf '%s' "$BODY" | sed "s|^{|{$INJECT|")
+RESP=$(curl -s --max-time 3 -X POST \\
+  -H "Content-Type: application/json" \\
+  -d "$BODY" \\
+  "${this.bridgeUrl}" 2>/dev/null || true)
+# Relay an explicit block verdict; a down/slow bridge fails open (command allowed).
+case "$RESP" in
+  *'"status":"blocked"'*) printf '%s' "$RESP" ;;
+esac
+exit 0
+`;
+  }
+
+  /**
+   * PowerShell script for Grok: injects `_ap_tool: "grok"` + cwd + agent_pid
+   * before forwarding to the bridge. Fail-open on any error.
+   */
+  private buildGrokPowerShellScript(): string {
+    return `# Agent Pulse — Grok hook script (PowerShell)
+# Reads event JSON from stdin, injects identifier + cwd + agent_pid, forwards to
+# the bridge, and relays a guardrail deny verdict back to Grok via stdout.
+# Grok's HTTP hooks are blocked by its SSRF protection (http:// not allowed), so
+# we POST from a command hook instead. Fail-open: any bridge error leaves the
+# command allowed.
+$ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
+$body = $reader.ReadToEnd()
+$reader.Close()
+$cwdJson = ($PWD.Path | ConvertTo-Json -Compress)
+$chainPids = New-Object System.Collections.ArrayList
+[void]$chainPids.Add($PID)
+try {
+  $cur = $PID
+  for ($i = 0; $i -lt 7; $i++) {
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$cur" -ErrorAction Stop
+    if (-not $p) { break }
+    $next = [int]$p.ParentProcessId
+    if ($next -le 0) { break }
+    [void]$chainPids.Add($next)
+    $cur = $next
+  }
+} catch { }
+$chainJson = '[' + ($chainPids -join ',') + ']'
+$agentPid = if ($chainPids.Count -ge 2) { $chainPids[1] } else { $PID }
+# Belt-and-suspenders sessionId (see the bash script) so token analytics can
+# always resolve the Grok session dir. Snake_case so a stdin camelCase sessionId
+# still wins in normalizePayload.
+$sidInject = if ($env:GROK_SESSION_ID) { '"session_id":"' + $env:GROK_SESSION_ID + '",' } else { '' }
+$inject = '"_ap_tool":"grok",' + $sidInject + '"cwd":' + $cwdJson + ',"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
+$body = $body -replace '^\\{', ('{' + $inject)
+try {
+  $resp = Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
+    -Method POST \`
+    -ContentType "application/json" \`
+    -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
+    -UseBasicParsing -TimeoutSec 3
+  if ($resp.Content -like '*"status":"blocked"*') {
+    [Console]::Out.Write($resp.Content)
+  }
+} catch { }
+exit 0
+`;
+  }
+
   public uninstallHook(toolId: ToolId, projectPath?: string) {
+    if (toolId === 'grok') {
+      // Delete only our dedicated config + scripts — leaves any other Grok
+      // hooks intact.
+      const hookPath = this.grokHookPath();
+      if (fs.existsSync(hookPath)) fs.unlinkSync(hookPath);
+      const hooksDir = path.join(this.grokHome(), 'hooks');
+      const shPath  = path.join(hooksDir, 'agent-pulse.sh');
+      const ps1Path = path.join(hooksDir, 'agent-pulse.ps1');
+      if (fs.existsSync(shPath))  fs.unlinkSync(shPath);
+      if (fs.existsSync(ps1Path)) fs.unlinkSync(ps1Path);
+      return { success: true };
+    }
+
     if (toolId === 'claude-code') {
       const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
       if (!fs.existsSync(settingsPath)) return { success: true };

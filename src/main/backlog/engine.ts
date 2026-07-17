@@ -23,6 +23,7 @@ import { buildExecutionPrompt, buildResearchPrompt } from './prompt';
 import { executeCard, RunnerHandle, RunnerResult } from './runner';
 import { captureDiff, createWorktree, reconcileWorktrees } from './worktree';
 import { runQa } from './qa';
+import { sendWebhook } from '../notifications/webhook';
 
 // Grace period a still-running card gets after its window closes.
 const GRACE_MS = 10 * 60_000;
@@ -414,6 +415,11 @@ export class BacklogEngine {
         this.lastRun = { at: Date.now(), cardId: card.id, cardTitle: card.title, outcome };
         logger.info(`[Backlog] "${card.title}" finished: ${outcome}${reason ? ` (${reason})` : ''}`);
 
+        // Ping configured webhooks once the card has settled. Fire-and-forget:
+        // the state is already committed, so a slow/failing POST never blocks
+        // finishing the attempt or claiming the next card.
+        void this.notifyOutcome(card, reason);
+
         // The run spent real window credit — refresh usage promptly.
         this.usagePoller.refreshNow();
         this.broadcast();
@@ -536,6 +542,49 @@ export class BacklogEngine {
 
     this.store.setCardState(card.id, 'done');
     return { outcome: 'success', reason: selfStatus === 'partial' ? 'agent reported partial completion' : undefined };
+  }
+
+  /**
+   * POST a Discord/Slack ping for a card that reached a terminal state the user
+   * cares about. Reads the card's FINAL state from the store (not the attempt
+   * outcome) so the killed→blocked and qa-failed→rework escalations classify
+   * correctly. Paused / usage-limit outcomes auto-resume and are intentionally
+   * silent. Fire-and-forget: sendWebhook swallows its own network errors.
+   */
+  private async notifyOutcome(card: BacklogCard, reason: string | null): Promise<void> {
+    const targets = (this.config.webhooks ?? []).filter((t) => t.enabled && t.url.trim().length > 0);
+    if (targets.length === 0) return;
+
+    const state = this.store.getCard(card.id)?.state ?? null;
+    if (state !== 'done' && state !== 'blocked' && state !== 'rework') return;
+
+    const meta =
+      state === 'done'
+        ? { emoji: '✅', verb: 'completed', color: 0x22c55e }
+        : state === 'rework'
+          ? { emoji: '🔁', verb: 'needs rework', color: 0xf59e0b }
+          : { emoji: '⛔', verb: 'blocked', color: 0xef4444 };
+
+    const project = this.store.listProjects().find((p) => p.id === card.projectId);
+    const bodyLines = [
+      project ? `Project: ${project.name}` : null,
+      `Type: ${card.taskType}`,
+      reason ? `Detail: ${reason}` : null,
+    ].filter((l): l is string => l !== null);
+
+    const message = {
+      title: `${meta.emoji} Backlog task ${meta.verb}: ${card.title}`,
+      body: bodyLines.join('\n'),
+      accentColor: meta.color,
+    };
+
+    await Promise.all(
+      targets.map((t) =>
+        sendWebhook(t, message).catch((e) =>
+          logger.warn(`[Backlog] webhook notify failed: ${e?.message ?? e}`),
+        ),
+      ),
+    );
   }
 
   /** Window closed: no new claims; a running card gets a grace period. */

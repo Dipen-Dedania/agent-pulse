@@ -3,6 +3,10 @@
 // (engine, store, runner) and the renderer (board tab, scheduler section) —
 // like SchedulerStatus in types.ts. See backlog.md for the product spec.
 
+// Type-only import (erased at compile) so the shared webhook shape can be
+// reused for backlog completion pings without a runtime dependency cycle.
+import type { WebhookTarget } from './types';
+
 export type BacklogCardState =
   | 'refinement'   // raw idea, not yet runnable
   | 'todo'         // refined & queued; sortable; autorun source
@@ -181,6 +185,10 @@ export interface BacklogSchedulerConfig {
   slots: BacklogSlot[];
   requireIdle: boolean;    // only claim when no input for K min, even inside a slot
   maxConcurrent: number;   // fixed at 1 in Phase 1 (migration clamps it)
+  // Discord/Slack webhooks pinged when a card settles into a terminal state
+  // (done / blocked / rework). Independent of the attention-escalation list so
+  // task-completion pings can route to their own channel. Empty = no pings.
+  webhooks: WebhookTarget[];
 }
 
 // ─── Live status broadcast to the renderer ───────────────────────────────────

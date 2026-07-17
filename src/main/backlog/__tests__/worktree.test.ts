@@ -33,6 +33,10 @@ describe.skipIf(!gitAvailable())('backlog worktree module', () => {
     git(repo, 'init');
     git(repo, 'config', 'user.email', 'test@test.local');
     git(repo, 'config', 'user.name', 'test');
+    // Pin line-ending handling so patch/stash round-trips stay LF regardless of
+    // the runner's global core.autocrlf (Windows CI defaults it to true, which
+    // would rewrite applied content to CRLF and break the byte-exact asserts).
+    git(repo, 'config', 'core.autocrlf', 'false');
     fs.writeFileSync(path.join(repo, 'a.txt'), 'hello\n');
     git(repo, 'add', '-A');
     git(repo, 'commit', '-m', 'initial');
@@ -270,6 +274,7 @@ describe.skipIf(!gitAvailable())('backlog worktree module', () => {
     git(other, 'init');
     git(other, 'config', 'user.email', 'test@test.local');
     git(other, 'config', 'user.name', 'test');
+    git(other, 'config', 'core.autocrlf', 'false');
     fs.writeFileSync(path.join(other, 'a.txt'), 'totally different content\n');
     git(other, 'add', '-A');
     git(other, 'commit', '-m', 'other initial');

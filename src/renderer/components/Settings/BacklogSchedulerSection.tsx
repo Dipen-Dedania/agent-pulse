@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BacklogSchedulerConfig, BacklogSchedulerStatus, BacklogSlot } from '../../../common/backlog-types';
+import { WebhookTarget } from '../../../common/types';
 import { formatUsd } from '../../../common/pricing';
+import { WebhookRow } from './WebhookRow';
 
 // Backlog Scheduler — sits beside the Cowork Scheduler in Usage → Claude Code.
 // The Cowork slot is a fire INSTANT (opens a window); a backlog slot is a time
@@ -121,6 +123,32 @@ const SlotRow: React.FC<{
 };
 
 export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onChange }) => {
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  // The webhook editor is driven by LOCAL state, not the config prop. onChange
+  // round-trips through backlog:scheduler:update-config and reconciles the whole
+  // config back into the prop; feeding an <input> straight off that made rows
+  // flicker/vanish as a stale async reply clobbered a just-typed value. Local
+  // state renders instantly; we only re-seed from the prop while the panel is
+  // closed (external edits), so an open editor is never overwritten mid-keystroke.
+  const [webhooks, setWebhooks] = useState<WebhookTarget[]>(config.webhooks ?? []);
+  useEffect(() => {
+    if (!notificationsOpen) setWebhooks(config.webhooks ?? []);
+  }, [config.webhooks, notificationsOpen]);
+
+  const activeWebhooks = webhooks.filter((w) => w.enabled && w.url.trim().length > 0).length;
+
+  const commitWebhooks = (next: WebhookTarget[]) => {
+    setWebhooks(next);            // instant, local — no flicker
+    onChange({ webhooks: next }); // persist; the reconciled reply is ignored while open
+  };
+  const addWebhook = () => {
+    const id = `wh-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    commitWebhooks([...webhooks, { id, kind: 'discord', url: '', enabled: true }]);
+  };
+  const changeWebhook = (id: string, next: WebhookTarget) =>
+    commitWebhooks(webhooks.map((w) => (w.id === id ? next : w)));
+  const deleteWebhook = (id: string) => commitWebhooks(webhooks.filter((w) => w.id !== id));
+
   const updateSlot = (i: number, next: BacklogSlot) =>
     onChange({ slots: config.slots.map((s, idx) => (idx === i ? next : s)) });
   const addSlot = () =>
@@ -237,6 +265,55 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
           onClick={() => onChange({ requireIdle: !config.requireIdle })}
           label='Toggle idle requirement'
         />
+      </div>
+
+      {/* Completion notifications — collapsed behind a toggle so an empty list
+          doesn't clutter the section; expands inline (no screen-covering modal). */}
+      <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4'>
+        <div className='flex items-start gap-3'>
+          <div className='flex-1 min-w-0'>
+            <p className='font-medium text-strong text-sm leading-tight'>Task notifications</p>
+            <p className='text-xs text-muted mt-1'>
+              Ping a Discord/Slack channel when a card finishes — <span className='text-ok'>done</span>,{' '}
+              <span className='text-danger'>blocked</span>, or <span className='text-warn'>rework</span>. Get told on
+              your phone the moment a queued task lands, without watching the board.
+            </p>
+          </div>
+          <button
+            onClick={() => setNotificationsOpen((v) => !v)}
+            aria-expanded={notificationsOpen}
+            className='shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
+          >
+            {notificationsOpen ? 'Hide' : activeWebhooks > 0 ? `Configure · ${activeWebhooks} active` : 'Configure'}
+          </button>
+        </div>
+
+        {notificationsOpen && (
+          <div className='mt-4 flex flex-col gap-3 border-t border-edge/40 pt-4'>
+            <p className='text-xs text-faint'>
+              Create a webhook in Discord (Server Settings → Integrations → Webhooks) or Slack (Incoming Webhooks).
+              Paused / usage-limit runs auto-resume, so they stay silent.
+            </p>
+            {webhooks.length === 0 ? (
+              <p className='text-xs text-faint italic'>No webhooks yet — add one to get pinged on completion.</p>
+            ) : (
+              webhooks.map((w) => (
+                <WebhookRow
+                  key={w.id}
+                  target={w}
+                  onChange={(next) => changeWebhook(w.id, next)}
+                  onDelete={() => deleteWebhook(w.id)}
+                />
+              ))
+            )}
+            <button
+              onClick={addWebhook}
+              className='self-start px-3 py-1.5 rounded-lg text-xs font-medium bg-control/60 hover:bg-control text-primary cursor-pointer transition-colors'
+            >
+              + Add webhook
+            </button>
+          </div>
+        )}
       </div>
 
       <p className='text-xs text-faint mt-4'>

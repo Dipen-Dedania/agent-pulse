@@ -57,6 +57,7 @@ const MODEL_PRESETS: { value: string; label: string }[] = [
   { value: 'haiku', label: 'Haiku — fastest, cheapest' },
   { value: 'sonnet', label: 'Sonnet — balanced' },
   { value: 'opus', label: 'Opus — most capable' },
+  { value: 'fable', label: 'Fable — top tier, highest quality' },
 ];
 const isPresetModel = (m: string) => MODEL_PRESETS.some((p) => p.value === m);
 

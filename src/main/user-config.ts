@@ -249,6 +249,7 @@ const DEFAULTS: UserConfig = {
     slots: [],
     requireIdle: true,
     maxConcurrent: 1, // Phase 1: sequential only; migration clamps this
+    webhooks: [],
   },
   // Seed templates from backlog.md. Phase 1 is research-only: every template
   // outputs a report/plan — nothing touches the repo.
@@ -417,11 +418,31 @@ export function migrateBacklogScheduler(raw: unknown): BacklogSchedulerConfig {
           enabled: typeof row.enabled === 'boolean' ? row.enabled : true,
         }))
     : [];
+  // Coerce each row to a well-formed shape but KEEP in-progress rows (empty
+  // URL) — this migration runs on every live update too, so dropping blanks
+  // here would delete a row the instant the user adds it, before they can type
+  // the URL. The engine guards empty/disabled URLs at send time. Only truly
+  // malformed rows (non-objects) are discarded; an unknown kind falls back to
+  // 'discord'.
+  const KINDS: WebhookKind[] = ['discord', 'slack'];
+  const webhooks: WebhookTarget[] = Array.isArray(s.webhooks)
+    ? s.webhooks
+        .filter((row: any) => !!row && typeof row === 'object')
+        .map((row: any, i: number) => ({
+          id: typeof row.id === 'string' && row.id.length > 0 ? row.id : `wh-${i}`,
+          kind: KINDS.includes(row.kind) ? (row.kind as WebhookKind) : 'discord',
+          label: typeof row.label === 'string' ? row.label : undefined,
+          url: typeof row.url === 'string' ? row.url : '',
+          enabled: typeof row.enabled === 'boolean' ? row.enabled : true,
+        }))
+    : [];
+
   return {
     enabled: typeof s.enabled === 'boolean' ? s.enabled : d.enabled,
     slots,
     requireIdle: typeof s.requireIdle === 'boolean' ? s.requireIdle : d.requireIdle,
     maxConcurrent: 1,
+    webhooks,
   };
 }
 

@@ -21,10 +21,10 @@ const COVERAGE: Record<ToolId, { ignoreFile: boolean; hookBlock: boolean; badge:
 };
 
 const TONE_CLS: Record<BadgeTone, string> = {
-  hard:   'bg-emerald-500/15 border-emerald-500/30 text-emerald-300',
-  soft:   'bg-amber-500/15 border-amber-500/30 text-amber-300',
+  hard:   'bg-emerald-500/15 border-emerald-500/30 text-ok',
+  soft:   'bg-amber-500/15 border-amber-500/30 text-warn',
   bypass: 'bg-rose-500/15 border-rose-500/30 text-rose-300',
-  none:   'bg-slate-700/40 border-slate-600/40 text-slate-400',
+  none:   'bg-control/40 border-edge-strong/40 text-muted',
 };
 
 interface DetectInfo { installed?: boolean; hookInstalled?: boolean }
@@ -85,8 +85,8 @@ export const SecretProtectionTab: React.FC = () => {
 
   if (!config) {
     return (
-      <div className='flex items-center gap-3 text-slate-400'>
-        <div className='w-4 h-4 border-2 border-slate-500 border-t-blue-400 rounded-full animate-spin' />
+      <div className='flex items-center gap-3 text-muted'>
+        <div className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
         Loading secret protection…
       </div>
     );
@@ -97,14 +97,14 @@ export const SecretProtectionTab: React.FC = () => {
       <div className='flex items-center justify-between mb-5'>
         <div>
           <h2 className='text-xl font-bold tracking-tight'>Secret Protection</h2>
-          <p className='text-sm text-slate-400 mt-1'>
+          <p className='text-sm text-muted mt-1'>
             Stop agents from reading secret files (.env, keys, credentials). Blocking works for tools that honour PreToolUse responses; everything else gets an ignore-file plus a warning.
           </p>
         </div>
         <button
           onClick={() => update({ enabled: !config.enabled })}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.enabled ? 'bg-blue-500' : 'bg-slate-600'
+            config.enabled ? 'bg-blue-500' : 'bg-control-strong'
           }`}
           aria-label='Toggle secret protection'
           title={config.enabled ? 'Secret Protection ON' : 'Secret Protection OFF'}
@@ -128,8 +128,8 @@ export const SecretProtectionTab: React.FC = () => {
       </div>
 
       {/* Supported agents coverage (analysis §2.1) */}
-      <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl mb-5'>
-        <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3'>Coverage by agent</p>
+      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl mb-5'>
+        <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>Coverage by agent</p>
         <div className='flex flex-col gap-2'>
           {(Object.keys(COVERAGE) as ToolId[]).map((toolId) => {
             const cov = COVERAGE[toolId];
@@ -141,13 +141,13 @@ export const SecretProtectionTab: React.FC = () => {
               <div
                 key={toolId}
                 className={`flex items-center gap-3 p-2.5 rounded-xl border ${
-                  installed ? 'bg-slate-900/60 border-slate-700/60' : 'bg-slate-900/30 border-slate-700/30 opacity-50'
+                  installed ? 'bg-glass/60 border-edge/60' : 'bg-glass/30 border-edge/30 opacity-50'
                 }`}
                 title={installed ? (hooked ? 'Hook installed' : 'Detected — hook not installed') : 'Not installed'}
               >
-                <span className='text-sm text-slate-200 flex-1 truncate'>
+                <span className='text-sm text-primary flex-1 truncate'>
                   {label}
-                  {!installed && <span className='text-[10px] text-slate-500 ml-2'>not installed</span>}
+                  {!installed && <span className='text-[10px] text-faint ml-2'>not installed</span>}
                 </span>
                 <Cov ok={cov.ignoreFile && installed} label='ignore-file' />
                 <Cov ok={cov.hookBlock && hooked} label='hook-block' />
@@ -161,7 +161,7 @@ export const SecretProtectionTab: React.FC = () => {
       </div>
 
       {/* Layer toggles + scope */}
-      <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl mb-5 flex flex-col gap-3'>
+      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl mb-5 flex flex-col gap-3'>
         <LayerToggle
           label='Write ignore files'
           hint='Fan the glob list out to each agent’s ignore/deny file (Claude deny, .cursorignore, …).'
@@ -176,18 +176,18 @@ export const SecretProtectionTab: React.FC = () => {
         />
         <div className='flex items-start justify-between gap-3 pt-1'>
           <div className='min-w-0'>
-            <p className='text-sm font-medium text-slate-200'>Scope</p>
-            <p className='text-xs text-slate-400 mt-0.5'>
+            <p className='text-sm font-medium text-primary'>Scope</p>
+            <p className='text-xs text-muted mt-0.5'>
               Global writes one ignore list per machine; Project writes into each recently-active project folder.
             </p>
           </div>
-          <div className='inline-flex gap-1 p-1 rounded-lg bg-slate-900/60 border border-slate-700/60 shrink-0'>
+          <div className='inline-flex gap-1 p-1 rounded-lg bg-glass/60 border border-edge/60 shrink-0'>
             {(['global', 'project'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => update({ scope: s })}
                 className={`px-3 py-1 rounded-md text-xs font-medium capitalize transition-colors cursor-pointer ${
-                  config.scope === s ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                  config.scope === s ? 'bg-blue-600 text-white' : 'text-muted hover:text-strong'
                 }`}
               >
                 {s}
@@ -198,9 +198,9 @@ export const SecretProtectionTab: React.FC = () => {
       </div>
 
       {/* Rule list */}
-      <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl'>
+      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl'>
         <div className='flex items-center justify-between mb-4'>
-          <p className='text-xs font-semibold uppercase tracking-widest text-slate-500'>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
             Protected globs ({allRules.length})
           </p>
           <button
@@ -220,27 +220,27 @@ export const SecretProtectionTab: React.FC = () => {
                 key={rule.id}
                 className={`flex items-start gap-3 p-3 rounded-xl border ${
                   isDisabled
-                    ? 'bg-slate-900/40 border-slate-700/40 opacity-50'
-                    : 'bg-slate-900/60 border-slate-700/60'
+                    ? 'bg-glass/40 border-edge/40 opacity-50'
+                    : 'bg-glass/60 border-edge/60'
                 }`}
               >
                 <div className='flex-1 min-w-0'>
                   <div className='flex items-center gap-2'>
-                    <code className='text-xs text-emerald-300 font-mono truncate'>{rule.glob}</code>
+                    <code className='text-xs text-ok font-mono truncate'>{rule.glob}</code>
                     {isCustom && (
                       <span className='text-[10px] text-blue-400 font-medium'>custom</span>
                     )}
                   </div>
                   {rule.message && (
-                    <p className='text-sm text-slate-300 mt-0.5'>{rule.message}</p>
+                    <p className='text-sm text-body mt-0.5'>{rule.message}</p>
                   )}
-                  <code className='text-[10px] text-slate-500 font-mono break-all'>{rule.id}</code>
+                  <code className='text-[10px] text-faint font-mono break-all'>{rule.id}</code>
                 </div>
                 <div className='flex flex-col items-end gap-1 shrink-0'>
                   <button
                     onClick={() => toggleRule(rule.id, !isDisabled)}
                     className={`relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer ${
-                      !isDisabled ? 'bg-blue-500' : 'bg-slate-600'
+                      !isDisabled ? 'bg-blue-500' : 'bg-control-strong'
                     }`}
                     aria-label={isDisabled ? 'Enable glob' : 'Disable glob'}
                   >
@@ -253,7 +253,7 @@ export const SecretProtectionTab: React.FC = () => {
                   {isCustom && (
                     <button
                       onClick={() => removeCustomRule(rule.id)}
-                      className='text-[10px] text-slate-500 hover:text-red-400 cursor-pointer transition-colors'
+                      className='text-[10px] text-faint hover:text-red-400 cursor-pointer transition-colors'
                     >
                       delete
                     </button>
@@ -266,30 +266,30 @@ export const SecretProtectionTab: React.FC = () => {
       </div>
 
       {/* Recent events */}
-      <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl mt-5'>
-        <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3'>
+      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl mt-5'>
+        <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
           Recent reads {events.length > 0 && `(${events.length})`}
         </p>
         {events.length === 0 ? (
-          <p className='text-sm text-slate-500 italic'>No protected-file reads observed yet.</p>
+          <p className='text-sm text-faint italic'>No protected-file reads observed yet.</p>
         ) : (
           <div className='flex flex-col gap-2 max-h-72 overflow-y-auto apple-scroll'>
             {events.map((evt, i) => (
               <div
                 key={`${evt.ts}-${i}`}
-                className='flex items-start gap-3 p-2.5 rounded-lg bg-slate-900/60 border border-slate-700/40'
+                className='flex items-start gap-3 p-2.5 rounded-lg bg-glass/60 border border-edge/40'
               >
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
                     evt.decision === 'block'
-                      ? 'bg-red-500/15 border-red-500/30 text-red-300'
-                      : 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                      ? 'bg-red-500/15 border-red-500/30 text-danger'
+                      : 'bg-amber-500/15 border-amber-500/30 text-warn'
                   }`}
                 >
                   {evt.decision}
                 </span>
                 <div className='flex-1 min-w-0'>
-                  <div className='flex items-center gap-2 text-[10px] text-slate-500'>
+                  <div className='flex items-center gap-2 text-[10px] text-faint'>
                     <span>{new Date(evt.ts).toLocaleTimeString()}</span>
                     <span>·</span>
                     <span>{evt.toolId}</span>
@@ -298,8 +298,8 @@ export const SecretProtectionTab: React.FC = () => {
                       <><span>·</span><span className='italic'>blocking not supported</span></>
                     )}
                   </div>
-                  <code className='text-xs text-slate-300 font-mono break-all'>{evt.filePath}</code>
-                  <p className='text-[11px] text-slate-400 mt-0.5'>
+                  <code className='text-xs text-body font-mono break-all'>{evt.filePath}</code>
+                  <p className='text-[11px] text-muted mt-0.5'>
                     {evt.matched.map((m) => m.glob).join(', ')}
                   </p>
                 </div>
@@ -324,7 +324,7 @@ export const SecretProtectionTab: React.FC = () => {
 const Cov: React.FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
   <span
     className={`hidden sm:inline-flex items-center gap-1 text-[10px] font-medium shrink-0 ${
-      ok ? 'text-emerald-300' : 'text-slate-600'
+      ok ? 'text-ok' : 'text-ghost'
     }`}
     title={`${label}: ${ok ? 'yes' : 'no'}`}
   >
@@ -342,13 +342,13 @@ const LayerToggle: React.FC<{
 }> = ({ label, hint, value, onChange }) => (
   <div className='flex items-start justify-between gap-3'>
     <div className='min-w-0'>
-      <p className='text-sm font-medium text-slate-200'>{label}</p>
-      <p className='text-xs text-slate-400 mt-0.5'>{hint}</p>
+      <p className='text-sm font-medium text-primary'>{label}</p>
+      <p className='text-xs text-muted mt-0.5'>{hint}</p>
     </div>
     <button
       onClick={() => onChange(!value)}
       className={`relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer shrink-0 mt-0.5 ${
-        value ? 'bg-blue-500' : 'bg-slate-600'
+        value ? 'bg-blue-500' : 'bg-control-strong'
       }`}
       aria-label={`Toggle ${label}`}
     >
@@ -414,19 +414,19 @@ const AddGlobModal: React.FC<AddGlobModalProps> = ({ onClose, onSaved }) => {
       onClick={onClose}
     >
       <div
-        className='apple-scroll relative w-full max-w-lg mx-4 bg-slate-900/95 border border-slate-700/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
+        className='apple-scroll relative w-full max-w-lg mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-slate-700/60 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors text-sm cursor-pointer'
+          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
           aria-label='Close'
         >
           ✕
         </button>
         <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-1'>New glob</p>
-          <h2 className='text-lg font-bold text-white'>Protected file glob</h2>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>New glob</p>
+          <h2 className='text-lg font-bold text-strong'>Protected file glob</h2>
         </div>
 
         <Field label='ID'>
@@ -462,7 +462,7 @@ const AddGlobModal: React.FC<AddGlobModalProps> = ({ onClose, onSaved }) => {
         <div className='flex justify-end gap-2 mt-2'>
           <button
             onClick={onClose}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 cursor-pointer transition-colors'
+            className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
           >
             Cancel
           </button>
@@ -480,11 +480,11 @@ const AddGlobModal: React.FC<AddGlobModalProps> = ({ onClose, onSaved }) => {
 };
 
 const inputCls =
-  'w-full bg-slate-800/60 border border-slate-700/60 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500/60';
+  'w-full bg-glass/60 border border-edge/60 rounded-lg px-3 py-2 text-sm text-strong placeholder:text-faint focus:outline-none focus:border-blue-500/60';
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div>
-    <p className='text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5'>{label}</p>
+    <p className='text-xs font-semibold uppercase tracking-wider text-faint mb-1.5'>{label}</p>
     {children}
   </div>
 );

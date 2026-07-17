@@ -90,8 +90,8 @@ export function Select<T extends string>({ value, options, onChange, className =
         aria-expanded={open}
         aria-label={ariaLabel}
         onClick={() => setOpen((v) => !v)}
-        className={`inline-flex items-center justify-between gap-2 bg-slate-800 border rounded-lg cursor-pointer transition-colors text-slate-200 ${
-          open ? 'border-blue-500/60' : 'border-slate-700 hover:border-slate-600'
+        className={`inline-flex items-center justify-between gap-2 bg-glass border rounded-lg cursor-pointer transition-colors text-primary ${
+          open ? 'border-blue-500/60' : 'border-edge hover:border-edge-strong'
         } ${className}`}
       >
         <span className='flex items-center gap-1.5 min-w-0'>
@@ -103,7 +103,7 @@ export function Select<T extends string>({ value, options, onChange, className =
         <svg
           viewBox='0 0 20 20'
           fill='currentColor'
-          className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`w-3.5 h-3.5 shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`}
         >
           <path
             fillRule='evenodd'
@@ -124,7 +124,7 @@ export function Select<T extends string>({ value, options, onChange, className =
             zIndex: 9999,
             visibility: pos ? 'visible' : 'hidden',
           }}
-          className='apple-scroll py-1 max-h-64 overflow-y-auto bg-slate-900/95 backdrop-blur-md border border-slate-600/60 rounded-lg shadow-2xl'
+          className='apple-scroll py-1 max-h-64 overflow-y-auto bg-overlay/95 backdrop-blur-md border border-edge-strong/60 rounded-lg shadow-2xl'
         >
           {options.map((opt) => {
             const active = opt.value === value;
@@ -139,7 +139,7 @@ export function Select<T extends string>({ value, options, onChange, className =
                   setOpen(false);
                 }}
                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs cursor-pointer transition-colors ${
-                  active ? 'bg-blue-500/20 text-white' : 'text-slate-300 hover:bg-slate-700/60'
+                  active ? 'bg-blue-500/20 text-white' : 'text-body hover:bg-control/60'
                 }`}
               >
                 {opt.swatch && (

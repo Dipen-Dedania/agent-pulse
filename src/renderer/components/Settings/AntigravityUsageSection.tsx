@@ -30,12 +30,12 @@ const STATE_LABEL: Record<UsageState, string> = {
 };
 
 const STATE_PILL_CLASS: Record<UsageState, string> = {
-  ok: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  unknown: 'bg-slate-700/40 text-slate-300 border-slate-600/40',
-  unauthenticated: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  unavailable: 'bg-slate-700/40 text-slate-300 border-slate-600/40',
-  'rate-limited': 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  'network-error': 'bg-red-500/15 text-red-300 border-red-500/30',
+  ok: 'bg-emerald-500/15 text-ok border-emerald-500/30',
+  unknown: 'bg-control/40 text-body border-edge-strong/40',
+  unauthenticated: 'bg-amber-500/15 text-warn border-amber-500/30',
+  unavailable: 'bg-control/40 text-body border-edge-strong/40',
+  'rate-limited': 'bg-amber-500/15 text-warn border-amber-500/30',
+  'network-error': 'bg-red-500/15 text-danger border-red-500/30',
 };
 
 function formatRelativeReset(targetMs: number | undefined): string {
@@ -64,16 +64,16 @@ interface NotifyRowProps {
 const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, onChange }) => {
   const op = comparator === 'lte' ? '≤' : '≥';
   return (
-    <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4'>
+    <div className='bg-glass/40 border border-edge/50 rounded-xl p-4'>
       <div className='flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
-          <p className='font-medium text-white text-sm leading-tight'>{title}</p>
-          <p className='text-xs text-slate-400 mt-1'>{hint}</p>
+          <p className='font-medium text-strong text-sm leading-tight'>{title}</p>
+          <p className='text-xs text-muted mt-1'>{hint}</p>
         </div>
         <button
           onClick={() => onChange({ ...value, enabled: !value.enabled })}
           className={`relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            value.enabled ? 'bg-blue-500' : 'bg-slate-600'
+            value.enabled ? 'bg-blue-500' : 'bg-control-strong'
           }`}
           aria-label={`Toggle ${title}`}
         >
@@ -86,7 +86,7 @@ const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, o
       </div>
 
       <div className={`flex items-center gap-3 mt-3 ${value.enabled ? '' : 'opacity-50'}`}>
-        <span className='text-xs text-slate-500 font-mono whitespace-nowrap'>
+        <span className='text-xs text-faint font-mono whitespace-nowrap'>
           remaining {op}
         </span>
         <input
@@ -98,7 +98,7 @@ const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, o
           onChange={(e) => onChange({ ...value, threshold: Number(e.target.value) })}
           className='flex-1'
         />
-        <span className='text-sm text-white font-mono w-10 text-right'>{value.threshold}%</span>
+        <span className='text-sm text-strong font-mono w-10 text-right'>{value.threshold}%</span>
       </div>
     </div>
   );
@@ -115,18 +115,18 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
   const models = status.snapshot?.models ?? [];
 
   return (
-    <section className='mt-6 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl'>
+    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-3'>
-            <h2 className='text-lg font-bold text-white'>Antigravity IDE Usage</h2>
+            <h2 className='text-lg font-bold text-strong'>Antigravity IDE Usage</h2>
             <span
               className={`text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded-full border ${STATE_PILL_CLASS[status.state]}`}
             >
               {STATE_LABEL[status.state]}
             </span>
           </div>
-          <p className='text-sm text-slate-400 mt-1'>
+          <p className='text-sm text-muted mt-1'>
             Tracks per-model quota in the Antigravity IDE. The endpoint is local — readings
             only refresh while the IDE is running.
           </p>
@@ -135,7 +135,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
         <button
           onClick={() => onChange({ enabled: !config.enabled })}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.enabled ? 'bg-blue-500' : 'bg-slate-600'
+            config.enabled ? 'bg-blue-500' : 'bg-control-strong'
           }`}
           aria-label='Toggle Antigravity usage tracking'
         >
@@ -149,10 +149,10 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
 
       {config.enabled && models.length > 0 && (
         <div className='mt-5 flex flex-col gap-2'>
-          <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>
+          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>
             Models with active quotas
           </p>
-          <div className='bg-slate-900/40 border border-slate-700/60 rounded-xl divide-y divide-slate-700/40 overflow-hidden'>
+          <div className='bg-glass/40 border border-edge/60 rounded-xl divide-y divide-edge/40 overflow-hidden'>
             {models.map((m) => {
               const remaining = 100 - m.utilization;
               const fill = fillColorForRemaining(remaining);
@@ -160,7 +160,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                 <div key={m.modelKey} className='flex items-center gap-3 px-3 py-2.5'>
                   <div className='flex-1 min-w-0'>
                     <div className='flex items-center gap-2'>
-                      <p className='text-sm font-medium text-white truncate'>{m.displayName}</p>
+                      <p className='text-sm font-medium text-strong truncate'>{m.displayName}</p>
                       {m.exhausted && (
                         <span
                           className='text-amber-400 shrink-0'
@@ -171,7 +171,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                         </span>
                       )}
                       {m.recommended && (
-                        <span className='text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 shrink-0'>
+                        <span className='text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/15 text-info border border-blue-500/30 shrink-0'>
                           Recommended
                         </span>
                       )}
@@ -186,7 +186,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                           style={{ width: `${Math.max(2, Math.min(100, remaining))}%`, background: fill }}
                         />
                       </div>
-                      <span className='text-xs text-slate-400 shrink-0 tabular-nums'>
+                      <span className='text-xs text-muted shrink-0 tabular-nums'>
                         {Math.round(remaining)}% · resets {formatRelativeReset(m.resetsAt)}
                       </span>
                     </div>
@@ -199,13 +199,13 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
       )}
 
       {config.enabled && status.state === 'ok' && models.length === 0 && (
-        <p className='mt-4 text-sm text-slate-400 italic'>
+        <p className='mt-4 text-sm text-muted italic'>
           No models reporting a quota window right now.
         </p>
       )}
 
       {status.message && status.state !== 'ok' && (
-        <p className='mt-4 text-sm text-amber-300/90 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2'>
+        <p className='mt-4 text-sm text-warn/90 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2'>
           {status.message}
         </p>
       )}
@@ -213,7 +213,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
       {config.enabled && (
         <>
           <div className='mt-6'>
-            <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold mb-3'>
+            <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-3'>
               Notifications
             </p>
             <div className='grid grid-cols-1 gap-3'>
@@ -236,7 +236,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
 
           <div className='mt-5'>
             <label className='flex flex-col gap-1.5'>
-              <span className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>
+              <span className='text-xs uppercase tracking-widest text-faint font-semibold'>
                 Poll interval
               </span>
               <div className='flex items-center gap-2'>
@@ -250,12 +250,12 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                     const next = Math.max(60, Math.min(3600, Number(e.target.value) || 300));
                     onChange({ intervalMs: next * 1000 });
                   }}
-                  className='w-24 bg-slate-900/60 border border-slate-700/70 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/60'
+                  className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
                 />
-                <span className='text-xs text-slate-500'>seconds (min 60)</span>
+                <span className='text-xs text-faint'>seconds (min 60)</span>
               </div>
             </label>
-            <p className='mt-3 text-xs text-slate-500'>
+            <p className='mt-3 text-xs text-faint'>
               The bubble surfaces just two models — Claude Opus 4.6 and Gemini 3.5 Flash (High).
               All other models stay visible in the list above.
             </p>
@@ -267,7 +267,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
         <button
           onClick={onRefresh}
           disabled={!config.enabled}
-          className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
+          className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
         >
           Refresh now
         </button>

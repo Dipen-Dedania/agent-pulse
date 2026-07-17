@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AgentState } from '../../../common/types';
 import { ClawdMascot } from '../Bubble/ClawdMascot';
+import { useIsDark } from '../../hooks/useTheme';
 
 // ── First-run tour coach card ────────────────────────────────────────────────
 // Rendered in its own transparent always-on-top window beside the demo bubble
@@ -105,6 +106,8 @@ export const TourCard: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index]);
 
+  const isDark = useIsDark();
+
   return (
     <div ref={rootRef} className='inline-block font-sans' style={{ padding: SHADOW_PAD }}>
       <motion.div
@@ -114,11 +117,11 @@ export const TourCard: React.FC = () => {
         className='rounded-2xl overflow-hidden'
         style={{
           width: CARD_WIDTH,
-          background: 'rgba(17,17,24,0.88)',
+          background: isDark ? 'rgba(17,17,24,0.88)' : 'rgba(255,255,255,0.92)',
           backdropFilter: 'blur(18px)',
           WebkitBackdropFilter: 'blur(18px)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
+          border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.10)',
+          boxShadow: isDark ? '0 8px 28px rgba(0,0,0,0.55)' : '0 8px 28px rgba(0,0,0,0.12)',
         }}
       >
         <div className='p-5'>
@@ -136,15 +139,15 @@ export const TourCard: React.FC = () => {
                   <ClawdMascot state={step.demoState} width={44} />
                 </div>
                 <div className='min-w-0'>
-                  <p className='text-[10px] font-semibold uppercase tracking-widest text-slate-500'>
+                  <p className='text-[10px] font-semibold uppercase tracking-widest text-faint'>
                     {step.kicker}
                   </p>
-                  <h2 className='text-[15px] font-bold text-white leading-snug mt-0.5'>
+                  <h2 className='text-[15px] font-bold text-strong leading-snug mt-0.5'>
                     {step.title}
                   </h2>
                 </div>
               </div>
-              <p className='text-[13px] text-slate-300 leading-relaxed mt-3'>
+              <p className='text-[13px] text-body leading-relaxed mt-3'>
                 {step.body}
               </p>
             </motion.div>
@@ -172,7 +175,7 @@ export const TourCard: React.FC = () => {
             ) : (
               <button
                 onClick={() => finish(false)}
-                className='text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer'
+                className='text-xs text-faint hover:text-body transition-colors cursor-pointer'
               >
                 Skip tour
               </button>

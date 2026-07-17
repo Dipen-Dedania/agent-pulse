@@ -116,10 +116,10 @@ export const TokensTimelineCard: React.FC = () => {
 
   const bucketTip = (b: TokensTimelineBucket) => (
     <span>
-      <span className='font-semibold text-white'>
+      <span className='font-semibold text-strong'>
         {isRatio ? `${(cacheRatio(b) * 100).toFixed(0)}% cache` : formatCompactNumber(b.tokensIn + b.tokensOut)}
       </span>
-      <span className='text-slate-400'>
+      <span className='text-muted'>
         {' '}· {b.date} · in {formatCompactNumber(b.tokensIn)} / out {formatCompactNumber(b.tokensOut)}
         {' '}· cache {formatCompactNumber(b.cacheRead)} · {formatUsd(b.costUsd)} est.
       </span>
@@ -164,19 +164,19 @@ export const TokensTimelineCard: React.FC = () => {
       ) : (
         <div>
           {/* Peak/average annotation carries the scale the missing y-axis would. */}
-          <div className='mb-2 flex items-center gap-4 text-[11px] text-slate-400 font-mono tabular-nums'>
+          <div className='mb-2 flex items-center gap-4 text-[11px] text-muted font-mono tabular-nums'>
             {isCost ? (
               <>
-                <span>est. spend <span className='text-emerald-300'>{formatUsd(data.totalCostUsd)}</span></span>
-                <span>peak <span className='text-slate-200'>{formatUsd(costBarMax)}</span>/{barsAreWeekly ? 'wk' : 'day'}</span>
+                <span>est. spend <span className='text-ok'>{formatUsd(data.totalCostUsd)}</span></span>
+                <span>peak <span className='text-primary'>{formatUsd(costBarMax)}</span>/{barsAreWeekly ? 'wk' : 'day'}</span>
               </>
             ) : isRatio ? (
-              <span>avg <span className='text-slate-200'>{(avgRatio * 100).toFixed(0)}%</span> of input served from cache</span>
+              <span>avg <span className='text-primary'>{(avgRatio * 100).toFixed(0)}%</span> of input served from cache</span>
             ) : (
               <>
-                <span>fresh <span className='text-slate-200'>{formatCompactNumber(data.totalFresh)}</span></span>
-                <span>cache <span className='text-slate-200'>{formatCompactNumber(data.totalCacheRead)}</span></span>
-                <span>peak <span className='text-slate-200'>{formatCompactNumber(data.maxFresh)}</span>/day</span>
+                <span>fresh <span className='text-primary'>{formatCompactNumber(data.totalFresh)}</span></span>
+                <span>cache <span className='text-primary'>{formatCompactNumber(data.totalCacheRead)}</span></span>
+                <span>peak <span className='text-primary'>{formatCompactNumber(data.maxFresh)}</span>/day</span>
               </>
             )}
           </div>
@@ -196,8 +196,8 @@ export const TokensTimelineCard: React.FC = () => {
                     style={{ height: `${pct}%` }}
                     {...tipHandlers(
                       <span>
-                        <span className='font-semibold text-white'>{formatUsd(b.costUsd)} est.</span>
-                        <span className='text-slate-400'> · {bucketLabel} · fresh {formatCompactNumber(fresh)} tokens</span>
+                        <span className='font-semibold text-strong'>{formatUsd(b.costUsd)} est.</span>
+                        <span className='text-muted'> · {bucketLabel} · fresh {formatCompactNumber(fresh)} tokens</span>
                       </span>,
                     )}
                   />
@@ -243,7 +243,7 @@ export const TokensTimelineCard: React.FC = () => {
               })}
             </svg>
           )}
-          <div className='flex justify-between mt-1 text-[10px] text-slate-500 font-mono'>
+          <div className='flex justify-between mt-1 text-[10px] text-faint font-mono'>
             {axisLabels.map((l) => (
               <span key={l.date}>{l.date}</span>
             ))}

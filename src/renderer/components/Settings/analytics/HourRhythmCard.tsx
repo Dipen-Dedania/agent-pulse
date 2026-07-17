@@ -24,12 +24,12 @@ export const HourRhythmCard: React.FC = () => {
       ) : (
         <div>
           {/* Peak annotation carries the scale the missing y-axis would. */}
-          <p className='text-[11px] text-slate-400 mb-1.5 font-mono tabular-nums'>
-            peak <span className='text-slate-200'>{formatDuration(max)}</span> at {peakHour}:00
+          <p className='text-[11px] text-muted mb-1.5 font-mono tabular-nums'>
+            peak <span className='text-primary'>{formatDuration(max)}</span> at {peakHour}:00
           </p>
           <div className='relative h-24'>
             {/* Recessive hairline at half the peak, for magnitude reading. */}
-            <div className='absolute inset-x-0 top-1/2 h-px bg-slate-700/50' />
+            <div className='absolute inset-x-0 top-1/2 h-px bg-control/50' />
             <div className='relative flex items-end gap-[3px] h-full'>
               {data.buckets.map((ms, hour) => {
                 const pct = ms === 0 ? 0 : Math.max(4, (ms / max) * 100);
@@ -40,8 +40,8 @@ export const HourRhythmCard: React.FC = () => {
                     style={{ height: `${pct}%` }}
                     {...tipHandlers(
                       <span>
-                        <span className='font-semibold text-white'>{formatDuration(ms)}</span>
-                        <span className='text-slate-400'> · {hour}:00–{hour + 1}:00</span>
+                        <span className='font-semibold text-strong'>{formatDuration(ms)}</span>
+                        <span className='text-muted'> · {hour}:00–{hour + 1}:00</span>
                       </span>,
                     )}
                   />
@@ -49,7 +49,7 @@ export const HourRhythmCard: React.FC = () => {
               })}
             </div>
           </div>
-          <div className='flex justify-between mt-1.5 text-[10px] text-slate-500 font-mono'>
+          <div className='flex justify-between mt-1.5 text-[10px] text-faint font-mono'>
             <span>0</span>
             <span>6</span>
             <span>12</span>

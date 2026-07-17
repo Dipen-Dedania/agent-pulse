@@ -13,6 +13,49 @@
   }
 }
 
+/* ── Semantic theme tokens ───────────────────────────────────────────────── */
+:root, [data-theme='dark'] {
+  --ap-base:           oklch(20.8% 0.042 265.755);
+  --ap-glass:          oklch(27.9% 0.041 260.031);
+  --ap-inset:          oklch(20.8% 0.042 265.755);
+  --ap-overlay:        oklch(20.8% 0.042 265.755);
+  --ap-control:        oklch(37.2% 0.044 257.287);
+  --ap-control-strong: oklch(44.6% 0.043 257.281);
+  --ap-edge:           oklch(37.2% 0.044 257.287);
+  --ap-edge-strong:    oklch(44.6% 0.043 257.281);
+  --ap-strong:  #ffffff;
+  --ap-primary: oklch(92.9% 0.013 255.508);
+  --ap-body:    oklch(86.9% 0.022 252.894);
+  --ap-muted:   oklch(70.4% 0.04 256.788);
+  --ap-faint:   oklch(55.4% 0.046 257.417);
+  --ap-ghost:   oklch(44.6% 0.043 257.281);
+  --ap-ok:     oklch(84.5% 0.143 164.978);
+  --ap-warn:   oklch(87.9% 0.169 91.605);
+  --ap-danger: oklch(80.8% 0.114 19.571);
+  --ap-info:   oklch(80.9% 0.105 251.813);
+}
+
+[data-theme='light'] {
+  --ap-base: #f1f5f9;  --ap-glass: #ffffff;  --ap-inset: #94a3b8;
+  --ap-overlay: #ffffff;  --ap-control: #e2e8f0;  --ap-control-strong: #cbd5e1;
+  --ap-edge: #cbd5e1;  --ap-edge-strong: #94a3b8;
+  --ap-strong: #0f172a;  --ap-primary: #1e293b;  --ap-body: #334155;
+  --ap-muted: #64748b;  --ap-faint: #94a3b8;  --ap-ghost: #cbd5e1;
+  --ap-ok: #047857;  --ap-warn: #b45309;  --ap-danger: #b91c1c;  --ap-info: #1d4ed8;
+}
+
+@theme inline {
+  --color-base: var(--ap-base);           --color-glass: var(--ap-glass);
+  --color-inset: var(--ap-inset);         --color-overlay: var(--ap-overlay);
+  --color-control: var(--ap-control);     --color-control-strong: var(--ap-control-strong);
+  --color-edge: var(--ap-edge);           --color-edge-strong: var(--ap-edge-strong);
+  --color-strong: var(--ap-strong);       --color-primary: var(--ap-primary);
+  --color-body: var(--ap-body);           --color-muted: var(--ap-muted);
+  --color-faint: var(--ap-faint);         --color-ghost: var(--ap-ghost);
+  --color-ok: var(--ap-ok);               --color-warn: var(--ap-warn);
+  --color-danger: var(--ap-danger);       --color-info: var(--ap-info);
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -103,3 +146,58 @@ body {
 .ap-diff .token.operator,
 .ap-diff .token.entity,
 .ap-diff .token.url { color: #94a3b8; }
+
+/* ── Light-theme overrides ───────────────────────────────────────────────── */
+[data-theme='light'] .apple-scroll {
+  scrollbar-color: rgba(0,0,0,0.22) transparent;
+}
+[data-theme='light'] .apple-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.22);
+  background-clip: padding-box;
+}
+[data-theme='light'] .apple-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.38);
+  background-clip: padding-box;
+}
+
+[data-theme='light'] .ap-diff {
+  --diff-text-color: #334155;
+  --diff-gutter-insert-background-color: rgba(4, 120, 87, 0.10);
+  --diff-gutter-delete-background-color: rgba(185, 28, 28, 0.10);
+  --diff-code-insert-background-color: rgba(4, 120, 87, 0.10);
+  --diff-code-delete-background-color: rgba(185, 28, 28, 0.10);
+  --diff-code-insert-edit-background-color: rgba(4, 120, 87, 0.25);
+  --diff-code-delete-edit-background-color: rgba(185, 28, 28, 0.25);
+  --diff-gutter-selected-background-color: rgba(100, 116, 139, 0.12);
+  --diff-code-selected-background-color: rgba(100, 116, 139, 0.10);
+}
+[data-theme='light'] .ap-diff .diff-gutter { color: #94a3b8; }
+[data-theme='light'] .ap-diff .diff-hunk-header { color: #94a3b8; }
+[data-theme='light'] .ap-diff .token.comment,
+[data-theme='light'] .ap-diff .token.prolog,
+[data-theme='light'] .ap-diff .token.doctype,
+[data-theme='light'] .ap-diff .token.cdata { color: #94a3b8; }
+[data-theme='light'] .ap-diff .token.punctuation { color: #64748b; }
+[data-theme='light'] .ap-diff .token.keyword,
+[data-theme='light'] .ap-diff .token.boolean,
+[data-theme='light'] .ap-diff .token.atrule,
+[data-theme='light'] .ap-diff .token.important { color: #7c3aed; }
+[data-theme='light'] .ap-diff .token.string,
+[data-theme='light'] .ap-diff .token.char,
+[data-theme='light'] .ap-diff .token.attr-value,
+[data-theme='light'] .ap-diff .token.regex,
+[data-theme='light'] .ap-diff .token.inserted { color: #047857; }
+[data-theme='light'] .ap-diff .token.function,
+[data-theme='light'] .ap-diff .token.class-name { color: #0369a1; }
+[data-theme='light'] .ap-diff .token.number,
+[data-theme='light'] .ap-diff .token.constant,
+[data-theme='light'] .ap-diff .token.symbol { color: #b45309; }
+[data-theme='light'] .ap-diff .token.tag,
+[data-theme='light'] .ap-diff .token.selector,
+[data-theme='light'] .ap-diff .token.deleted { color: #b91c1c; }
+[data-theme='light'] .ap-diff .token.attr-name,
+[data-theme='light'] .ap-diff .token.property,
+[data-theme='light'] .ap-diff .token.variable { color: #c2410c; }
+[data-theme='light'] .ap-diff .token.operator,
+[data-theme='light'] .ap-diff .token.entity,
+[data-theme='light'] .ap-diff .token.url { color: #64748b; }

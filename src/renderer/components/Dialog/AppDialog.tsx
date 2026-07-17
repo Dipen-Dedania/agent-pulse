@@ -113,7 +113,7 @@ export const AppDialogHost: React.FC = () => {
           onClick={() => settle(false)}
         >
           <motion.div
-            className='w-full max-w-md mx-4 bg-slate-900/95 border border-slate-700/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-3'
+            className='w-full max-w-md mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-3'
             initial={{ opacity: 0, scale: 0.95, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
@@ -123,13 +123,13 @@ export const AppDialogHost: React.FC = () => {
             aria-modal='true'
             aria-label={current.title}
           >
-            <h2 className='text-base font-bold text-white leading-tight'>{current.title}</h2>
-            <p className='text-sm text-slate-300 leading-relaxed whitespace-pre-wrap break-words'>{current.message}</p>
+            <h2 className='text-base font-bold text-strong leading-tight'>{current.title}</h2>
+            <p className='text-sm text-body leading-relaxed whitespace-pre-wrap break-words'>{current.message}</p>
             <div className='flex items-center justify-end gap-2 mt-2'>
               {current.kind === 'confirm' && (
                 <button
                   onClick={() => settle(false)}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 cursor-pointer transition-colors'
+                  className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
                 >
                   {current.cancelLabel}
                 </button>
@@ -137,7 +137,7 @@ export const AppDialogHost: React.FC = () => {
               <button
                 autoFocus
                 onClick={() => settle(true)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer transition-colors ${
+                className={`px-4 py-2 rounded-lg text-sm font-medium text-strong cursor-pointer transition-colors ${
                   current.danger ? 'bg-red-600 hover:bg-red-500' : 'bg-blue-600 hover:bg-blue-500'
                 }`}
               >

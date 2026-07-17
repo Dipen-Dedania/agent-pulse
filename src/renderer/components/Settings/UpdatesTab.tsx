@@ -23,19 +23,19 @@ function formatRelative(ts: number | null): string {
 }
 
 const STATUS_PILL: Record<UpdaterState['status'], { label: string; classes: string }> = {
-  idle:            { label: 'Idle',                  classes: 'bg-slate-600/30 border-slate-500/40 text-slate-300' },
-  disabled:        { label: 'Disabled (dev mode)',   classes: 'bg-slate-600/30 border-slate-500/40 text-slate-400' },
-  unsupported:     { label: 'Manual install',        classes: 'bg-amber-500/15 border-amber-500/30 text-amber-300' },
-  checking:        { label: 'Checking…',             classes: 'bg-blue-500/15 border-blue-500/30 text-blue-300' },
-  available:       { label: 'Update available',      classes: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' },
-  'not-available': { label: 'Up to date',            classes: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' },
-  downloading:     { label: 'Downloading…',          classes: 'bg-blue-500/15 border-blue-500/30 text-blue-300' },
-  downloaded:      { label: 'Ready to install',      classes: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' },
-  error:           { label: 'Error',                 classes: 'bg-red-500/15 border-red-500/30 text-red-300' },
+  idle:            { label: 'Idle',                  classes: 'bg-control-strong/30 border-edge-strong/40 text-body' },
+  disabled:        { label: 'Disabled (dev mode)',   classes: 'bg-control-strong/30 border-edge-strong/40 text-muted' },
+  unsupported:     { label: 'Manual install',        classes: 'bg-amber-500/15 border-amber-500/30 text-warn' },
+  checking:        { label: 'Checking…',             classes: 'bg-blue-500/15 border-blue-500/30 text-info' },
+  available:       { label: 'Update available',      classes: 'bg-emerald-500/15 border-emerald-500/30 text-ok' },
+  'not-available': { label: 'Up to date',            classes: 'bg-emerald-500/15 border-emerald-500/30 text-ok' },
+  downloading:     { label: 'Downloading…',          classes: 'bg-blue-500/15 border-blue-500/30 text-info' },
+  downloaded:      { label: 'Ready to install',      classes: 'bg-emerald-500/15 border-emerald-500/30 text-ok' },
+  error:           { label: 'Error',                 classes: 'bg-red-500/15 border-red-500/30 text-danger' },
 };
 
 const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className }) => (
-  <div className={`mb-5 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl ${className ?? ''}`}>
+  <div className={`mb-5 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl ${className ?? ''}`}>
     {children}
   </div>
 );
@@ -61,7 +61,7 @@ export const UpdatesTab: React.FC = () => {
   }, []);
 
   if (!state) {
-    return <p className='text-slate-400 text-sm'>Loading…</p>;
+    return <p className='text-muted text-sm'>Loading…</p>;
   }
 
   const pill = STATUS_PILL[state.status];
@@ -115,8 +115,8 @@ export const UpdatesTab: React.FC = () => {
       )}
       {isDev && (
         <Card>
-          <p className='font-semibold text-white'>Auto-update is off in dev mode</p>
-          <p className='text-sm text-slate-400 mt-1'>
+          <p className='font-semibold text-strong'>Auto-update is off in dev mode</p>
+          <p className='text-sm text-muted mt-1'>
             electron-updater only operates on packaged builds. Ship a build via the
             "Build Distribution" workflow to test the real flow.
           </p>
@@ -127,8 +127,8 @@ export const UpdatesTab: React.FC = () => {
       <Card>
         <div className='flex items-center justify-between gap-4 mb-3'>
           <div>
-            <p className='text-xs font-semibold uppercase tracking-widest text-slate-500'>Current version</p>
-            <p className='text-2xl font-bold text-white mt-1 font-mono'>{state.currentVersion}</p>
+            <p className='text-xs font-semibold uppercase tracking-widest text-faint'>Current version</p>
+            <p className='text-2xl font-bold text-strong mt-1 font-mono'>{state.currentVersion}</p>
           </div>
           <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${pill.classes}`}>
             <span className='w-1.5 h-1.5 rounded-full bg-current' />
@@ -136,19 +136,19 @@ export const UpdatesTab: React.FC = () => {
           </span>
         </div>
         <div className='flex items-center justify-between gap-4'>
-          <p className='text-xs text-slate-500'>
+          <p className='text-xs text-faint'>
             Last checked {formatRelative(state.lastCheckedAt)}
           </p>
           <button
             onClick={handleCheck}
             disabled={isInProgress || isDev || isMacUnsupported}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/60 disabled:text-slate-500 disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
+            className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/60 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
           >
             {state.status === 'checking' ? 'Checking…' : 'Check for updates'}
           </button>
         </div>
         {state.errorMessage && (
-          <p className='mt-3 text-xs text-red-300 font-mono bg-red-500/10 border border-red-500/30 rounded-lg p-2'>
+          <p className='mt-3 text-xs text-danger font-mono bg-red-500/10 border border-red-500/30 rounded-lg p-2'>
             {state.errorMessage}
           </p>
         )}
@@ -157,21 +157,21 @@ export const UpdatesTab: React.FC = () => {
       {/* Available / downloading / ready */}
       {state.info && (state.status === 'available' || state.status === 'downloading' || state.status === 'downloaded') && (
         <Card>
-          <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2'>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-2'>
             New version
           </p>
           <div className='flex items-baseline justify-between gap-4 mb-3'>
-            <p className='text-xl font-bold text-white font-mono'>{state.info.version}</p>
+            <p className='text-xl font-bold text-strong font-mono'>{state.info.version}</p>
             {state.info.releaseDate && (
-              <p className='text-xs text-slate-500'>
+              <p className='text-xs text-faint'>
                 Released {new Date(state.info.releaseDate).toLocaleDateString()}
               </p>
             )}
           </div>
 
           {state.info.releaseNotes && (
-            <div className='mb-4 bg-slate-900/40 border border-slate-700/40 rounded-xl p-3 max-h-48 overflow-y-auto apple-scroll'>
-              <pre className='text-xs text-slate-300 whitespace-pre-wrap leading-relaxed font-sans'>
+            <div className='mb-4 bg-glass/40 border border-edge/40 rounded-xl p-3 max-h-48 overflow-y-auto apple-scroll'>
+              <pre className='text-xs text-body whitespace-pre-wrap leading-relaxed font-sans'>
                 {state.info.releaseNotes}
               </pre>
             </div>
@@ -179,7 +179,7 @@ export const UpdatesTab: React.FC = () => {
 
           {state.status === 'downloading' && state.progress && (
             <div className='mb-4'>
-              <div className='flex items-center justify-between text-xs text-slate-400 mb-1.5'>
+              <div className='flex items-center justify-between text-xs text-muted mb-1.5'>
                 <span>{state.progress.percent}%</span>
                 <span>
                   {formatBytes(state.progress.transferred)} / {formatBytes(state.progress.total)}
@@ -188,7 +188,7 @@ export const UpdatesTab: React.FC = () => {
                   )}
                 </span>
               </div>
-              <div className='w-full h-2 bg-slate-700/50 rounded-full overflow-hidden'>
+              <div className='w-full h-2 bg-control/50 rounded-full overflow-hidden'>
                 <div
                   className='h-full bg-blue-500 transition-all duration-300'
                   style={{ width: `${state.progress.percent}%` }}
@@ -218,11 +218,11 @@ export const UpdatesTab: React.FC = () => {
 
       {/* Preferences */}
       <Card>
-        <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3'>Preferences</p>
+        <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>Preferences</p>
         <div className='flex items-center gap-4'>
           <div className='flex-1'>
-            <p className='font-semibold text-white leading-tight'>Check for updates automatically</p>
-            <p className='text-xs text-slate-400 mt-1'>
+            <p className='font-semibold text-strong leading-tight'>Check for updates automatically</p>
+            <p className='text-xs text-muted mt-1'>
               Runs a background check shortly after launch and every six hours after that.
             </p>
           </div>
@@ -230,7 +230,7 @@ export const UpdatesTab: React.FC = () => {
             onClick={handleAutoCheckToggle}
             disabled={isDev || isMacUnsupported}
             className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 ${
-              state.autoCheck ? 'bg-blue-500' : 'bg-slate-600'
+              state.autoCheck ? 'bg-blue-500' : 'bg-control-strong'
             } ${(isDev || isMacUnsupported) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             aria-label='Toggle automatic update checks'
           >

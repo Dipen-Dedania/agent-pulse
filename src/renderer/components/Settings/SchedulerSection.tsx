@@ -57,7 +57,7 @@ const Toggle: React.FC<{ on: boolean; onClick: () => void; label: string; small?
     onClick={onClick}
     aria-label={label}
     className={`relative ${small ? 'w-10 h-5' : 'w-11 h-6'} rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-      on ? 'bg-blue-500' : 'bg-slate-600'
+      on ? 'bg-blue-500' : 'bg-control-strong'
     }`}
   >
     <span
@@ -80,12 +80,12 @@ const SlotRow: React.FC<{
     onChange({ ...slot, days });
   };
   return (
-    <div className={`bg-slate-900/40 border border-slate-700/50 rounded-xl p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
+    <div className={`bg-glass/40 border border-edge/50 rounded-xl p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
       <input
         type='time'
         value={slot.time}
         onChange={(e) => onChange({ ...slot, time: e.target.value })}
-        className='bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500/60'
+        className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
       />
       <div className='flex gap-1'>
         {WEEKDAYS.map((label, d) => {
@@ -95,7 +95,7 @@ const SlotRow: React.FC<{
               key={d}
               onClick={() => toggleDay(d)}
               className={`w-7 h-7 rounded-md text-[11px] font-medium cursor-pointer transition-colors ${
-                active ? 'bg-blue-500/80 text-white' : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'
+                active ? 'bg-blue-500/80 text-white' : 'bg-control/50 text-muted hover:bg-control'
               }`}
               title={label}
             >
@@ -108,7 +108,7 @@ const SlotRow: React.FC<{
         <Toggle small on={slot.enabled} onClick={() => onChange({ ...slot, enabled: !slot.enabled })} label='Toggle slot' />
         <button
           onClick={onRemove}
-          className='w-7 h-7 flex items-center justify-center rounded-md bg-slate-700/50 hover:bg-red-500/30 text-slate-400 hover:text-red-300 text-sm cursor-pointer transition-colors'
+          className='w-7 h-7 flex items-center justify-center rounded-md bg-control/50 hover:bg-red-500/30 text-muted hover:text-danger text-sm cursor-pointer transition-colors'
           aria-label='Remove slot'
         >
           ✕
@@ -160,25 +160,25 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
   ];
 
   return (
-    <section className='mt-6 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl'>
+    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
-          <h2 className='text-lg font-bold text-white'>Cowork Scheduler</h2>
-          <p className='text-sm text-slate-400 mt-1'>
-            Open a fresh 5-hour window on your schedule with one tiny <code className='text-slate-300'>claude -p</code> ping
+          <h2 className='text-lg font-bold text-strong'>Cowork Scheduler</h2>
+          <p className='text-sm text-muted mt-1'>
+            Open a fresh 5-hour window on your schedule with one tiny <code className='text-body'>claude -p</code> ping
             (which also refreshes your login). Turns the rolling window into a daily cadence.
           </p>
         </div>
       </div>
 
       {/* Mode switch */}
-      <div className='mt-5 flex gap-1 p-1 bg-slate-900/50 border border-slate-700/60 rounded-xl w-fit'>
+      <div className='mt-5 flex gap-1 p-1 bg-glass/50 border border-edge/60 rounded-xl w-fit'>
         {MODES.map((m) => (
           <button
             key={m.id}
             onClick={() => setMode(m.id)}
             className={`px-4 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
-              config.mode === m.id ? 'bg-slate-700 text-white shadow-inner' : 'text-slate-400 hover:text-white'
+              config.mode === m.id ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
             }`}
           >
             {m.label}
@@ -187,19 +187,19 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
       </div>
 
       {/* Status glance */}
-      <div className='mt-4 bg-slate-900/50 border border-slate-700/60 rounded-xl px-4 py-3'>
-        <p className='text-sm text-white'>{glance}</p>
+      <div className='mt-4 bg-glass/50 border border-edge/60 rounded-xl px-4 py-3'>
+        <p className='text-sm text-strong'>{glance}</p>
         {status.lastRun && (
-          <p className='text-xs mt-1 text-slate-400'>
+          <p className='text-xs mt-1 text-muted'>
             Last {status.lastRun.kind} {formatClock(status.lastRun.at)} —{' '}
             {status.lastRun.ok ? (
-              <span className='text-emerald-300'>ok</span>
+              <span className='text-ok'>ok</span>
             ) : (
-              <span className='text-red-300'>failed: {status.lastRun.reason}</span>
+              <span className='text-danger'>failed: {status.lastRun.reason}</span>
             )}
           </p>
         )}
-        <p className='text-xs mt-1 text-slate-500'>
+        <p className='text-xs mt-1 text-faint'>
           {status.openersToday} opener{status.openersToday === 1 ? '' : 's'} fired today · cap {config.maxOpenersPerDay}/day
         </p>
       </div>
@@ -208,11 +208,11 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
       {config.mode === 'fixed' && (
         <div className='mt-5'>
           <div className='flex items-center justify-between mb-3'>
-            <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Slots</p>
+            <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Slots</p>
             <div className='flex gap-2'>
               <button
                 onClick={applyPreset}
-                className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'
+                className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
               >
                 Preset 6 · 11 · 4
               </button>
@@ -225,7 +225,7 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
             </div>
           </div>
           {config.fixed.length === 0 ? (
-            <p className='text-sm text-slate-400'>No slots yet. Add one, or apply the 6 · 11 · 4 preset.</p>
+            <p className='text-sm text-muted'>No slots yet. Add one, or apply the 6 · 11 · 4 preset.</p>
           ) : (
             <div className='flex flex-col gap-2'>
               {config.fixed.map((slot, i) => (
@@ -233,7 +233,7 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
               ))}
             </div>
           )}
-          <p className='text-xs text-slate-500 mt-2'>
+          <p className='text-xs text-faint mt-2'>
             Space slots ≥5h apart so each lands a fresh window — a ping inside a live window just rides it.
           </p>
         </div>
@@ -243,45 +243,45 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
       {config.mode === 'adaptive' && (
         <div className='mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4'>
           <label className='flex flex-col gap-1.5'>
-            <span className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Work start</span>
+            <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Work start</span>
             <input
               type='time'
               value={config.adaptive.workHours.start}
               onChange={(e) => onChange({ adaptive: { ...config.adaptive, workHours: { ...config.adaptive.workHours, start: e.target.value } } })}
-              className='bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/60'
+              className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
             />
           </label>
           <label className='flex flex-col gap-1.5'>
-            <span className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Work end</span>
+            <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Work end</span>
             <input
               type='time'
               value={config.adaptive.workHours.end}
               onChange={(e) => onChange({ adaptive: { ...config.adaptive, workHours: { ...config.adaptive.workHours, end: e.target.value } } })}
-              className='bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/60'
+              className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
             />
           </label>
           <label className='flex flex-col gap-1.5'>
-            <span className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Max windows/day</span>
+            <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Max windows/day</span>
             <input
               type='number'
               min={1}
               max={10}
               value={config.adaptive.maxWindowsPerDay}
               onChange={(e) => onChange({ adaptive: { ...config.adaptive, maxWindowsPerDay: Math.max(1, Math.min(10, Number(e.target.value) || 1)) } })}
-              className='w-24 bg-slate-900/60 border border-slate-700/70 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/60'
+              className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
             />
           </label>
-          <p className='text-xs text-slate-500 sm:col-span-3'>
+          <p className='text-xs text-faint sm:col-span-3'>
             Opens a window at each block's reset within work hours. Shifts forward if you message Claude off-script.
           </p>
         </div>
       )}
 
       {/* Token nudge */}
-      <div className='mt-5 bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 flex items-start gap-3'>
+      <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4 flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
-          <p className='font-medium text-white text-sm leading-tight'>Token-refresh nudge</p>
-          <p className='text-xs text-slate-400 mt-1'>
+          <p className='font-medium text-strong text-sm leading-tight'>Token-refresh nudge</p>
+          <p className='text-xs text-muted mt-1'>
             Fire a refresh ping ~{Math.round(config.tokenNudge.leadMs / 60000)} min before your login expires, when no
             opener is already coming. Keeps the usage panel from going stale (mainly in Off mode).
           </p>
@@ -297,24 +297,24 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
       {/* Daily cap + cost + test */}
       <div className='mt-5 flex flex-wrap items-end gap-4'>
         <label className='flex flex-col gap-1.5'>
-          <span className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Max openers/day</span>
+          <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Max openers/day</span>
           <input
             type='number'
             min={1}
             max={24}
             value={config.maxOpenersPerDay}
             onChange={(e) => onChange({ maxOpenersPerDay: Math.max(1, Math.min(24, Number(e.target.value) || 1)) })}
-            className='w-24 bg-slate-900/60 border border-slate-700/70 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/60'
+            className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
           />
         </label>
         <button
           onClick={handleTest}
           disabled={testing}
-          className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 text-white transition-colors cursor-pointer'
+          className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white transition-colors cursor-pointer'
         >
           {testing ? 'Sending…' : 'Send test ping now'}
         </button>
-        <p className='text-xs text-slate-500 flex-1 min-w-[12rem]'>
+        <p className='text-xs text-faint flex-1 min-w-[12rem]'>
           Each ping ≈ {formatUsd(OPENER_COST)} at Haiku API rates ({formatUsd(OPENER_COST * config.maxOpenersPerDay)}/day
           at the cap). A test ping counts toward today's cap.
         </p>

@@ -10,13 +10,13 @@ import { EmptyState, SkeletonLine, formatDuration } from './shared';
 const DeltaChip: React.FC<{ current: number; previous: number }> = ({ current, previous }) => {
   if (previous <= 0) {
     return current > 0
-      ? <span className='text-[10px] text-slate-500'>new this period</span>
-      : <span className='text-[10px] text-slate-600'>—</span>;
+      ? <span className='text-[10px] text-faint'>new this period</span>
+      : <span className='text-[10px] text-ghost'>—</span>;
   }
   const pct = ((current - previous) / previous) * 100;
   if (!Number.isFinite(pct)) return null;
   const up = pct >= 0;
-  const cls = up ? 'text-emerald-300' : 'text-slate-400';
+  const cls = up ? 'text-ok' : 'text-muted';
   return (
     <span className={`text-[10px] font-medium ${cls}`}>
       {up ? '↑' : '↓'} {Math.abs(pct) >= 100 ? Math.round(Math.abs(pct)) : Math.abs(pct).toFixed(1)}%
@@ -30,12 +30,12 @@ const StatTile: React.FC<{
   delta?: React.ReactNode;
   sub?: string;
 }> = ({ label, value, delta, sub }) => (
-  <div className='flex-1 min-w-0 bg-slate-900/40 border border-slate-700/40 rounded-xl px-4 py-3'>
-    <p className='text-[10px] uppercase tracking-widest text-slate-500'>{label}</p>
-    <p className='text-xl font-semibold text-white leading-tight mt-1 truncate' title={value}>{value}</p>
+  <div className='flex-1 min-w-0 bg-glass/40 border border-edge/40 rounded-xl px-4 py-3'>
+    <p className='text-[10px] uppercase tracking-widest text-faint'>{label}</p>
+    <p className='text-xl font-semibold text-strong leading-tight mt-1 truncate' title={value}>{value}</p>
     <div className='mt-1 flex items-center gap-1.5 min-h-[14px]'>
       {delta}
-      {sub && <span className='text-[10px] text-slate-500 truncate'>{sub}</span>}
+      {sub && <span className='text-[10px] text-faint truncate'>{sub}</span>}
     </div>
   </div>
 );
@@ -56,7 +56,7 @@ export const SummaryHeroCard: React.FC = () => {
   const { current, previous } = data;
   if (current.sessions === 0 && previous.sessions === 0) {
     return (
-      <div className='mb-5 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5'>
+      <div className='mb-5 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5'>
         <EmptyState message='No agent activity in this window yet.' />
       </div>
     );

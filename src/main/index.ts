@@ -1,4 +1,4 @@
-import { app, ipcMain, shell, BrowserWindow, Menu, dialog, screen } from 'electron';
+import { app, ipcMain, shell, BrowserWindow, Menu, dialog, screen, nativeTheme } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
 import { TooltipManager } from './windows/tooltip-window';
 import { TourManager } from './windows/tour-manager';
@@ -10,13 +10,13 @@ import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
 import path from 'path';
-import { loadConfig, saveConfig, defaultStatusLineConfig, migrateBacklogScheduler, migrateBacklogTemplates, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, CopilotUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
+import { loadConfig, saveConfig, defaultStatusLineConfig, migrateBacklogScheduler, migrateBacklogTemplates, migrateAppearance, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, CopilotUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
 import { BacklogSchedulerConfig, BacklogTemplate } from '../common/backlog-types';
 import { initBacklogDb, closeBacklogDb } from './backlog/db';
 import { BacklogStore } from './backlog/store';
 import { BacklogEngine } from './backlog/engine';
 import { registerBacklogIpc } from './backlog/ipc';
-import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, DisplayInfo, TourState } from '../common/types';
+import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, DisplayInfo, TourState, AppearanceConfig } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
 import { isPatternSafe } from './guardrails/engine';
@@ -213,6 +213,7 @@ class AgentPulseApp {
         Menu.setApplicationMenu(null);
       }
       this.setupIpc();
+      this.applyThemeSource();
       // Refresh an already-installed status line to this app version so script
       // improvements (e.g. icon rendering) propagate on upgrade without a manual
       // re-apply. No-ops unless we own the installed status line.
@@ -781,6 +782,18 @@ class AgentPulseApp {
       return next;
     });
 
+    // ── Appearance IPC ────────────────────────────────────────────────────
+    ipcMain.handle('appearance:update-config', (_event, partial: Partial<AppearanceConfig>) => {
+      const next = migrateAppearance({ ...this.userConfig.appearance, ...partial });
+      this.userConfig.appearance = next;
+      saveConfig(this.userConfig);
+      this.applyThemeSource();
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('appearance:config-updated', next);
+      }
+      return next;
+    });
+
     // ── Tour / setup checklist IPC ────────────────────────────────────────
     // `tour:start`, `tour:demo-state`, `tour:card-measured`, and `tour:finish`
     // are owned by TourManager.init(); only the persisted state lives here.
@@ -810,6 +823,11 @@ class AgentPulseApp {
         packaged: app.isPackaged,
       };
     });
+  }
+
+  private applyThemeSource() {
+    const t = this.userConfig.appearance.theme;
+    nativeTheme.themeSource = t === 'auto' ? 'system' : t;
   }
 
   // Renderer-facing slice of the tour config (completedAt stays internal).

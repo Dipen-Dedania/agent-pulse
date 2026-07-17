@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from 'electron';
+import { BrowserWindow, app, nativeTheme } from 'electron';
 import path from 'path';
 import { ENABLE_APP_MENU } from '../feature-flags';
 
@@ -35,6 +35,7 @@ export class SettingsWindow {
       height: 680,
       title: 'Agent Pulse Settings',
       icon: getAppIconPath(),
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f172a' : '#f8fafc',
       autoHideMenuBar: !ENABLE_APP_MENU,
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'), // Will create preload later

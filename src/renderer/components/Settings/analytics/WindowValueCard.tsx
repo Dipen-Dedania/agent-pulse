@@ -6,10 +6,10 @@ import { useWindowValue } from './useAnalytics';
 import { Card, CostBreakdownContent, EmptyState, InfoPill, InfoTooltip, SkeletonLine, formatCompactNumber } from './shared';
 
 const WindowBlock: React.FC<{ label: string; slice: WindowValueSlice }> = ({ label, slice }) => (
-  <div className='flex-1 min-w-0 bg-slate-900/40 border border-slate-700/40 rounded-xl p-4'>
-    <p className='text-[10px] uppercase tracking-widest text-slate-500 mb-1'>{label}</p>
+  <div className='flex-1 min-w-0 bg-glass/40 border border-edge/40 rounded-xl p-4'>
+    <p className='text-[10px] uppercase tracking-widest text-faint mb-1'>{label}</p>
     <div className='flex items-center gap-1.5'>
-      <p className='text-2xl font-bold text-emerald-300 leading-tight font-mono tabular-nums'>
+      <p className='text-2xl font-bold text-ok leading-tight font-mono tabular-nums'>
         {formatUsd(slice.costUsd)}
       </p>
       <InfoTooltip label={`${label} cost breakdown`}>
@@ -23,11 +23,11 @@ const WindowBlock: React.FC<{ label: string; slice: WindowValueSlice }> = ({ lab
         />
       </InfoTooltip>
     </div>
-    <p className='text-[11px] text-slate-500 mt-1 font-mono'>
+    <p className='text-[11px] text-faint mt-1 font-mono'>
       in {formatCompactNumber(slice.tokensIn)} · out {formatCompactNumber(slice.tokensOut)}
       {' · '}cache {formatCompactNumber(slice.cacheRead)}
     </p>
-    <p className='text-[10px] text-slate-600 mt-0.5'>
+    <p className='text-[10px] text-ghost mt-0.5'>
       {slice.sessions} {slice.sessions === 1 ? 'session' : 'sessions'}
     </p>
   </div>
@@ -45,7 +45,7 @@ export const WindowValueCard: React.FC = () => {
       <div className='mb-3 flex items-center gap-1.5'>
         <InfoPill>Estimated cost</InfoPill>
         <InfoTooltip label='How this cost is estimated'>
-          <span className='text-[11px] text-slate-300 leading-snug'>
+          <span className='text-[11px] text-body leading-snug'>
             Trailing windows priced at API list rates. The flat-rate plan you pay is fixed — this is what the
             same usage would cost on the API.
           </span>
@@ -62,12 +62,12 @@ export const WindowValueCard: React.FC = () => {
             <WindowBlock label='Last 5 hours' slice={data.last5h} />
             <WindowBlock label='Last 7 days'  slice={data.last7d} />
           </div>
-          <div className='mt-3 flex items-center justify-between text-[11px] text-slate-400 font-mono tabular-nums'>
+          <div className='mt-3 flex items-center justify-between text-[11px] text-muted font-mono tabular-nums'>
             <span>
-              Burn rate <span className='text-slate-200'>{formatUsd(data.burnRateUsdPerHour)}/hr</span>
+              Burn rate <span className='text-primary'>{formatUsd(data.burnRateUsdPerHour)}/hr</span>
             </span>
             <span>
-              Projected 5h at this pace <span className='text-amber-300'>{formatUsd(data.projected5hUsd)}</span>
+              Projected 5h at this pace <span className='text-warn'>{formatUsd(data.projected5hUsd)}</span>
             </span>
           </div>
         </>

@@ -14,8 +14,8 @@ export interface ProjectColor {
 
 const PALETTE: ProjectColor[] = [
   {
-    chip: 'bg-blue-500/15 text-blue-300',
-    filter: 'bg-blue-500/10 text-blue-300/80 hover:bg-blue-500/20 hover:text-blue-200',
+    chip: 'bg-blue-500/15 text-info',
+    filter: 'bg-blue-500/10 text-info/80 hover:bg-blue-500/20 hover:text-blue-200',
     filterActive: 'bg-blue-500/30 text-blue-100 shadow-inner',
   },
   {
@@ -24,13 +24,13 @@ const PALETTE: ProjectColor[] = [
     filterActive: 'bg-violet-500/30 text-violet-100 shadow-inner',
   },
   {
-    chip: 'bg-emerald-500/15 text-emerald-300',
-    filter: 'bg-emerald-500/10 text-emerald-300/80 hover:bg-emerald-500/20 hover:text-emerald-200',
+    chip: 'bg-emerald-500/15 text-ok',
+    filter: 'bg-emerald-500/10 text-ok/80 hover:bg-emerald-500/20 hover:text-emerald-200',
     filterActive: 'bg-emerald-500/30 text-emerald-100 shadow-inner',
   },
   {
-    chip: 'bg-amber-500/15 text-amber-300',
-    filter: 'bg-amber-500/10 text-amber-300/80 hover:bg-amber-500/20 hover:text-amber-200',
+    chip: 'bg-amber-500/15 text-warn',
+    filter: 'bg-amber-500/10 text-warn/80 hover:bg-amber-500/20 hover:text-amber-200',
     filterActive: 'bg-amber-500/30 text-amber-100 shadow-inner',
   },
   {

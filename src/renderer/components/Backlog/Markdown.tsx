@@ -48,14 +48,14 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
       out.push(
         <code
           key={key}
-          className='px-1 py-0.5 rounded bg-slate-800/80 text-emerald-300 font-mono text-[0.85em]'
+          className='px-1 py-0.5 rounded bg-glass/80 text-ok font-mono text-[0.85em]'
         >
           {tok.slice(1, -1)}
         </code>,
       );
     } else if (tok.startsWith('**') || tok.startsWith('__')) {
       out.push(
-        <strong key={key} className='font-semibold text-white'>
+        <strong key={key} className='font-semibold text-strong'>
           {renderInline(tok.slice(2, -2), key)}
         </strong>,
       );
@@ -103,12 +103,12 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
 
 // ---- Block-level parsing -----------------------------------------------
 const HEADING_CLASS: Record<number, string> = {
-  1: 'text-lg font-bold text-white mt-4 mb-2 first:mt-0',
-  2: 'text-base font-bold text-white mt-4 mb-2 first:mt-0',
-  3: 'text-sm font-semibold text-slate-100 mt-3 mb-1.5 first:mt-0',
-  4: 'text-sm font-semibold text-slate-200 mt-3 mb-1.5 first:mt-0',
-  5: 'text-xs font-semibold uppercase tracking-wide text-slate-300 mt-3 mb-1 first:mt-0',
-  6: 'text-xs font-semibold uppercase tracking-wide text-slate-400 mt-3 mb-1 first:mt-0',
+  1: 'text-lg font-bold text-strong mt-4 mb-2 first:mt-0',
+  2: 'text-base font-bold text-strong mt-4 mb-2 first:mt-0',
+  3: 'text-sm font-semibold text-primary mt-3 mb-1.5 first:mt-0',
+  4: 'text-sm font-semibold text-primary mt-3 mb-1.5 first:mt-0',
+  5: 'text-xs font-semibold uppercase tracking-wide text-body mt-3 mb-1 first:mt-0',
+  6: 'text-xs font-semibold uppercase tracking-wide text-muted mt-3 mb-1 first:mt-0',
 };
 
 // A GFM table separator row, e.g. `| --- | :--: |` (with ≥1 column).
@@ -158,9 +158,9 @@ function renderBlocks(src: string): React.ReactNode[] {
       blocks.push(
         <pre
           key={k()}
-          className='my-2 p-3 rounded-lg bg-slate-950/60 border border-slate-700/50 overflow-x-auto apple-scroll'
+          className='my-2 p-3 rounded-lg bg-glass/60 border border-edge/50 overflow-x-auto apple-scroll'
         >
-          <code className='font-mono text-xs text-slate-200 leading-relaxed whitespace-pre'>
+          <code className='font-mono text-xs text-primary leading-relaxed whitespace-pre'>
             {buf.join('\n')}
           </code>
         </pre>,
@@ -185,7 +185,7 @@ function renderBlocks(src: string): React.ReactNode[] {
 
     // Horizontal rule
     if (RE_HR.test(line)) {
-      blocks.push(<hr key={k()} className='my-3 border-slate-700/60' />);
+      blocks.push(<hr key={k()} className='my-3 border-edge/60' />);
       i++;
       continue;
     }
@@ -207,7 +207,7 @@ function renderBlocks(src: string): React.ReactNode[] {
                 {header.map((c, ci) => (
                   <th
                     key={ci}
-                    className='border border-slate-700/60 px-2 py-1 text-left font-semibold text-slate-200 bg-slate-800/40'
+                    className='border border-edge/60 px-2 py-1 text-left font-semibold text-primary bg-glass/40'
                   >
                     {renderInline(c, `th-${ci}`)}
                   </th>
@@ -220,7 +220,7 @@ function renderBlocks(src: string): React.ReactNode[] {
                   {header.map((_, ci) => (
                     <td
                       key={ci}
-                      className='border border-slate-700/60 px-2 py-1 text-slate-300 align-top'
+                      className='border border-edge/60 px-2 py-1 text-body align-top'
                     >
                       {renderInline(r[ci] ?? '', `td-${ri}-${ci}`)}
                     </td>
@@ -244,7 +244,7 @@ function renderBlocks(src: string): React.ReactNode[] {
       blocks.push(
         <blockquote
           key={k()}
-          className='my-2 pl-3 border-l-2 border-slate-600 text-slate-400 italic'
+          className='my-2 pl-3 border-l-2 border-edge-strong text-muted italic'
         >
           {renderInline(buf.join(' '), k())}
         </blockquote>,
@@ -262,10 +262,10 @@ function renderBlocks(src: string): React.ReactNode[] {
       blocks.push(
         <ul
           key={k()}
-          className='my-2 pl-5 list-disc marker:text-slate-500 flex flex-col gap-1'
+          className='my-2 pl-5 list-disc marker:text-faint flex flex-col gap-1'
         >
           {items.map((it, ii) => (
-            <li key={ii} className='text-slate-200 leading-relaxed'>
+            <li key={ii} className='text-primary leading-relaxed'>
               {renderInline(it, `li-${ii}`)}
             </li>
           ))}
@@ -284,10 +284,10 @@ function renderBlocks(src: string): React.ReactNode[] {
       blocks.push(
         <ol
           key={k()}
-          className='my-2 pl-5 list-decimal marker:text-slate-500 flex flex-col gap-1'
+          className='my-2 pl-5 list-decimal marker:text-faint flex flex-col gap-1'
         >
           {items.map((it, ii) => (
-            <li key={ii} className='text-slate-200 leading-relaxed'>
+            <li key={ii} className='text-primary leading-relaxed'>
               {renderInline(it, `oli-${ii}`)}
             </li>
           ))}
@@ -313,7 +313,7 @@ function renderBlocks(src: string): React.ReactNode[] {
       i++;
     }
     blocks.push(
-      <p key={k()} className='my-2 text-slate-200 leading-relaxed'>
+      <p key={k()} className='my-2 text-primary leading-relaxed'>
         {renderInline(buf.join('\n'), k())}
       </p>,
     );

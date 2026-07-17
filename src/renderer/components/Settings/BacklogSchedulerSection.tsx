@@ -47,7 +47,7 @@ const Toggle: React.FC<{ on: boolean; onClick: () => void; label: string; small?
     onClick={onClick}
     aria-label={label}
     className={`relative ${small ? 'w-10 h-5' : 'w-11 h-6'} rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-      on ? 'bg-blue-500' : 'bg-slate-600'
+      on ? 'bg-blue-500' : 'bg-control-strong'
     }`}
   >
     <span
@@ -68,23 +68,23 @@ const SlotRow: React.FC<{
     onChange({ ...slot, days });
   };
   return (
-    <div className={`bg-slate-900/40 border border-slate-700/50 rounded-xl p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
+    <div className={`bg-glass/40 border border-edge/50 rounded-xl p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
       <div className='flex items-center gap-1.5'>
         <input
           type='time'
           value={slot.start}
           onChange={(e) => onChange({ ...slot, start: e.target.value })}
-          className='bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500/60'
+          className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
         />
-        <span className='text-slate-500 text-sm'>–</span>
+        <span className='text-faint text-sm'>–</span>
         <input
           type='time'
           value={slot.end}
           onChange={(e) => onChange({ ...slot, end: e.target.value })}
-          className='bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500/60'
+          className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
         />
         {wrapsMidnight(slot) && (
-          <span className='px-1.5 py-0.5 rounded text-[10px] bg-slate-700/60 text-slate-300' title='Ends the next morning'>
+          <span className='px-1.5 py-0.5 rounded text-[10px] bg-control/60 text-body' title='Ends the next morning'>
             +1d
           </span>
         )}
@@ -97,7 +97,7 @@ const SlotRow: React.FC<{
               key={d}
               onClick={() => toggleDay(d)}
               className={`w-7 h-7 rounded-md text-[11px] font-medium cursor-pointer transition-colors ${
-                active ? 'bg-blue-500/80 text-white' : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'
+                active ? 'bg-blue-500/80 text-white' : 'bg-control/50 text-muted hover:bg-control'
               }`}
               title={`${label} (window start day)`}
             >
@@ -110,7 +110,7 @@ const SlotRow: React.FC<{
         <Toggle small on={slot.enabled} onClick={() => onChange({ ...slot, enabled: !slot.enabled })} label='Toggle window' />
         <button
           onClick={onRemove}
-          className='w-7 h-7 flex items-center justify-center rounded-md bg-slate-700/50 hover:bg-red-500/30 text-slate-400 hover:text-red-300 text-sm cursor-pointer transition-colors'
+          className='w-7 h-7 flex items-center justify-center rounded-md bg-control/50 hover:bg-red-500/30 text-muted hover:text-danger text-sm cursor-pointer transition-colors'
           aria-label='Remove window'
         >
           ✕
@@ -149,12 +149,12 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
   })();
 
   return (
-    <section className='mt-6 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl'>
+    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
-          <h2 className='text-lg font-bold text-white'>Backlog Scheduler</h2>
-          <p className='text-sm text-slate-400 mt-1'>
-            Time windows when queued cards from the <span className='text-slate-300'>Backlog</span> board
+          <h2 className='text-lg font-bold text-strong'>Backlog Scheduler</h2>
+          <p className='text-sm text-muted mt-1'>
+            Time windows when queued cards from the <span className='text-body'>Backlog</span> board
             auto-execute — night hours, weekends. Green cards only, one at a time, research reports only in
             this phase. Turns idle window credit into finished work.
           </p>
@@ -163,23 +163,23 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       </div>
 
       {/* Status glance */}
-      <div className='mt-4 bg-slate-900/50 border border-slate-700/60 rounded-xl px-4 py-3'>
-        <p className='text-sm text-white'>{glance}</p>
+      <div className='mt-4 bg-glass/50 border border-edge/60 rounded-xl px-4 py-3'>
+        <p className='text-sm text-strong'>{glance}</p>
         {status?.usagePausedUntil != null && status.usagePausedUntil > Date.now() && (
-          <p className='text-xs mt-1 text-amber-300/90'>
+          <p className='text-xs mt-1 text-warn/90'>
             usage window exhausted · resumes ~{formatClock(status.usagePausedUntil)}
           </p>
         )}
         {status?.lastRun && (
-          <p className='text-xs mt-1 text-slate-400'>
+          <p className='text-xs mt-1 text-muted'>
             Last run {formatClock(status.lastRun.at)} — {status.lastRun.cardTitle}:{' '}
-            <span className={status.lastRun.outcome === 'success' ? 'text-emerald-300' : 'text-amber-300'}>
+            <span className={status.lastRun.outcome === 'success' ? 'text-ok' : 'text-warn'}>
               {status.lastRun.outcome}
             </span>
           </p>
         )}
         {status?.forecast && status.forecast.cardCount > 0 && (
-          <p className='text-xs mt-1 text-slate-500'>
+          <p className='text-xs mt-1 text-faint'>
             Queue will burn ~{formatUsd(status.forecast.totalCostUsd)} in the next window
             ({status.forecast.cardCount} card{status.forecast.cardCount === 1 ? '' : 's'} fit).
           </p>
@@ -189,17 +189,17 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       {/* Windows editor */}
       <div className='mt-5'>
         <div className='flex items-center justify-between mb-3 flex-wrap gap-2'>
-          <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Windows</p>
+          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Windows</p>
           <div className='flex gap-2'>
             <button
               onClick={() => addPreset(PRESET_NIGHTS)}
-              className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'
+              className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
             >
               Nights 23–07 Mon–Fri
             </button>
             <button
               onClick={() => addPreset(PRESET_WEEKENDS)}
-              className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'
+              className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
             >
               Weekends
             </button>
@@ -212,7 +212,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
           </div>
         </div>
         {config.slots.length === 0 ? (
-          <p className='text-sm text-slate-400'>No windows yet. Add one, or use a preset — overnight ranges (23:00–07:00) belong to their start day.</p>
+          <p className='text-sm text-muted'>No windows yet. Add one, or use a preset — overnight ranges (23:00–07:00) belong to their start day.</p>
         ) : (
           <div className='flex flex-col gap-2'>
             {config.slots.map((slot, i) => (
@@ -223,10 +223,10 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       </div>
 
       {/* requireIdle gate */}
-      <div className='mt-5 bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 flex items-start gap-3'>
+      <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4 flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
-          <p className='font-medium text-white text-sm leading-tight'>Only run while idle</p>
-          <p className='text-xs text-slate-400 mt-1'>
+          <p className='font-medium text-strong text-sm leading-tight'>Only run while idle</p>
+          <p className='text-xs text-muted mt-1'>
             Even inside a window, wait until the keyboard/mouse have been untouched for 5 minutes — so a
             late-night session of yours isn't interrupted by an agent claiming the queue.
           </p>
@@ -239,7 +239,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
         />
       </div>
 
-      <p className='text-xs text-slate-500 mt-4'>
+      <p className='text-xs text-faint mt-4'>
         Sequential in this phase: one card at a time, each with a hard time budget. A card still running at
         window end gets a 10-minute grace period, then pauses and resumes first in the next window. Backlog
         runs anchor 5-hour windows themselves, so Cowork opener pings are skipped while a card is running.

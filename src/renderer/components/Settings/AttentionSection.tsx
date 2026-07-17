@@ -30,7 +30,7 @@ const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
   >
     <span
       className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
-        checked ? 'bg-blue-600' : 'bg-slate-600'
+        checked ? 'bg-blue-600' : 'bg-control-strong'
       }`}
     >
       <span
@@ -40,8 +40,8 @@ const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
       />
     </span>
     <span>
-      <span className='text-sm font-medium text-slate-200'>{label}</span>
-      {hint && <span className='text-xs text-slate-500 ml-2'>{hint}</span>}
+      <span className='text-sm font-medium text-primary'>{label}</span>
+      {hint && <span className='text-xs text-faint ml-2'>{hint}</span>}
     </span>
   </button>
 );
@@ -69,7 +69,7 @@ const WebhookRow: React.FC<{
     testState === 'sending' ? 'Sending…' : testState === 'ok' ? '✓ Sent' : testState === 'fail' ? '✗ Failed' : 'Send test';
 
   return (
-    <div className='flex flex-col gap-2 px-4 py-3 rounded-xl border border-slate-700/60 bg-slate-900/40'>
+    <div className='flex flex-col gap-2 px-4 py-3 rounded-xl border border-edge/60 bg-inset/40'>
       <div className='flex items-center gap-2'>
         <Select<WebhookKind>
           value={target.kind}
@@ -83,7 +83,7 @@ const WebhookRow: React.FC<{
           value={target.label ?? ''}
           onChange={(e) => onChange({ ...target, label: e.target.value })}
           placeholder='Label (optional)'
-          className='flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-500'
+          className='flex-1 bg-glass border border-edge rounded-lg px-3 py-1.5 text-sm text-primary placeholder:text-faint'
         />
         <Toggle
           checked={target.enabled}
@@ -92,7 +92,7 @@ const WebhookRow: React.FC<{
         />
         <button
           onClick={onDelete}
-          className='px-2 py-1.5 rounded-lg text-xs font-medium bg-slate-700/60 hover:bg-red-600/70 text-slate-300 hover:text-white cursor-pointer transition-colors'
+          className='px-2 py-1.5 rounded-lg text-xs font-medium bg-control/60 hover:bg-red-600/70 text-body hover:text-white cursor-pointer transition-colors'
           aria-label='Delete webhook'
           title='Delete webhook'
         >
@@ -105,7 +105,7 @@ const WebhookRow: React.FC<{
           value={target.url}
           onChange={(e) => onChange({ ...target, url: e.target.value })}
           placeholder={target.kind === 'discord' ? 'https://discord.com/api/webhooks/…' : 'https://hooks.slack.com/services/…'}
-          className='flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 font-mono'
+          className='flex-1 bg-glass border border-edge rounded-lg px-3 py-1.5 text-sm text-primary placeholder:text-faint font-mono'
         />
         <button
           onClick={sendTest}
@@ -115,7 +115,7 @@ const WebhookRow: React.FC<{
               ? 'bg-green-600/70 text-white'
               : testState === 'fail'
                 ? 'bg-red-600/70 text-white'
-                : 'bg-slate-700/70 hover:bg-slate-600 text-slate-200'
+                : 'bg-control/70 hover:bg-control-strong text-primary'
           }`}
         >
           {testLabel}
@@ -144,10 +144,10 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
   const disabled = !config.enabled;
 
   return (
-    <section className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl flex flex-col gap-7'>
+    <section className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl flex flex-col gap-7'>
       <div>
-        <h2 className='text-lg font-bold text-white'>“Needs you” escalation</h2>
-        <p className='text-sm text-slate-400 mt-1'>
+        <h2 className='text-lg font-bold text-strong'>“Needs you” escalation</h2>
+        <p className='text-sm text-muted mt-1'>
           When an agent finishes and waits on you, escalate after a set time — intensify the bubble and ping your chat.
         </p>
       </div>
@@ -162,7 +162,7 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
       <div className={`flex flex-col gap-7 transition-opacity ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
         {/* Threshold */}
         <div className='flex flex-col gap-3'>
-          <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Escalate after</p>
+          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Escalate after</p>
           <div className='flex items-center gap-4'>
             <input
               type='range'
@@ -173,18 +173,18 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
               onChange={(e) => onChange({ escalateAfterSeconds: Number(e.target.value) })}
               className='flex-1 cursor-pointer'
             />
-            <span className='text-sm font-medium text-white tabular-nums w-16 text-right'>
+            <span className='text-sm font-medium text-strong tabular-nums w-16 text-right'>
               {config.escalateAfterSeconds}s
             </span>
           </div>
-          <p className='text-xs text-slate-500'>
+          <p className='text-xs text-faint'>
             How long a tool sits in “waiting for input” before Agent Pulse escalates.
           </p>
         </div>
 
         {/* Channels */}
         <div className='flex flex-col gap-3'>
-          <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>On escalation</p>
+          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>On escalation</p>
           <Toggle
             checked={config.intensifyBubble}
             onChange={(v) => onChange({ intensifyBubble: v })}
@@ -201,12 +201,12 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
 
         {/* Webhooks */}
         <div className='flex flex-col gap-3'>
-          <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Discord / Slack webhooks</p>
-          <p className='text-xs text-slate-400 -mt-1'>
+          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Discord / Slack webhooks</p>
+          <p className='text-xs text-muted -mt-1'>
             POSTed when escalation fires. Create one in Discord (Server Settings → Integrations → Webhooks) or Slack (Incoming Webhooks).
           </p>
           {config.webhooks.length === 0 && (
-            <p className='text-xs text-slate-500 italic'>No webhooks yet.</p>
+            <p className='text-xs text-faint italic'>No webhooks yet.</p>
           )}
           {config.webhooks.map((w) => (
             <WebhookRow
@@ -218,7 +218,7 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
           ))}
           <button
             onClick={addWebhook}
-            className='self-start px-4 py-2 rounded-lg text-sm font-medium bg-slate-700/60 hover:bg-slate-700 text-slate-200 cursor-pointer transition-colors'
+            className='self-start px-4 py-2 rounded-lg text-sm font-medium bg-control/60 hover:bg-control text-primary cursor-pointer transition-colors'
           >
             + Add webhook
           </button>

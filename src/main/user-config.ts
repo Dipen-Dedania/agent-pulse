@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold } from '../common/types';
+import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold, AppearanceConfig, ThemeMode } from '../common/types';
 import { GuardrailConfig } from '../common/guardrails';
 import { BacklogSchedulerConfig, BacklogSlot, BacklogTemplate } from '../common/backlog-types';
 import { SecretProtectionConfig, SecretRule } from '../common/secretProtection';
@@ -138,6 +138,7 @@ export interface UserConfig {
   // Quick-task templates for the backlog board's card creator.
   backlogTemplates: BacklogTemplate[];
   statusLine: StatusLineConfig;
+  appearance: AppearanceConfig;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse-config.json');
@@ -325,6 +326,7 @@ const DEFAULTS: UserConfig = {
       },
     ],
   },
+  appearance: { theme: 'auto' },
 };
 
 // Map legacy ToolId keys in persisted configs to their current names so a
@@ -557,6 +559,12 @@ function migrateTour(raw: unknown): TourConfig {
   };
 }
 
+export function migrateAppearance(raw: unknown): AppearanceConfig {
+  const THEMES: ThemeMode[] = ['light', 'dark', 'auto'];
+  const a = (raw && typeof raw === 'object' ? raw : {}) as Partial<AppearanceConfig>;
+  return { theme: THEMES.includes(a.theme as ThemeMode) ? a.theme! : 'auto' };
+}
+
 // Smallest allowed escalation delay. Below this the feature would fire almost
 // instantly on every `waiting` flip, defeating the "give the user a moment"
 // intent and risking webhook spam.
@@ -766,6 +774,7 @@ export function loadConfig(): UserConfig {
         backlogScheduler: migrateBacklogScheduler(parsed.backlogScheduler),
         backlogTemplates: migrateBacklogTemplates(parsed.backlogTemplates),
         statusLine: migrateStatusLine(parsed.statusLine),
+        appearance: migrateAppearance(parsed.appearance),
       };
     }
   } catch {
@@ -813,6 +822,7 @@ export function loadConfig(): UserConfig {
     backlogScheduler: migrateBacklogScheduler(undefined),
     backlogTemplates: migrateBacklogTemplates(undefined),
     statusLine: migrateStatusLine(undefined),
+    appearance: migrateAppearance(undefined),
   };
 }
 

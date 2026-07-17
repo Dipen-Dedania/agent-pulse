@@ -61,8 +61,8 @@ const MODEL_PRESETS: { value: string; label: string }[] = [
 const isPresetModel = (m: string) => MODEL_PRESETS.some((p) => p.value === m);
 
 const inputClass =
-  'bg-slate-900/60 border border-slate-700/70 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/60';
-const labelClass = 'text-xs uppercase tracking-widest text-slate-500 font-semibold';
+  'bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60';
+const labelClass = 'text-xs uppercase tracking-widest text-faint font-semibold';
 
 export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, cards, onSave, onClose }) => {
   const [title, setTitle] = useState(card?.title ?? '');
@@ -192,18 +192,18 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
       <div
-        className='apple-scroll relative w-full max-w-xl mx-4 bg-slate-900/95 border border-slate-700/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
+        className='apple-scroll relative w-full max-w-xl mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-slate-700/60 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors text-sm cursor-pointer'
+          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
           aria-label='Close'
         >
           ✕
         </button>
 
-        <h2 className='text-lg font-bold text-white leading-tight'>{card ? 'Edit card' : 'New card'}</h2>
+        <h2 className='text-lg font-bold text-strong leading-tight'>{card ? 'Edit card' : 'New card'}</h2>
 
         {/* Quick tasks — templates pre-fill title + description (create only) */}
         {!card && (
@@ -212,21 +212,21 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
               <span className={labelClass}>Quick tasks</span>
               <button
                 onClick={() => setManagingTemplates(true)}
-                className='text-[11px] text-slate-500 hover:text-slate-300 cursor-pointer transition-colors'
+                className='text-[11px] text-faint hover:text-body cursor-pointer transition-colors'
                 title='Add, edit, or remove quick-task templates'
               >
                 manage
               </button>
             </div>
             {templates.length === 0 ? (
-              <p className='text-xs text-slate-500'>No templates yet — "manage" to add some.</p>
+              <p className='text-xs text-faint'>No templates yet — "manage" to add some.</p>
             ) : (
               <div className='flex gap-2 flex-wrap'>
                 {templates.map((tpl) => (
                   <button
                     key={tpl.id}
                     onClick={() => applyTemplate(tpl)}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'
+                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
                     title={tpl.description}
                   >
                     {tpl.name}
@@ -263,25 +263,25 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
               type='button'
               onClick={() => void handlePickAttachments()}
               disabled={picking}
-              className='px-2 py-0.5 rounded-md text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors disabled:opacity-50'
+              className='px-2 py-0.5 rounded-md text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors disabled:opacity-50'
             >
               {picking ? 'Choosing…' : '+ Attach files'}
             </button>
           </div>
           {keptExisting.length === 0 && pendingAttachments.length === 0 ? (
-            <p className='text-xs text-slate-500'>
+            <p className='text-xs text-faint'>
               Attach text files (specs, plans) to inline them into the prompt — useful for uncommitted files a worktree can’t see.
             </p>
           ) : (
             <div className='flex flex-wrap gap-1.5'>
               {keptExisting.map((a) => (
-                <span key={a.id} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-800/70 border border-slate-700/60 text-xs text-slate-200'>
+                <span key={a.id} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-glass/70 border border-edge/60 text-xs text-primary'>
                   <span className='truncate max-w-48' title={a.filename}>{a.filename}</span>
-                  <span className='text-slate-500'>{formatBytes(a.bytes)}</span>
+                  <span className='text-faint'>{formatBytes(a.bytes)}</span>
                   <button
                     type='button'
                     onClick={() => setRemovedIds((prev) => [...prev, a.id])}
-                    className='text-slate-500 hover:text-red-300 cursor-pointer'
+                    className='text-faint hover:text-danger cursor-pointer'
                     aria-label={`Remove ${a.filename}`}
                   >
                     ✕
@@ -295,7 +295,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
                   <button
                     type='button'
                     onClick={() => setPendingAttachments((prev) => prev.filter((_, j) => j !== i))}
-                    className='text-emerald-400/70 hover:text-red-300 cursor-pointer'
+                    className='text-emerald-400/70 hover:text-danger cursor-pointer'
                     aria-label={`Remove ${a.filename}`}
                   >
                     ✕
@@ -319,7 +319,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
 
           <div className='flex flex-col gap-1.5'>
             <span className={labelClass}>Task type</span>
-            <div className='flex gap-1 p-1 bg-slate-900/50 border border-slate-700/60 rounded-xl w-fit'>
+            <div className='flex gap-1 p-1 bg-glass/50 border border-edge/60 rounded-xl w-fit'>
               {([
                 { value: 'research', label: 'Research', hint: 'Read-only — the agent produces a report.' },
                 { value: 'execution', label: 'Execution', hint: 'Edits files in an isolated worktree — delivers a diff + report.' },
@@ -329,7 +329,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
                   onClick={() => setTaskType(t.value)}
                   title={t.hint}
                   className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-                    taskType === t.value ? 'bg-slate-700 text-white shadow-inner' : 'text-slate-400 hover:text-white'
+                    taskType === t.value ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
                   }`}
                 >
                   {t.label}
@@ -340,14 +340,14 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
 
           <div className='flex flex-col gap-1.5'>
             <span className={labelClass}>Risk tier</span>
-            <div className='flex gap-1 p-1 bg-slate-900/50 border border-slate-700/60 rounded-xl w-fit'>
+            <div className='flex gap-1 p-1 bg-glass/50 border border-edge/60 rounded-xl w-fit'>
               {(Object.keys(TIER_META) as RiskTier[]).map((tier) => (
                 <button
                   key={tier}
                   onClick={() => setRiskTier(tier)}
                   title={TIER_META[tier].hint}
                   className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 ${
-                    riskTier === tier ? 'bg-slate-700 text-white shadow-inner' : 'text-slate-400 hover:text-white'
+                    riskTier === tier ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
                   }`}
                 >
                   <span className={`w-2 h-2 rounded-full ${TIER_META[tier].dot}`} />
@@ -381,7 +381,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
                   placeholder='e.g. claude-sonnet-4-6'
                 />
                 {!modelValid && (
-                  <span className='text-[11px] text-red-300'>
+                  <span className='text-[11px] text-danger'>
                     Letters, digits, dots, dashes, and brackets only.
                   </span>
                 )}
@@ -412,21 +412,21 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         {prereqCandidates.length > 0 && (
           <div className='flex flex-col gap-1.5'>
             <span className={labelClass}>Prerequisites</span>
-            <p className='text-xs text-slate-400 -mt-0.5'>
+            <p className='text-xs text-muted -mt-0.5'>
               Autorun waits until these cards are Done ("Run now" overrides).
             </p>
-            <div className='apple-scroll flex flex-col gap-1 max-h-36 overflow-y-auto bg-slate-900/40 border border-slate-700/50 rounded-xl p-2'>
+            <div className='apple-scroll flex flex-col gap-1 max-h-36 overflow-y-auto bg-glass/40 border border-edge/50 rounded-xl p-2'>
               {prereqCandidates.map((c) => (
-                <label key={c.id} className='flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-slate-800/60 cursor-pointer'>
+                <label key={c.id} className='flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-glass/60 cursor-pointer'>
                   <input
                     type='checkbox'
                     checked={prereqIds.includes(c.id)}
                     onChange={() => togglePrereq(c.id)}
                     className='accent-blue-500'
                   />
-                  <span className='flex-1 min-w-0 text-sm text-slate-200 truncate'>{c.title}</span>
+                  <span className='flex-1 min-w-0 text-sm text-primary truncate'>{c.title}</span>
                   <span className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 ${
-                    c.state === 'done' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-700/60 text-slate-400'
+                    c.state === 'done' ? 'bg-emerald-500/15 text-ok' : 'bg-control/60 text-muted'
                   }`}>
                     {c.state}
                   </span>
@@ -438,10 +438,10 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
 
         {/* Acceptance criteria & QA provider — execution cards only */}
         {taskType === 'execution' ? (
-          <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 flex flex-col gap-3'>
+          <div className='bg-glass/40 border border-edge/50 rounded-xl p-4 flex flex-col gap-3'>
             <div>
-              <p className='text-sm font-medium text-white'>Acceptance criteria & QA</p>
-              <p className='text-xs text-slate-400 mt-1'>
+              <p className='text-sm font-medium text-strong'>Acceptance criteria & QA</p>
+              <p className='text-xs text-muted mt-1'>
                 The executor edits files in an isolated worktree; QA runs the chosen check afterward and gates Done.
               </p>
             </div>
@@ -469,7 +469,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
                 ))}
                 <option value='browser' disabled>Browser — coming later</option>
               </select>
-              <span className='text-[11px] text-slate-500'>
+              <span className='text-[11px] text-faint'>
                 {QA_PROVIDERS.find((p) => p.value === qaProvider)?.hint}
               </span>
             </label>
@@ -484,7 +484,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
                   placeholder='npm run e2e'
                 />
                 {qaCommand.trim() === '' && (
-                  <span className='text-[11px] text-amber-300'>
+                  <span className='text-[11px] text-warn'>
                     Required for the custom provider — QA fails with no command to run.
                   </span>
                 )}
@@ -492,8 +492,8 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             )}
           </div>
         ) : (
-          <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-3 opacity-50'>
-            <p className='text-xs text-slate-400'>
+          <div className='bg-glass/40 border border-edge/50 rounded-xl p-3 opacity-50'>
+            <p className='text-xs text-muted'>
               QA applies to execution tasks — research cards are done when their report is attached.
             </p>
           </div>
@@ -502,7 +502,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         <div className='flex items-center gap-2 justify-end'>
           <button
             onClick={onClose}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 cursor-pointer transition-colors'
+            className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
           >
             Cancel
           </button>
@@ -510,7 +510,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             <button
               onClick={() => valid && onSave(buildInput(), attachmentIntent())}
               disabled={!valid}
-              className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 text-white transition-colors cursor-pointer'
+              className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white transition-colors cursor-pointer'
             >
               Save
             </button>
@@ -519,14 +519,14 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
               <button
                 onClick={() => valid && onSave(buildInput('refinement'), attachmentIntent())}
                 disabled={!valid}
-                className='px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 disabled:bg-slate-700/40 disabled:text-slate-500 text-slate-200 transition-colors cursor-pointer'
+                className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong disabled:bg-control/40 disabled:text-faint text-primary transition-colors cursor-pointer'
               >
                 Save to Refinement
               </button>
               <button
                 onClick={() => valid && onSave(buildInput('todo'), attachmentIntent())}
                 disabled={!valid}
-                className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 text-white transition-colors cursor-pointer'
+                className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white transition-colors cursor-pointer'
               >
                 Queue in Todo
               </button>

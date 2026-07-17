@@ -24,7 +24,7 @@ interface Item {
 const CheckCircle: React.FC<{ done: boolean }> = ({ done }) => (
   <div
     className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border transition-colors duration-300 ${
-      done ? 'bg-green-500 border-green-400' : 'bg-slate-700/50 border-slate-600'
+      done ? 'bg-green-500 border-green-400' : 'bg-control/50 border-edge-strong'
     }`}
   >
     <AnimatePresence>
@@ -103,17 +103,17 @@ export const SetupChecklist: React.FC<SetupChecklistProps> = ({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className={`mb-6 bg-slate-800/60 backdrop-blur-md border rounded-2xl p-5 shadow-xl ${
-        allDone ? 'border-green-500/40' : 'border-slate-700/70'
+      className={`mb-6 bg-glass/60 backdrop-blur-md border rounded-2xl p-5 shadow-xl ${
+        allDone ? 'border-green-500/40' : 'border-edge/70'
       }`}
       style={allDone ? { boxShadow: '0 0 24px rgba(34,197,94,0.15)' } : undefined}
     >
       <div className='flex items-center gap-3 mb-4'>
         <div className='flex-1'>
-          <p className='font-semibold text-white leading-tight'>
+          <p className='font-semibold text-strong leading-tight'>
             {allDone ? 'You’re live' : 'Get set up'}
           </p>
-          <p className='text-xs text-slate-400 mt-0.5'>
+          <p className='text-xs text-muted mt-0.5'>
             {allDone
               ? 'Agent Pulse is watching your agents. The bubbles take it from here.'
               : `${doneCount} of ${items.length} — a couple of minutes, once.`}
@@ -129,7 +129,7 @@ export const SetupChecklist: React.FC<SetupChecklistProps> = ({
         ) : (
           <button
             onClick={dismiss}
-            className='w-7 h-7 flex items-center justify-center rounded-full bg-slate-700/60 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors text-sm cursor-pointer'
+            className='w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
             aria-label='Dismiss setup checklist'
             title='Dismiss — you can always set up from the tool cards below'
           >
@@ -144,12 +144,12 @@ export const SetupChecklist: React.FC<SetupChecklistProps> = ({
             <CheckCircle done={item.done} />
             <div className='min-w-0 -mt-0.5'>
               <p className={`text-sm font-medium leading-tight transition-colors duration-300 ${
-                item.done ? 'text-slate-500' : 'text-white'
+                item.done ? 'text-faint' : 'text-strong'
               }`}>
                 {item.label}
               </p>
               {!item.done && (
-                <p className='text-xs text-slate-400 mt-0.5'>{item.hint}</p>
+                <p className='text-xs text-muted mt-0.5'>{item.hint}</p>
               )}
             </div>
           </div>

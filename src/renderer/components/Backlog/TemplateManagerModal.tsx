@@ -12,7 +12,7 @@ interface Props {
 }
 
 const inputClass =
-  'bg-slate-900/60 border border-slate-700/70 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/60';
+  'bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60';
 
 export const TemplateManagerModal: React.FC<Props> = ({ onClose }) => {
   const templates = useBacklogStore((s) => s.templates);
@@ -45,31 +45,31 @@ export const TemplateManagerModal: React.FC<Props> = ({ onClose }) => {
   return (
     <div className='fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
       <div
-        className='apple-scroll relative w-full max-w-2xl mx-4 bg-slate-900/95 border border-slate-700/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
+        className='apple-scroll relative w-full max-w-2xl mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-slate-700/60 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors text-sm cursor-pointer'
+          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
           aria-label='Close'
         >
           ✕
         </button>
 
         <div>
-          <h2 className='text-lg font-bold text-white leading-tight'>Quick-task templates</h2>
-          <p className='text-sm text-slate-400 mt-1'>
+          <h2 className='text-lg font-bold text-strong leading-tight'>Quick-task templates</h2>
+          <p className='text-sm text-muted mt-1'>
             Picking a template in the card editor pre-fills the title and description. Edit freely —
             the description is the prompt the executor runs.
           </p>
         </div>
 
         {rows.length === 0 ? (
-          <p className='text-sm text-slate-400'>No templates. Add one below.</p>
+          <p className='text-sm text-muted'>No templates. Add one below.</p>
         ) : (
           <div className='flex flex-col gap-3'>
             {rows.map((tpl) => (
-              <div key={tpl.id} className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-3 flex flex-col gap-2'>
+              <div key={tpl.id} className='bg-glass/40 border border-edge/50 rounded-xl p-3 flex flex-col gap-2'>
                 <div className='flex gap-2'>
                   <input
                     value={tpl.name}
@@ -85,7 +85,7 @@ export const TemplateManagerModal: React.FC<Props> = ({ onClose }) => {
                   />
                   <button
                     onClick={() => removeRow(tpl.id)}
-                    className='w-8 shrink-0 flex items-center justify-center rounded-lg bg-slate-700/50 hover:bg-red-500/30 text-slate-400 hover:text-red-300 text-sm cursor-pointer transition-colors'
+                    className='w-8 shrink-0 flex items-center justify-center rounded-lg bg-control/50 hover:bg-red-500/30 text-muted hover:text-danger text-sm cursor-pointer transition-colors'
                     title='Remove template'
                     aria-label='Remove template'
                   >
@@ -107,22 +107,22 @@ export const TemplateManagerModal: React.FC<Props> = ({ onClose }) => {
         <div className='flex items-center gap-2'>
           <button
             onClick={addRow}
-            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'
+            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
           >
             + Add template
           </button>
-          {!valid && <span className='text-xs text-amber-300'>Every template needs a chip label and a card title.</span>}
+          {!valid && <span className='text-xs text-warn'>Every template needs a chip label and a card title.</span>}
           <div className='ml-auto flex items-center gap-2'>
             <button
               onClick={onClose}
-              className='px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 cursor-pointer transition-colors'
+              className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
             >
               Cancel
             </button>
             <button
               onClick={() => void handleSave()}
               disabled={!valid || saving}
-              className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 text-white transition-colors cursor-pointer'
+              className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white transition-colors cursor-pointer'
             >
               {saving ? 'Saving…' : 'Save templates'}
             </button>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo } from '../../../common/types';
+import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, ThemeMode, AppearanceConfig } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
@@ -65,10 +65,10 @@ const GeneralSection: React.FC = () => {
   const checked = state.enabled;
 
   return (
-    <div className='mb-6 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl flex items-center gap-4'>
+    <div className='mb-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl flex items-center gap-4'>
       <div className='flex-1'>
-        <p className='font-semibold text-white leading-tight'>Launch on startup</p>
-        <p className='text-xs text-slate-400 mt-1'>
+        <p className='font-semibold text-strong leading-tight'>Launch on startup</p>
+        <p className='text-xs text-muted mt-1'>
           {state.packaged
             ? 'Start Agent Pulse automatically when you sign in. Works on Windows, macOS, and Linux.'
             : 'Auto-launch is only applied to packaged installs. Toggle is remembered for the next build.'}
@@ -77,7 +77,7 @@ const GeneralSection: React.FC = () => {
       <button
         onClick={handleToggle}
         className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-          checked ? 'bg-blue-500' : 'bg-slate-600'
+          checked ? 'bg-blue-500' : 'bg-control-strong'
         }`}
         aria-label='Toggle launch on startup'
       >
@@ -87,6 +87,77 @@ const GeneralSection: React.FC = () => {
           }`}
         />
       </button>
+    </div>
+  );
+};
+
+// ── Theme Icon Toggle (header) ───────────────────────────────────────────────
+
+const SunIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor' className={className}>
+    <path d='M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM10 15a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 15zM10 7a3 3 0 100 6 3 3 0 000-6zM15.657 5.404a.75.75 0 10-1.06-1.06l-1.061 1.06a.75.75 0 001.06 1.06l1.06-1.06zM6.464 14.596a.75.75 0 10-1.06-1.06l-1.06 1.06a.75.75 0 001.06 1.06l1.06-1.06zM18 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0118 10zM5 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 015 10zM14.596 15.657a.75.75 0 001.06-1.06l-1.06-1.061a.75.75 0 10-1.06 1.06l1.06 1.06zM5.404 6.464a.75.75 0 001.06-1.06L5.404 4.343a.75.75 0 00-1.06 1.06l1.06 1.061z' />
+  </svg>
+);
+
+const MoonIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor' className={className}>
+    <path fillRule='evenodd' d='M7.455 2.004a.75.75 0 01.26.77 7 7 0 009.958 7.967.75.75 0 011.067.853A8.5 8.5 0 116.647 1.921a.75.75 0 01.808.083z' clipRule='evenodd' />
+  </svg>
+);
+
+const MonitorIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor' className={className}>
+    <path fillRule='evenodd' d='M2 4.25A2.25 2.25 0 014.25 2h11.5A2.25 2.25 0 0118 4.25v8.5A2.25 2.25 0 0115.75 15h-3.105a3.501 3.501 0 001.1 1.677A.75.75 0 0113.26 18H6.74a.75.75 0 01-.484-1.323A3.501 3.501 0 007.355 15H4.25A2.25 2.25 0 012 12.75v-8.5zm1.5 0a.75.75 0 01.75-.75h11.5a.75.75 0 01.75.75v7.5a.75.75 0 01-.75.75H4.25a.75.75 0 01-.75-.75v-7.5z' clipRule='evenodd' />
+  </svg>
+);
+
+const THEME_OPTIONS: { value: ThemeMode; Icon: React.FC<{ className?: string }>; label: string }[] = [
+  { value: 'light', Icon: SunIcon,     label: 'Light' },
+  { value: 'dark',  Icon: MoonIcon,    label: 'Dark'  },
+  { value: 'auto',  Icon: MonitorIcon, label: 'Auto'  },
+];
+
+const ThemeIconToggle: React.FC = () => {
+  const [theme, setTheme] = useState<ThemeMode>('auto');
+
+  useEffect(() => {
+    let cancelled = false;
+    window.electron
+      .invoke('get-config')
+      .then((cfg: { appearance?: AppearanceConfig }) => {
+        if (!cancelled) setTheme(cfg.appearance?.theme ?? 'auto');
+      })
+      .catch(() => {});
+    const handler = (_e: unknown, cfg: AppearanceConfig) => setTheme(cfg.theme);
+    window.electron.on('appearance:config-updated', handler);
+    return () => {
+      cancelled = true;
+      window.electron.off('appearance:config-updated', handler);
+    };
+  }, []);
+
+  const handleTheme = (t: ThemeMode) => {
+    setTheme(t);
+    window.electron.invoke('appearance:update-config', { theme: t }).catch(() => {});
+  };
+
+  return (
+    <div className='inline-flex gap-0.5 p-1 rounded-xl bg-glass/60 backdrop-blur-md border border-edge/60 shrink-0'>
+      {THEME_OPTIONS.map(({ value, Icon, label }) => (
+        <button
+          key={value}
+          onClick={() => handleTheme(value)}
+          title={label}
+          aria-label={`${label} theme`}
+          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+            theme === value
+              ? 'bg-blue-600 text-white shadow'
+              : 'text-muted hover:text-strong hover:bg-control/40'
+          }`}
+        >
+          <Icon className='w-4 h-4' />
+        </button>
+      ))}
     </div>
   );
 };
@@ -105,13 +176,13 @@ const HookInfoModal: React.FC<{
       onClick={onClose}
     >
       <div
-        className='apple-scroll relative w-full max-w-lg mx-4 bg-slate-900/95 border border-slate-700/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-5 max-h-[85vh] overflow-y-auto'
+        className='apple-scroll relative w-full max-w-lg mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-5 max-h-[85vh] overflow-y-auto'
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close */}
         <button
           onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-slate-700/60 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors text-sm cursor-pointer'
+          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
           aria-label='Close'
         >
           ✕
@@ -119,20 +190,20 @@ const HookInfoModal: React.FC<{
 
         {/* Title */}
         <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-1'>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>
             Hook Installation
           </p>
-          <h2 className='text-lg font-bold text-white leading-tight'>{label}</h2>
+          <h2 className='text-lg font-bold text-strong leading-tight'>{label}</h2>
         </div>
 
         {/* Tabs */}
-        <div className='flex gap-1 p-1 bg-slate-800/60 border border-slate-700/60 rounded-xl w-fit'>
+        <div className='flex gap-1 p-1 bg-glass/60 border border-edge/60 rounded-xl w-fit'>
           <button
             onClick={() => setTab('install')}
             className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
               tab === 'install'
-                ? 'bg-slate-700 text-white'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-control text-strong'
+                : 'text-muted hover:text-strong'
             }`}
           >
             Install
@@ -141,8 +212,8 @@ const HookInfoModal: React.FC<{
             onClick={() => setTab('troubleshoot')}
             className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
               tab === 'troubleshoot'
-                ? 'bg-slate-700 text-white'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-control text-strong'
+                : 'text-muted hover:text-strong'
             }`}
           >
             Troubleshoot
@@ -153,36 +224,36 @@ const HookInfoModal: React.FC<{
           <>
             {/* Badges */}
             <div className='flex flex-wrap gap-2'>
-              <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-300 text-xs font-medium'>
+              <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-info text-xs font-medium'>
                 <span className='w-1.5 h-1.5 rounded-full bg-blue-400 inline-block' />
                 {info.mechanism}
               </span>
-              <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-700/60 border border-slate-600/50 text-slate-300 text-xs font-mono'>
+              <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-control/60 border border-edge-strong/50 text-body text-xs font-mono'>
                 {info.configFile}
               </span>
             </div>
 
             {/* Description */}
-            <p className='text-sm text-slate-300 leading-relaxed'>
+            <p className='text-sm text-body leading-relaxed'>
               {info.description}
             </p>
 
             {/* Snippet */}
             <div>
-              <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2'>
+              <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-2'>
                 Config snippet
               </p>
-              <pre className='bg-slate-800/80 border border-slate-700/60 rounded-xl p-4 text-xs text-green-300 font-mono overflow-x-auto whitespace-pre leading-relaxed'>
+              <pre className='bg-glass/80 border border-edge/60 rounded-xl p-4 text-xs text-ok font-mono overflow-x-auto whitespace-pre leading-relaxed'>
                 {info.snippet}
               </pre>
             </div>
           </>
         ) : (
           <div>
-            <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3'>
+            <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
               If status events aren't arriving
             </p>
-            <ol className='flex flex-col gap-2.5 list-decimal list-inside text-sm text-slate-300 leading-relaxed'>
+            <ol className='flex flex-col gap-2.5 list-decimal list-inside text-sm text-body leading-relaxed'>
               {info.troubleshooting.map((step, i) => (
                 <li key={i} className='pl-1'>
                   {step}
@@ -204,7 +275,7 @@ const GuardrailsParent: React.FC = () => {
   const [sub, setSub] = useState<'commands' | 'secrets'>('commands');
   return (
     <div className='mt-8'>
-      <div className='inline-flex gap-1 p-1 rounded-xl bg-slate-800/60 border border-slate-700/60 mb-6'>
+      <div className='inline-flex gap-1 p-1 rounded-xl bg-glass/60 border border-edge/60 mb-6'>
         <SubTabPill active={sub === 'commands'} onClick={() => setSub('commands')}>
           Command Guardrails
         </SubTabPill>
@@ -225,7 +296,7 @@ const SubTabPill: React.FC<{ active: boolean; onClick: () => void; children: Rea
   <button
     onClick={onClick}
     className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-      active ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+      active ? 'bg-blue-600 text-white shadow' : 'text-muted hover:text-strong'
     }`}
   >
     {children}
@@ -645,12 +716,12 @@ export const SettingsPanel: React.FC = () => {
   };
 
   return (
-    <div className='h-screen overflow-y-auto apple-scroll bg-slate-900 text-white p-8 font-sans'>
+    <div className='h-screen overflow-y-auto apple-scroll bg-base text-strong p-8 font-sans'>
       {/* Header */}
       <div className='mb-10 flex items-start gap-3'>
         <button
           onClick={handleBack}
-          className='mt-1 w-9 h-9 flex items-center justify-center rounded-full bg-slate-800/70 hover:bg-slate-700 border border-slate-700/70 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0'
+          className='mt-1 w-9 h-9 flex items-center justify-center rounded-full bg-glass/70 hover:bg-control border border-edge/70 text-body hover:text-strong transition-colors cursor-pointer shrink-0'
           aria-label='Back'
         >
           <svg
@@ -671,17 +742,18 @@ export const SettingsPanel: React.FC = () => {
           alt='Agent Pulse'
           className='w-10 h-10 object-contain shrink-0'
         />
-        <div>
+        <div className='flex-1'>
           <h1 className='text-3xl font-bold tracking-tight'>Agent Pulse</h1>
-          <p className='text-slate-400 mt-1 text-sm'>{activeTabMeta.description}</p>
+          <p className='text-muted mt-1 text-sm'>{activeTabMeta.description}</p>
         </div>
+        <ThemeIconToggle />
       </div>
 
       {/* Tab navigation */}
       <div
         role='tablist'
         aria-label='Settings sections'
-        className='mb-8 flex gap-1 p-1 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-xl w-fit shadow-lg'
+        className='mb-8 flex gap-1 p-1 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-xl w-fit shadow-lg'
       >
         {TABS.map((tab) => {
           const isActive = tab.id === activeTab;
@@ -693,8 +765,8 @@ export const SettingsPanel: React.FC = () => {
               onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
                 isActive
-                  ? 'bg-slate-700 text-white shadow-inner'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-700/40'
+                  ? 'bg-control text-strong shadow-inner'
+                  : 'text-muted hover:text-strong hover:bg-control/40'
               }`}
             >
               {tab.label}
@@ -704,8 +776,8 @@ export const SettingsPanel: React.FC = () => {
       </div>
 
       {activeTab === 'hooks' && (loading ? (
-        <div className='flex items-center gap-3 text-slate-400'>
-          <div className='w-4 h-4 border-2 border-slate-500 border-t-blue-400 rounded-full animate-spin' />
+        <div className='flex items-center gap-3 text-muted'>
+          <div className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
           Detecting tools…
         </div>
       ) : (
@@ -726,13 +798,13 @@ export const SettingsPanel: React.FC = () => {
             return (
               <div
                 key={toolId}
-                className={`bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl flex flex-col gap-4 ${
+                className={`bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl flex flex-col gap-4 ${
                   !toolDetected ? 'opacity-60' : ''
                 }`}
               >
                 {/* Tool header */}
                 <div className='flex items-center gap-4'>
-                  <div className='w-11 h-11 rounded-xl bg-slate-700/60 flex items-center justify-center shrink-0'>
+                  <div className='w-11 h-11 rounded-xl bg-control/60 flex items-center justify-center shrink-0'>
                     <img
                       src={meta.icon}
                       alt={meta.label}
@@ -741,20 +813,20 @@ export const SettingsPanel: React.FC = () => {
                   </div>
                   <div className='flex-1 min-w-0'>
                     <div className='flex items-center gap-1.5 flex-wrap'>
-                      <p className='font-semibold text-white leading-tight'>
+                      <p className='font-semibold text-strong leading-tight'>
                         {meta.label}
                       </p>
                       {meta.badges?.map((badge) => (
                         <span
                           key={badge}
-                          className='px-1.5 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[10px] font-semibold uppercase tracking-wide'
+                          className='px-1.5 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-info text-[10px] font-semibold uppercase tracking-wide'
                         >
                           {badge}
                         </span>
                       ))}
                       <button
                         onClick={() => setActiveInfo(toolId)}
-                        className='flex-shrink-0 w-4 h-4 rounded-full bg-slate-600/70 hover:bg-blue-500/60 border border-slate-500/50 hover:border-blue-400/50 text-slate-400 hover:text-blue-300 text-[9px] font-bold flex items-center justify-center cursor-pointer transition-colors'
+                        className='flex-shrink-0 w-4 h-4 rounded-full bg-control-strong/70 hover:bg-blue-500/60 border border-edge-strong/50 hover:border-blue-400/50 text-muted hover:text-info text-[9px] font-bold flex items-center justify-center cursor-pointer transition-colors'
                         aria-label={`How ${meta.label} hook is installed`}
                       >
                         i
@@ -762,7 +834,7 @@ export const SettingsPanel: React.FC = () => {
                     </div>
                     {toolDetected ? (
                       <>
-                        <p className='text-xs text-slate-400 mt-0.5'>
+                        <p className='text-xs text-muted mt-0.5'>
                           {config.hookInstalled
                             ? '✓ Hook installed'
                             : 'Hook not installed'}
@@ -782,18 +854,18 @@ export const SettingsPanel: React.FC = () => {
                               xmlns='http://www.w3.org/2000/svg'
                               viewBox='0 0 16 16'
                               fill='currentColor'
-                              className='w-2.5 h-2.5 text-slate-600 group-hover:text-blue-400 shrink-0 transition-colors'
+                              className='w-2.5 h-2.5 text-ghost group-hover:text-blue-400 shrink-0 transition-colors'
                             >
                               <path d='M2 3.5A1.5 1.5 0 0 1 3.5 2h2.879a1.5 1.5 0 0 1 1.06.44l1.122 1.12A1.5 1.5 0 0 0 9.62 4H12.5A1.5 1.5 0 0 1 14 5.5v1H2v-3ZM2 8.5A1.5 1.5 0 0 1 3.5 7h9A1.5 1.5 0 0 1 14 8.5v4A1.5 1.5 0 0 1 12.5 14h-9A1.5 1.5 0 0 1 2 12.5v-4Z' />
                             </svg>
-                            <span className='text-[10px] text-slate-500 group-hover:text-blue-400 font-mono truncate transition-colors'>
+                            <span className='text-[10px] text-faint group-hover:text-blue-400 font-mono truncate transition-colors'>
                               {config.location}
                             </span>
                           </button>
                         )}
                       </>
                     ) : (
-                      <p className='text-xs text-slate-500 mt-0.5 italic'>
+                      <p className='text-xs text-faint mt-0.5 italic'>
                         Not installed on this machine
                       </p>
                     )}
@@ -806,7 +878,7 @@ export const SettingsPanel: React.FC = () => {
                     }
                     disabled={!toolDetected}
                     className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 ${
-                      config.enabled ? 'bg-blue-500' : 'bg-slate-600'
+                      config.enabled ? 'bg-blue-500' : 'bg-control-strong'
                     } ${
                       toolDetected
                         ? 'cursor-pointer'
@@ -831,7 +903,7 @@ export const SettingsPanel: React.FC = () => {
                       config.hookInstalled
                         ? 'bg-green-500/15 text-green-400 border border-green-500/30 cursor-default'
                         : !toolDetected
-                          ? 'bg-slate-700/40 text-slate-500 cursor-not-allowed'
+                          ? 'bg-control/40 text-faint cursor-not-allowed'
                           : 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer'
                     }`}
                   >
@@ -840,7 +912,7 @@ export const SettingsPanel: React.FC = () => {
                   <button
                     onClick={() => handleUninstallHook(toolId)}
                     disabled={!config.hookInstalled}
-                    className='flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-default text-slate-300 transition-all enabled:cursor-pointer'
+                    className='flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong disabled:opacity-40 disabled:cursor-default text-body transition-all enabled:cursor-pointer'
                   >
                     Uninstall
                   </button>
@@ -863,7 +935,7 @@ export const SettingsPanel: React.FC = () => {
             )}
           </div>
         ) : (
-          <p className='text-slate-400 text-sm'>Bubble settings are loading…</p>
+          <p className='text-muted text-sm'>Bubble settings are loading…</p>
         )
       )}
 
@@ -880,7 +952,7 @@ export const SettingsPanel: React.FC = () => {
         ];
         const available = providers.filter((p) => p.hasConfig);
         if (available.length === 0) {
-          return <p className='text-slate-400 text-sm'>Usage settings are loading…</p>;
+          return <p className='text-muted text-sm'>Usage settings are loading…</p>;
         }
         // Fall back to the first available provider if the remembered one isn't
         // (yet) loaded, so the view is never empty.
@@ -890,7 +962,7 @@ export const SettingsPanel: React.FC = () => {
 
         return (
           <div>
-            <div className='inline-flex flex-wrap gap-1 p-1 rounded-xl bg-slate-800/60 border border-slate-700/60 mb-2'>
+            <div className='inline-flex flex-wrap gap-1 p-1 rounded-xl bg-glass/60 border border-edge/60 mb-2'>
               {available.map((p) => (
                 <SubTabPill
                   key={p.toolId}

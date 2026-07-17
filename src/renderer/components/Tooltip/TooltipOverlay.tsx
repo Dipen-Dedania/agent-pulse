@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { BubbleTooltipPayload } from '../../../common/types';
+import { useIsDark } from '../../hooks/useTheme';
 
 // Padding around the glass card so its drop-shadow has room inside the window
 // (anything outside the window bounds is clipped). The card itself is measured
@@ -42,6 +43,8 @@ export const TooltipOverlay: React.FC = () => {
     });
   }, [content, nonce]);
 
+  const isDark = useIsDark();
+
   if (!content) return null;
 
   const accent = content.accent ?? 'rgba(96,165,250,0.9)';
@@ -59,11 +62,11 @@ export const TooltipOverlay: React.FC = () => {
         className='rounded-2xl px-3.5 py-2.5'
         style={{
           maxWidth: 240,
-          background: 'rgba(17,17,24,0.88)',
+          background: isDark ? 'rgba(17,17,24,0.88)' : 'rgba(255,255,255,0.92)',
           backdropFilter: 'blur(18px)',
           WebkitBackdropFilter: 'blur(18px)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
+          border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.10)',
+          boxShadow: isDark ? '0 8px 28px rgba(0,0,0,0.55)' : '0 8px 28px rgba(0,0,0,0.12)',
         }}
       >
         {/* Title + status dot */}
@@ -72,13 +75,13 @@ export const TooltipOverlay: React.FC = () => {
             className='w-2 h-2 rounded-full shrink-0'
             style={{ background: accent, boxShadow: `0 0 8px ${accent}` }}
           />
-          <span className='text-[13px] font-semibold text-white leading-tight truncate'>
+          <span className='text-[13px] font-semibold text-strong leading-tight truncate'>
             {content.title}
           </span>
         </div>
 
         {content.subtitle && (
-          <p className='text-[11px] text-slate-400 mt-0.5 ml-4 leading-tight'>
+          <p className='text-[11px] text-muted mt-0.5 ml-4 leading-tight'>
             {content.subtitle}
           </p>
         )}
@@ -86,7 +89,7 @@ export const TooltipOverlay: React.FC = () => {
         {content.lines.length > 0 && (
           <div className='flex flex-col gap-0.5 mt-1.5'>
             {content.lines.map((line, i) => (
-              <p key={i} className='text-[11px] text-slate-200/90 leading-snug'>
+              <p key={i} className='text-[11px] text-primary/90 leading-snug'>
                 {line}
               </p>
             ))}

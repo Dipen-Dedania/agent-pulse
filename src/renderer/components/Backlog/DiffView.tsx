@@ -168,7 +168,7 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
     return (
       <>
         {truncated && <TruncatedBanner />}
-        <pre className='text-xs text-slate-200 leading-relaxed font-mono max-h-96 overflow-auto apple-scroll whitespace-pre'>
+        <pre className='text-xs text-primary leading-relaxed font-mono max-h-96 overflow-auto apple-scroll whitespace-pre'>
           {patch || 'No diff.'}
         </pre>
       </>
@@ -176,28 +176,28 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
   }
 
   if (files.length === 0) {
-    return <p className='text-sm text-slate-400'>No changes in this diff.</p>;
+    return <p className='text-sm text-muted'>No changes in this diff.</p>;
   }
 
   return (
     <div className='flex flex-col gap-2'>
       {/* Summary + view toggle */}
       <div className='flex items-center gap-3 text-xs'>
-        <span className='text-slate-400'>
+        <span className='text-muted'>
           {files.length} {files.length === 1 ? 'file' : 'files'}
         </span>
-        <span className='text-emerald-300 font-medium'>+{totals.additions}</span>
-        <span className='text-red-300 font-medium'>−{totals.deletions}</span>
+        <span className='text-ok font-medium'>+{totals.additions}</span>
+        <span className='text-danger font-medium'>−{totals.deletions}</span>
         <div className='flex-1' />
-        <div className='flex rounded-lg overflow-hidden border border-slate-700/70'>
+        <div className='flex rounded-lg overflow-hidden border border-edge/70'>
           <button
             onClick={() => setView('split')}
             disabled={!wide}
             title={wide ? 'Side-by-side' : 'Window too narrow for side-by-side'}
             className={`px-2.5 py-1 font-medium transition-colors ${
               effectiveView === 'split'
-                ? 'bg-slate-700 text-white'
-                : 'bg-slate-900/60 text-slate-400 hover:text-slate-200'
+                ? 'bg-control text-strong'
+                : 'bg-inset/60 text-muted hover:text-primary'
             } disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             Split
@@ -206,8 +206,8 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
             onClick={() => setView('unified')}
             className={`px-2.5 py-1 font-medium transition-colors ${
               effectiveView === 'unified'
-                ? 'bg-slate-700 text-white'
-                : 'bg-slate-900/60 text-slate-400 hover:text-slate-200'
+                ? 'bg-control text-strong'
+                : 'bg-inset/60 text-muted hover:text-primary'
             }`}
           >
             Unified
@@ -231,17 +231,17 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
                 key={`${path}-${i}`}
                 onClick={() => scrollToFile(i)}
                 title={file.type === 'rename' ? `${file.oldPath} → ${file.newPath}` : path}
-                className='group flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-slate-700/40 transition-colors'
+                className='group flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-control/40 transition-colors'
               >
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dot}`} aria-label={status.label} />
                 {/* Dir truncates first (shrinkable); filename stays visible, capped at rail width. */}
                 <span className='flex-1 min-w-0 flex text-xs leading-tight'>
-                  {dir && <span className='truncate text-slate-500'>{dir}</span>}
-                  <span className='truncate shrink-0 max-w-full text-slate-200 font-medium'>{base}</span>
+                  {dir && <span className='truncate text-faint'>{dir}</span>}
+                  <span className='truncate shrink-0 max-w-full text-primary font-medium'>{base}</span>
                 </span>
                 <span className='shrink-0 text-[10px] font-mono tabular-nums'>
-                  <span className='text-emerald-300'>+{s.additions}</span>{' '}
-                  <span className='text-red-300'>−{s.deletions}</span>
+                  <span className='text-ok'>+{s.additions}</span>{' '}
+                  <span className='text-danger'>−{s.deletions}</span>
                 </span>
               </button>
             );
@@ -257,17 +257,17 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
               <div
                 key={`${path}-${i}`}
                 ref={(el) => { fileRefs.current[i] = el; }}
-                className='mb-3 rounded-lg border border-slate-700/50 overflow-hidden bg-slate-900/30'
+                className='mb-3 rounded-lg border border-edge/50 overflow-hidden bg-inset/30'
               >
-                <div className='sticky top-0 z-10 flex items-center gap-2 px-3 py-2 bg-slate-800/90 backdrop-blur border-b border-slate-700/50'>
+                <div className='sticky top-0 z-10 flex items-center gap-2 px-3 py-2 bg-glass/90 backdrop-blur border-b border-edge/50'>
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dot}`} />
-                  <span className='text-xs font-mono text-slate-200 truncate flex-1'>
+                  <span className='text-xs font-mono text-primary truncate flex-1'>
                     {file.type === 'rename' ? `${file.oldPath} → ${file.newPath}` : path}
                   </span>
-                  <span className='shrink-0 text-[10px] uppercase tracking-wider text-slate-500'>{status.label}</span>
+                  <span className='shrink-0 text-[10px] uppercase tracking-wider text-faint'>{status.label}</span>
                 </div>
                 {file.isBinary || !file.hunks?.length ? (
-                  <p className='px-3 py-2 text-xs text-slate-500 italic'>
+                  <p className='px-3 py-2 text-xs text-faint italic'>
                     {file.isBinary ? 'Binary file — not shown.' : 'No textual changes.'}
                   </p>
                 ) : (

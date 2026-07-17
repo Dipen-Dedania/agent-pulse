@@ -78,7 +78,7 @@ const Toggle: React.FC<{ checked: boolean; onChange: () => void; label?: string 
     onClick={onChange}
     aria-label={label ?? 'Toggle'}
     className={`relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-      checked ? 'bg-blue-500' : 'bg-slate-600'
+      checked ? 'bg-blue-500' : 'bg-control-strong'
     }`}
   >
     <span
@@ -170,23 +170,23 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
 
   // Header chips ───────────────────────────────────────────────────────────
   const runtimeBadge = detect.runtime
-    ? <span className='inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-300 text-xs font-medium'>{RUNTIME_LABEL[detect.runtime]} ✓</span>
-    : <span className='inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-medium'>No runtime — install Node</span>;
+    ? <span className='inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-info text-xs font-medium'>{RUNTIME_LABEL[detect.runtime]} ✓</span>
+    : <span className='inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-warn text-xs font-medium'>No runtime — install Node</span>;
 
   const stateBadge =
     detect.state === 'ours'
       ? <span className='px-2.5 py-0.5 rounded-full bg-green-500/15 border border-green-500/30 text-green-400 text-xs font-medium'>Installed</span>
       : detect.state === 'foreign'
-        ? <span className='px-2.5 py-0.5 rounded-full bg-slate-700/60 border border-slate-600/50 text-slate-300 text-xs font-medium'>Another status line set</span>
-        : <span className='px-2.5 py-0.5 rounded-full bg-slate-700/60 border border-slate-600/50 text-slate-400 text-xs font-medium'>Not installed</span>;
+        ? <span className='px-2.5 py-0.5 rounded-full bg-control/60 border border-edge-strong/50 text-body text-xs font-medium'>Another status line set</span>
+        : <span className='px-2.5 py-0.5 rounded-full bg-control/60 border border-edge-strong/50 text-muted text-xs font-medium'>Not installed</span>;
 
   return (
-    <section className='mt-6 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl'>
+    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
       {/* Header */}
       <div className='flex items-center gap-3'>
         <div className='flex-1 min-w-0'>
-          <p className='font-semibold text-white leading-tight'>Status Line</p>
-          <p className='text-xs text-slate-400 mt-0.5'>Show context, cost & more in Claude Code&apos;s terminal bar.</p>
+          <p className='font-semibold text-strong leading-tight'>Status Line</p>
+          <p className='text-xs text-muted mt-0.5'>Show context, cost & more in Claude Code&apos;s terminal bar.</p>
         </div>
         <div className='flex items-center gap-2 flex-wrap justify-end'>
           {runtimeBadge}
@@ -197,17 +197,17 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
       <div className='mt-5 flex flex-col gap-5'>
           {/* Live preview — each config line on its own row; long rows scroll
               horizontally so they never break the panel layout. */}
-          <div className='bg-slate-900/70 border border-slate-700/60 rounded-xl px-4 py-3'>
-            <p className='text-[10px] uppercase tracking-widest text-slate-500 mb-2'>Preview</p>
+          <div className='bg-glass/70 border border-edge/60 rounded-xl px-4 py-3'>
+            <p className='text-[10px] uppercase tracking-widest text-faint mb-2'>Preview</p>
             <div className='font-mono text-sm leading-relaxed overflow-x-auto'>
               {preview.lines.map((pl, i) => (
                 <div key={i} className='whitespace-pre w-max'>
                   {pl.segments.length === 0 ? (
-                    <span className='text-slate-600 italic'>—</span>
+                    <span className='text-ghost italic'>—</span>
                   ) : (
                     pl.segments.map((seg, j) => (
                       <React.Fragment key={j}>
-                        {j > 0 && <span className='text-slate-500'>{pl.separator}</span>}
+                        {j > 0 && <span className='text-faint'>{pl.separator}</span>}
                         <span style={{ color: COLOR_CSS[seg.color] ?? COLOR_CSS.white }}>{seg.text}</span>
                       </React.Fragment>
                     ))
@@ -218,41 +218,41 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
           </div>
 
           {/* Install / remove controls */}
-          <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 flex flex-wrap items-center gap-3'>
+          <div className='bg-glass/40 border border-edge/50 rounded-xl p-4 flex flex-wrap items-center gap-3'>
             {detect.state === 'ours' ? (
               <>
-                <p className='text-sm text-slate-300 flex-1 min-w-0'>
+                <p className='text-sm text-body flex-1 min-w-0'>
                   Installed via {detect.runtime ? RUNTIME_LABEL[detect.runtime] : 'a script'}. Edits below apply live.
                 </p>
                 <button
                   onClick={() => onInstall(true)}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors cursor-pointer'
+                  className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-primary transition-colors cursor-pointer'
                 >
                   Re-apply
                 </button>
                 <button
                   onClick={onRemove}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors cursor-pointer'
+                  className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-primary transition-colors cursor-pointer'
                 >
                   Remove
                 </button>
               </>
             ) : detect.state === 'foreign' ? (
               <>
-                <p className='text-sm text-amber-300/90 flex-1 min-w-0'>
+                <p className='text-sm text-warn/90 flex-1 min-w-0'>
                   A different status line is already configured. Replacing it backs up your <span className='font-mono'>settings.json</span> first.
                 </p>
                 <button
                   onClick={() => onInstall(true)}
                   disabled={!detect.runtime}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
+                  className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
                 >
                   Back up &amp; replace
                 </button>
               </>
             ) : (
               <>
-                <p className='text-sm text-slate-300 flex-1 min-w-0'>
+                <p className='text-sm text-body flex-1 min-w-0'>
                   {detect.runtime
                     ? 'Install the status line into Claude Code.'
                     : 'No script runtime (Node, Python, or PowerShell) was found on PATH.'}
@@ -260,7 +260,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                 <button
                   onClick={() => onInstall(false)}
                   disabled={!detect.runtime}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
+                  className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
                 >
                   Install
                 </button>
@@ -271,17 +271,17 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
           {/* Segment editor */}
           <div>
             <div className='flex items-center justify-between gap-3 mb-2'>
-              <p className='text-[10px] uppercase tracking-widest text-slate-500'>Segments</p>
+              <p className='text-[10px] uppercase tracking-widest text-faint'>Segments</p>
               <div className='flex items-center gap-2'>
                 <button
                   onClick={applyDefaultIcons}
-                  className='text-xs px-2.5 py-1 rounded-lg bg-slate-700/50 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer'
+                  className='text-xs px-2.5 py-1 rounded-lg bg-control/50 hover:bg-control text-body transition-colors cursor-pointer'
                 >
                   Add emoji icons
                 </button>
                 <button
                   onClick={clearIcons}
-                  className='text-xs px-2.5 py-1 rounded-lg bg-slate-700/50 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer'
+                  className='text-xs px-2.5 py-1 rounded-lg bg-control/50 hover:bg-control text-body transition-colors cursor-pointer'
                 >
                   Clear icons
                 </button>
@@ -290,13 +290,13 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
 
             <div className='flex flex-col gap-4'>
               {lines.map((row, li) => (
-                <div key={li} className='rounded-xl border border-slate-700/50 bg-slate-900/30 p-3'>
+                <div key={li} className='rounded-xl border border-edge/50 bg-glass/30 p-3'>
                   <div className='flex items-center justify-between mb-2'>
-                    <span className='text-[10px] uppercase tracking-widest text-slate-500'>Line {li + 1}</span>
+                    <span className='text-[10px] uppercase tracking-widest text-faint'>Line {li + 1}</span>
                     {lines.length > 1 && (
                       <button
                         onClick={() => removeLine(li)}
-                        className='text-xs text-slate-500 hover:text-red-400 transition-colors cursor-pointer'
+                        className='text-xs text-faint hover:text-red-400 transition-colors cursor-pointer'
                       >
                         Remove line
                       </button>
@@ -305,14 +305,14 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
 
                   <div className='flex flex-col gap-2'>
                     {row.segments.length === 0 ? (
-                      <p className='text-xs text-slate-600 italic px-1 py-2'>
+                      <p className='text-xs text-ghost italic px-1 py-2'>
                         Empty line — move a segment here with the ↑ / ↓ arrows.
                       </p>
                     ) : (
                       row.segments.map((seg, si) => (
                         <div
                           key={`${seg.type}-${si}`}
-                          className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-3 flex flex-wrap items-center gap-3'
+                          className='bg-glass/40 border border-edge/50 rounded-xl p-3 flex flex-wrap items-center gap-3'
                         >
                           <Toggle checked={seg.enabled} onChange={() => patchSegment(li, si, { enabled: !seg.enabled })} label={`Toggle ${SEGMENT_LABEL[seg.type]}`} />
 
@@ -325,10 +325,10 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                             onChange={(e) => patchSegment(li, si, { icon: e.target.value })}
                             aria-label={`Icon for ${SEGMENT_LABEL[seg.type]}`}
                             title='Optional emoji or glyph shown before this segment'
-                            className='w-11 text-center bg-slate-900/60 border border-slate-700/70 rounded-lg px-1 py-1 text-sm text-white focus:outline-none focus:border-blue-500/60'
+                            className='w-11 text-center bg-glass/60 border border-edge/70 rounded-lg px-1 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
                           />
 
-                          <span className={`text-sm font-medium w-32 ${seg.enabled ? 'text-white' : 'text-slate-500'}`}>
+                          <span className={`text-sm font-medium w-32 ${seg.enabled ? 'text-strong' : 'text-faint'}`}>
                             {SEGMENT_LABEL[seg.type]}
                           </span>
 
@@ -337,7 +337,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                           {/* Type-specific controls */}
                           {seg.type === 'contextBar' && (
                             <>
-                              <label className='flex items-center gap-1.5 text-xs text-slate-400'>
+                              <label className='flex items-center gap-1.5 text-xs text-muted'>
                                 Width
                                 <input
                                   type='number'
@@ -345,10 +345,10 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                                   max={40}
                                   value={seg.width ?? 20}
                                   onChange={(e) => patchSegment(li, si, { width: Math.max(4, Math.min(40, Number(e.target.value) || 20)) })}
-                                  className='w-16 bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500/60'
+                                  className='w-16 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong focus:outline-none focus:border-blue-500/60'
                                 />
                               </label>
-                              <label className='flex items-center gap-1.5 text-xs text-slate-400'>
+                              <label className='flex items-center gap-1.5 text-xs text-muted'>
                                 <Toggle checked={seg.showPercent !== false} onChange={() => patchSegment(li, si, { showPercent: !(seg.showPercent !== false) })} label='Toggle percent' />
                                 %
                               </label>
@@ -367,7 +367,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                             />
                           )}
                           {(seg.type === 'cwd' || seg.type === 'projectDir') && (
-                            <label className='flex items-center gap-1.5 text-xs text-slate-400'>
+                            <label className='flex items-center gap-1.5 text-xs text-muted'>
                               <Toggle checked={seg.basenameOnly !== false} onChange={() => patchSegment(li, si, { basenameOnly: !(seg.basenameOnly !== false) })} label='Toggle basename only' />
                               Folder only
                             </label>
@@ -378,7 +378,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                             <button
                               onClick={() => moveSegmentUp(li, si)}
                               disabled={li === 0 && si === 0}
-                              className='w-7 h-7 rounded-md text-slate-400 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-default cursor-pointer transition-colors flex items-center justify-center'
+                              className='w-7 h-7 rounded-md text-muted bg-control/50 hover:bg-control disabled:opacity-30 disabled:cursor-default cursor-pointer transition-colors flex items-center justify-center'
                               aria-label='Move up'
                             >
                               ↑
@@ -386,7 +386,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                             <button
                               onClick={() => moveSegmentDown(li, si)}
                               disabled={li === lastLine && si === row.segments.length - 1}
-                              className='w-7 h-7 rounded-md text-slate-400 bg-slate-700/50 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-default cursor-pointer transition-colors flex items-center justify-center'
+                              className='w-7 h-7 rounded-md text-muted bg-control/50 hover:bg-control disabled:opacity-30 disabled:cursor-default cursor-pointer transition-colors flex items-center justify-center'
                               aria-label='Move down'
                             >
                               ↓
@@ -402,24 +402,24 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
 
             <button
               onClick={addLine}
-              className='mt-3 text-xs px-3 py-1.5 rounded-lg bg-slate-700/50 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer'
+              className='mt-3 text-xs px-3 py-1.5 rounded-lg bg-control/50 hover:bg-control text-body transition-colors cursor-pointer'
             >
               + Add line
             </button>
 
             {/* Separator + wrap + open settings */}
             <div className='mt-4 flex flex-wrap items-center gap-3'>
-              <label className='flex items-center gap-2 text-xs text-slate-400'>
+              <label className='flex items-center gap-2 text-xs text-muted'>
                 Separator
                 <input
                   type='text'
                   value={config.separator}
                   onChange={(e) => onChange({ separator: e.target.value })}
-                  className='w-24 bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-blue-500/60'
+                  className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong font-mono focus:outline-none focus:border-blue-500/60'
                 />
               </label>
               <label
-                className='flex items-center gap-2 text-xs text-slate-400'
+                className='flex items-center gap-2 text-xs text-muted'
                 title='When a line has more than this many indicators, it wraps onto extra terminal rows. 0 = never wrap.'
               >
                 Wrap after
@@ -429,20 +429,20 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                   max={20}
                   value={config.maxItemsPerLine ?? 0}
                   onChange={(e) => onChange({ maxItemsPerLine: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })}
-                  className='w-16 bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500/60'
+                  className='w-16 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong focus:outline-none focus:border-blue-500/60'
                 />
                 items
               </label>
               <button
                 onClick={() => window.electron.invoke('open-path', detect.settingsPath)}
-                className='text-xs text-slate-500 hover:text-blue-400 transition-colors cursor-pointer font-mono'
+                className='text-xs text-faint hover:text-blue-400 transition-colors cursor-pointer font-mono'
                 title={detect.settingsPath}
               >
                 Open settings.json
               </button>
               <button
                 onClick={onReset}
-                className='ml-auto text-xs text-slate-500 hover:text-red-400 transition-colors cursor-pointer'
+                className='ml-auto text-xs text-faint hover:text-red-400 transition-colors cursor-pointer'
                 title='Replace the current layout with the default two-line layout with icons'
               >
                 Reset to default

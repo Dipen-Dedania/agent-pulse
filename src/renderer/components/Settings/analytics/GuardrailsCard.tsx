@@ -28,15 +28,15 @@ export const GuardrailsCard: React.FC = () => {
 
           {data.byTool.length > 0 && (
             <div className='mb-5'>
-              <p className='text-[11px] uppercase tracking-wide text-slate-500 mb-2'>By tool</p>
+              <p className='text-[11px] uppercase tracking-wide text-faint mb-2'>By tool</p>
               <div className='space-y-1.5'>
                 {data.byTool.map((t) => {
                   const label = TOOL_META[t.toolId as ToolId]?.label ?? t.toolId;
                   return (
                     <div key={t.toolId} className='flex items-center gap-3 text-xs'>
-                      <span className='text-slate-300 flex-1 truncate'>{label}</span>
-                      <span className='text-slate-400 font-mono tabular-nums w-10 text-right'>{t.total}</span>
-                      <span className='text-amber-300/90 font-mono tabular-nums w-12 text-right' title='Warn'>
+                      <span className='text-body flex-1 truncate'>{label}</span>
+                      <span className='text-muted font-mono tabular-nums w-10 text-right'>{t.total}</span>
+                      <span className='text-warn/90 font-mono tabular-nums w-12 text-right' title='Warn'>
                         {t.warn}w
                       </span>
                       <span className='text-rose-300/90 font-mono tabular-nums w-12 text-right' title='Block'>
@@ -51,15 +51,15 @@ export const GuardrailsCard: React.FC = () => {
 
           {data.byRule.length > 0 && (
             <div>
-              <p className='text-[11px] uppercase tracking-wide text-slate-500 mb-2'>Top rules</p>
+              <p className='text-[11px] uppercase tracking-wide text-faint mb-2'>Top rules</p>
               <div className='space-y-1.5'>
                 {data.byRule.slice(0, 8).map((r) => (
                   <div key={r.ruleId} className='flex items-start gap-3 text-xs'>
-                    <span className='text-slate-300 flex-1 leading-snug'>
+                    <span className='text-body flex-1 leading-snug'>
                       <span className='block truncate'>{r.message}</span>
-                      <span className='block text-[10px] text-slate-500 font-mono truncate'>{r.ruleId}</span>
+                      <span className='block text-[10px] text-faint font-mono truncate'>{r.ruleId}</span>
                     </span>
-                    <span className='text-slate-400 font-mono tabular-nums shrink-0 mt-0.5'>
+                    <span className='text-muted font-mono tabular-nums shrink-0 mt-0.5'>
                       {formatCompactNumber(r.count)}
                     </span>
                   </div>
@@ -77,7 +77,7 @@ const Stat: React.FC<{ label: string; value: number; tone: 'neutral' | 'warn' | 
   const toneCls =
     tone === 'warn'  ? 'text-amber-200 border-amber-500/30 bg-amber-500/10' :
     tone === 'block' ? 'text-rose-200  border-rose-500/30  bg-rose-500/10'  :
-                       'text-slate-200 border-slate-700/60 bg-slate-900/40';
+                       'text-primary border-edge/60 bg-inset/40';
   return (
     <div className={`rounded-xl border px-3 py-2.5 ${toneCls}`}>
       <p className='text-[10px] uppercase tracking-wide opacity-70'>{label}</p>

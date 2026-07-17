@@ -22,8 +22,8 @@ const TIER_LABELS: Record<GuardrailTier, string> = {
 };
 
 const TIER_STYLES: Record<GuardrailTier, string> = {
-  mustBlock: 'bg-red-500/15 border-red-500/30 text-red-300',
-  warn:      'bg-amber-500/15 border-amber-500/30 text-amber-300',
+  mustBlock: 'bg-red-500/15 border-red-500/30 text-danger',
+  warn:      'bg-amber-500/15 border-amber-500/30 text-warn',
 };
 
 export const GuardrailsTab: React.FC = () => {
@@ -83,8 +83,8 @@ export const GuardrailsTab: React.FC = () => {
 
   if (!config) {
     return (
-      <div className='flex items-center gap-3 text-slate-400'>
-        <div className='w-4 h-4 border-2 border-slate-500 border-t-blue-400 rounded-full animate-spin' />
+      <div className='flex items-center gap-3 text-muted'>
+        <div className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
         Loading guardrails…
       </div>
     );
@@ -95,14 +95,14 @@ export const GuardrailsTab: React.FC = () => {
       <div className='flex items-center justify-between mb-5'>
         <div>
           <h2 className='text-xl font-bold tracking-tight'>Command Guardrails</h2>
-          <p className='text-sm text-slate-400 mt-1'>
+          <p className='text-sm text-muted mt-1'>
             Inspect shell commands before tools run them. Blocking works for tools that honour PreToolUse responses; everything else gets a warning.
           </p>
         </div>
         <button
           onClick={() => update({ enabled: !config.enabled })}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.enabled ? 'bg-blue-500' : 'bg-slate-600'
+            config.enabled ? 'bg-blue-500' : 'bg-control-strong'
           }`}
           aria-label='Toggle guardrails'
           title={config.enabled ? 'Guardrails ON' : 'Guardrails OFF'}
@@ -116,9 +116,9 @@ export const GuardrailsTab: React.FC = () => {
       </div>
 
       {/* Rule list */}
-      <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl'>
+      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl'>
         <div className='flex items-center justify-between mb-4'>
-          <p className='text-xs font-semibold uppercase tracking-widest text-slate-500'>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
             Rules ({allRules.length})
           </p>
           <button
@@ -138,8 +138,8 @@ export const GuardrailsTab: React.FC = () => {
                 key={rule.id}
                 className={`flex items-start gap-3 p-3 rounded-xl border ${
                   isDisabled
-                    ? 'bg-slate-900/40 border-slate-700/40 opacity-50'
-                    : 'bg-slate-900/60 border-slate-700/60'
+                    ? 'bg-glass/40 border-edge/40 opacity-50'
+                    : 'bg-glass/60 border-edge/60'
                 }`}
               >
                 <span
@@ -149,25 +149,25 @@ export const GuardrailsTab: React.FC = () => {
                 </span>
                 <div className='flex-1 min-w-0'>
                   <div className='flex items-center gap-2'>
-                    <code className='text-xs text-slate-300 font-mono truncate'>{rule.id}</code>
-                    <span className='text-[10px] text-slate-500'>
+                    <code className='text-xs text-body font-mono truncate'>{rule.id}</code>
+                    <span className='text-[10px] text-faint'>
                       {rule.os.join(', ')}
                     </span>
                     {isCustom && (
                       <span className='text-[10px] text-blue-400 font-medium'>custom</span>
                     )}
                   </div>
-                  <p className='text-sm text-slate-300 mt-0.5'>{rule.message}</p>
-                  <code className='text-[10px] text-slate-500 font-mono break-all'>/{rule.pattern}/{rule.flags ?? ''}</code>
+                  <p className='text-sm text-body mt-0.5'>{rule.message}</p>
+                  <code className='text-[10px] text-faint font-mono break-all'>/{rule.pattern}/{rule.flags ?? ''}</code>
                   {rule.suggestedFix && (
-                    <p className='text-[11px] text-slate-400 mt-1 italic'>→ {rule.suggestedFix}</p>
+                    <p className='text-[11px] text-muted mt-1 italic'>→ {rule.suggestedFix}</p>
                   )}
                 </div>
                 <div className='flex flex-col items-end gap-1 shrink-0'>
                   <button
                     onClick={() => toggleRule(rule.id, !isDisabled)}
                     className={`relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer ${
-                      !isDisabled ? 'bg-blue-500' : 'bg-slate-600'
+                      !isDisabled ? 'bg-blue-500' : 'bg-control-strong'
                     }`}
                     aria-label={isDisabled ? 'Enable rule' : 'Disable rule'}
                   >
@@ -180,7 +180,7 @@ export const GuardrailsTab: React.FC = () => {
                   {isCustom && (
                     <button
                       onClick={() => removeCustomRule(rule.id)}
-                      className='text-[10px] text-slate-500 hover:text-red-400 cursor-pointer transition-colors'
+                      className='text-[10px] text-faint hover:text-red-400 cursor-pointer transition-colors'
                     >
                       delete
                     </button>
@@ -193,30 +193,30 @@ export const GuardrailsTab: React.FC = () => {
       </div>
 
       {/* Recent events */}
-      <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl mt-5'>
-        <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3'>
+      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl mt-5'>
+        <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
           Recent activity {events.length > 0 && `(${events.length})`}
         </p>
         {events.length === 0 ? (
-          <p className='text-sm text-slate-500 italic'>No guardrail events yet.</p>
+          <p className='text-sm text-faint italic'>No guardrail events yet.</p>
         ) : (
           <div className='flex flex-col gap-2 max-h-72 overflow-y-auto apple-scroll'>
             {events.map((evt, i) => (
               <div
                 key={`${evt.ts}-${i}`}
-                className='flex items-start gap-3 p-2.5 rounded-lg bg-slate-900/60 border border-slate-700/40'
+                className='flex items-start gap-3 p-2.5 rounded-lg bg-glass/60 border border-edge/40'
               >
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
                     evt.decision === 'block'
-                      ? 'bg-red-500/15 border-red-500/30 text-red-300'
-                      : 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                      ? 'bg-red-500/15 border-red-500/30 text-danger'
+                      : 'bg-amber-500/15 border-amber-500/30 text-warn'
                   }`}
                 >
                   {evt.decision}
                 </span>
                 <div className='flex-1 min-w-0'>
-                  <div className='flex items-center gap-2 text-[10px] text-slate-500'>
+                  <div className='flex items-center gap-2 text-[10px] text-faint'>
                     <span>{new Date(evt.ts).toLocaleTimeString()}</span>
                     <span>·</span>
                     <span>{evt.toolId}</span>
@@ -227,8 +227,8 @@ export const GuardrailsTab: React.FC = () => {
                       </>
                     )}
                   </div>
-                  <code className='text-xs text-slate-300 font-mono break-all'>{evt.command}</code>
-                  <p className='text-[11px] text-slate-400 mt-0.5'>
+                  <code className='text-xs text-body font-mono break-all'>{evt.command}</code>
+                  <p className='text-[11px] text-muted mt-0.5'>
                     {evt.matched.map(m => m.ruleId).join(', ')}
                   </p>
                 </div>
@@ -321,19 +321,19 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
       onClick={onClose}
     >
       <div
-        className='apple-scroll relative w-full max-w-lg mx-4 bg-slate-900/95 border border-slate-700/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
+        className='apple-scroll relative w-full max-w-lg mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-slate-700/60 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors text-sm cursor-pointer'
+          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
           aria-label='Close'
         >
           ✕
         </button>
         <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-1'>New rule</p>
-          <h2 className='text-lg font-bold text-white'>Custom guardrail</h2>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>New rule</p>
+          <h2 className='text-lg font-bold text-strong'>Custom guardrail</h2>
         </div>
 
         <Field label='ID'>
@@ -367,7 +367,7 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
                 key={t}
                 onClick={() => setTier(t)}
                 className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors border ${
-                  tier === t ? TIER_STYLES[t] : 'border-slate-700 text-slate-400 hover:text-white'
+                  tier === t ? TIER_STYLES[t] : 'border-edge text-muted hover:text-strong'
                 }`}
               >
                 {TIER_LABELS[t]}
@@ -384,8 +384,8 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
                 onClick={() => toggleOs(o)}
                 className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors border ${
                   osSet.has(o)
-                    ? 'bg-blue-500/15 border-blue-500/30 text-blue-300'
-                    : 'border-slate-700 text-slate-400 hover:text-white'
+                    ? 'bg-blue-500/15 border-blue-500/30 text-info'
+                    : 'border-edge text-muted hover:text-strong'
                 }`}
               >
                 {label}
@@ -419,7 +419,7 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
         <div className='flex justify-end gap-2 mt-2'>
           <button
             onClick={onClose}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 cursor-pointer transition-colors'
+            className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
           >
             Cancel
           </button>
@@ -437,11 +437,11 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
 };
 
 const inputCls =
-  'w-full bg-slate-800/60 border border-slate-700/60 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500/60';
+  'w-full bg-glass/60 border border-edge/60 rounded-lg px-3 py-2 text-sm text-strong placeholder:text-faint focus:outline-none focus:border-blue-500/60';
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div>
-    <p className='text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5'>{label}</p>
+    <p className='text-xs font-semibold uppercase tracking-wider text-faint mb-1.5'>{label}</p>
     {children}
   </div>
 );

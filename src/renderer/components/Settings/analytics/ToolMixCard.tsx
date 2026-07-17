@@ -24,7 +24,7 @@ export const ToolMixCard: React.FC = () => {
         <span className='inline-flex items-center gap-1.5'>
           <InfoPill>Estimated cost</InfoPill>
           <InfoTooltip label='Cost coverage'>
-            <span className='text-[11px] text-slate-300 leading-snug'>{COVERAGE_NOTE}</span>
+            <span className='text-[11px] text-body leading-snug'>{COVERAGE_NOTE}</span>
           </InfoTooltip>
         </span>
       }
@@ -36,7 +36,7 @@ export const ToolMixCard: React.FC = () => {
       ) : (
         <div>
           {/* Share-of-active-time bar */}
-          <div className='flex h-3 rounded-full overflow-hidden bg-slate-900/60'>
+          <div className='flex h-3 rounded-full overflow-hidden bg-glass/60'>
             {data.slices.map((s, i) => (
               <div
                 key={s.toolId}
@@ -51,30 +51,30 @@ export const ToolMixCard: React.FC = () => {
             {data.slices.map((s, i) => {
               const meta = TOOL_META[s.toolId as ToolId];
               return (
-                <div key={s.toolId} className='bg-slate-900/40 border border-slate-700/40 rounded-xl p-3'>
+                <div key={s.toolId} className='bg-glass/40 border border-edge/40 rounded-xl p-3'>
                   <div className='flex items-center gap-2.5 mb-2'>
                     <span className='w-2.5 h-2.5 rounded-sm shrink-0' style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                     {meta && (
-                      <div className='w-6 h-6 rounded-md bg-slate-700/60 flex items-center justify-center shrink-0'>
+                      <div className='w-6 h-6 rounded-md bg-control/60 flex items-center justify-center shrink-0'>
                         <img src={meta.icon} alt={meta.label} className='w-4 h-4 object-contain' />
                       </div>
                     )}
-                    <span className='text-sm font-medium text-slate-100 flex-1 truncate'>{meta?.label ?? s.toolId}</span>
+                    <span className='text-sm font-medium text-primary flex-1 truncate'>{meta?.label ?? s.toolId}</span>
                     {s.hasTokenData ? (
-                      <span className='text-sm font-semibold text-emerald-300 font-mono tabular-nums shrink-0'>
+                      <span className='text-sm font-semibold text-ok font-mono tabular-nums shrink-0'>
                         {formatUsd(s.costUsd)}
                       </span>
                     ) : (
                       <InfoPill tone='warn'>no token data</InfoPill>
                     )}
                   </div>
-                  <div className='flex items-center justify-between text-[11px] text-slate-400 font-mono tabular-nums'>
+                  <div className='flex items-center justify-between text-[11px] text-muted font-mono tabular-nums'>
                     <span>
                       {formatDuration(s.activeMs)} active
                       {s.hasTokenData && (
                         <>
-                          {' · '}in <span className='text-slate-200'>{formatCompactNumber(s.tokensIn)}</span>
-                          {' · '}out <span className='text-slate-200'>{formatCompactNumber(s.tokensOut)}</span>
+                          {' · '}in <span className='text-primary'>{formatCompactNumber(s.tokensIn)}</span>
+                          {' · '}out <span className='text-primary'>{formatCompactNumber(s.tokensOut)}</span>
                         </>
                       )}
                     </span>
@@ -87,12 +87,12 @@ export const ToolMixCard: React.FC = () => {
             })}
           </div>
 
-          <p className='text-[11px] text-slate-500 mt-3 flex items-center justify-between'>
+          <p className='text-[11px] text-faint mt-3 flex items-center justify-between'>
             <span>
-              Total active: <span className='text-slate-300 font-mono'>{formatDuration(data.totalActiveMs)}</span>
+              Total active: <span className='text-body font-mono'>{formatDuration(data.totalActiveMs)}</span>
             </span>
             <span>
-              Est. spend: <span className='text-emerald-300 font-mono'>{formatUsd(data.totalCostUsd)}</span>
+              Est. spend: <span className='text-ok font-mono'>{formatUsd(data.totalCostUsd)}</span>
             </span>
           </p>
         </div>

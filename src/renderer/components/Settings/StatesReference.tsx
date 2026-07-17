@@ -70,7 +70,7 @@ const StateCard: React.FC<CardConfig> = ({
   const ring = colors.ring?.dark ?? null;
 
   return (
-    <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-4 flex flex-col gap-3 shadow-xl'>
+    <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-4 flex flex-col gap-3 shadow-xl'>
       <div className='flex items-center gap-3'>
         <div className='relative w-9 h-9 shrink-0 flex items-center justify-center'>
           <div
@@ -96,7 +96,7 @@ const StateCard: React.FC<CardConfig> = ({
         </div>
         <p className={`font-semibold text-sm ${colors.textClass}`}>{label}</p>
       </div>
-      <p className='text-xs text-slate-400 leading-relaxed'>{description}</p>
+      <p className='text-xs text-muted leading-relaxed'>{description}</p>
     </div>
   );
 };
@@ -132,7 +132,7 @@ const MascotStateCard: React.FC<{ card: CardConfig; mascot: MascotEntry }> = ({
   const Mascot = mascot.Component;
 
   return (
-    <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-4 flex flex-col gap-3 shadow-xl'>
+    <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-4 flex flex-col gap-3 shadow-xl'>
       <div className='h-28 flex items-center justify-center overflow-hidden'>
         <Mascot state={card.state} width={mascot.width} />
       </div>
@@ -148,7 +148,7 @@ const MascotStates: React.FC = () => {
   return (
     <div className='mt-8'>
       <div className='flex flex-wrap items-center justify-between gap-3 mb-4'>
-        <p className='text-xs font-semibold uppercase tracking-widest text-slate-500'>
+        <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
           Mascot States
         </p>
         <div className='flex gap-1.5'>
@@ -159,8 +159,8 @@ const MascotStates: React.FC = () => {
                 key={m.id}
                 onClick={() => setMascotId(m.id)}
                 className={`flex items-center cursor-pointer gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${active
-                    ? 'bg-slate-700/80 border-slate-500/70 text-slate-100'
-                    : 'bg-slate-800/40 border-slate-700/70 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                    ? 'bg-control/80 border-edge-strong/70 text-primary'
+                    : 'bg-glass/40 border-edge/70 text-muted hover:text-primary hover:border-edge-strong'
                   }`}
               >
                 <img src={TOOL_META[m.id].icon} alt='' className='w-3.5 h-3.5' />
@@ -175,7 +175,7 @@ const MascotStates: React.FC = () => {
           <MascotStateCard key={`${mascot.id}-${card.state}`} card={card} mascot={mascot} />
         ))}
       </div>
-      <p className='text-[11px] text-slate-500 mt-3'>
+      <p className='text-[11px] text-faint mt-3'>
         Shown when Mascot mode is enabled for the tool in the Bubble tab.
       </p>
     </div>
@@ -184,7 +184,7 @@ const MascotStates: React.FC = () => {
 
 export const StatesReference: React.FC = () => (
   <div className='mt-10'>
-    <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4'>
+    <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-4'>
       Agent States
     </p>
     <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3'>

@@ -1,6 +1,9 @@
 export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'antigravity-cli' | 'grok';
 export type AgentState = 'working' | 'waiting' | 'idle' | 'idle-active' | 'error';
 
+export type ThemeMode = 'light' | 'dark' | 'auto';
+export interface AppearanceConfig { theme: ThemeMode; }
+
 // ─── Bubble appearance & behavior ────────────────────────────────────────────
 // User-tunable look/feel of the status bubbles. Persisted in user-config and
 // shared between the main process (window sizing/placement) and the renderer

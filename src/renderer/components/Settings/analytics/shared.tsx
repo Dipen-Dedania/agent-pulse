@@ -24,11 +24,11 @@ export const Card: React.FC<{
   right?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ title, subtitle, right, children }) => (
-  <div className='mb-5 bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 shadow-xl'>
+  <div className='mb-5 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl'>
     <div className='flex items-start justify-between gap-3 mb-4'>
       <div>
-        <h3 className='text-base font-semibold text-white leading-tight'>{title}</h3>
-        {subtitle && <p className='text-xs text-slate-400 mt-1'>{subtitle}</p>}
+        <h3 className='text-base font-semibold text-strong leading-tight'>{title}</h3>
+        {subtitle && <p className='text-xs text-muted mt-1'>{subtitle}</p>}
       </div>
       {right && <div className='shrink-0'>{right}</div>}
     </div>
@@ -41,7 +41,7 @@ export const Segmented: React.FC<{
   value: string;
   onChange: (next: string) => void;
 }> = ({ options, value, onChange }) => (
-  <div className='inline-flex gap-1 p-1 bg-slate-800/60 border border-slate-700/60 rounded-lg'>
+  <div className='inline-flex gap-1 p-1 bg-glass/60 border border-edge/60 rounded-lg'>
     {options.map((opt) => {
       const active = opt.value === value;
       return (
@@ -49,7 +49,7 @@ export const Segmented: React.FC<{
           key={opt.value}
           onClick={() => onChange(opt.value)}
           className={`px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors ${
-            active ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
+            active ? 'bg-control text-strong' : 'text-muted hover:text-strong'
           }`}
         >
           {opt.label}
@@ -142,7 +142,7 @@ export const InfoTooltip: React.FC<{ children: React.ReactNode; label?: string }
         onMouseLeave={hide}
         onFocus={show}
         onBlur={hide}
-        className='inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-500/50 text-slate-400 text-[10px] font-semibold leading-none cursor-help hover:text-slate-100 hover:border-slate-300/70 focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-300/60 transition-colors'
+        className='inline-flex items-center justify-center w-4 h-4 rounded-full border border-edge-strong/50 text-muted text-[10px] font-semibold leading-none cursor-help hover:text-primary hover:border-edge focus:outline-none focus-visible:ring-1 focus-visible:ring-edge transition-colors'
       >
         i
       </button>
@@ -161,7 +161,7 @@ export const InfoTooltip: React.FC<{ children: React.ReactNode; label?: string }
           }}
           className='w-max max-w-[18rem]'
         >
-          <span className='block bg-slate-900/95 backdrop-blur-md border border-slate-600/60 rounded-lg shadow-2xl px-3 py-2.5 text-left font-normal normal-case tracking-normal'>
+          <span className='block bg-overlay/95 backdrop-blur-md border border-edge-strong/60 rounded-lg shadow-2xl px-3 py-2.5 text-left font-normal normal-case tracking-normal'>
             {children}
           </span>
         </div>,
@@ -200,7 +200,7 @@ export function useChartTip() {
           style={{ position: 'fixed', left: tip.x, top: tip.y, zIndex: 9999, pointerEvents: 'none' }}
           className='w-max max-w-[18rem]'
         >
-          <span className='block bg-slate-900/95 backdrop-blur-md border border-slate-600/60 rounded-lg shadow-2xl px-2.5 py-1.5 text-left text-[11px] text-slate-200 whitespace-nowrap'>
+          <span className='block bg-overlay/95 backdrop-blur-md border border-edge-strong/60 rounded-lg shadow-2xl px-2.5 py-1.5 text-left text-[11px] text-primary whitespace-nowrap'>
             {tip.content}
           </span>
         </div>,
@@ -220,11 +220,11 @@ function effectiveRate(costUsd: number, tokens: number): string {
 }
 
 const BreakdownRow: React.FC<{ label: string; tokens: number; costUsd: number }> = ({ label, tokens, costUsd }) => (
-  <tr className='text-[11px] text-slate-300'>
-    <td className='py-0.5 pr-3 text-slate-400'>{label}</td>
-    <td className='py-0.5 pr-3 text-right font-mono tabular-nums text-slate-300'>{formatCompactNumber(tokens)}</td>
-    <td className='py-0.5 pr-3 text-right font-mono tabular-nums text-slate-500'>{effectiveRate(costUsd, tokens)}</td>
-    <td className='py-0.5 text-right font-mono tabular-nums text-emerald-300'>{formatUsd(costUsd)}</td>
+  <tr className='text-[11px] text-body'>
+    <td className='py-0.5 pr-3 text-muted'>{label}</td>
+    <td className='py-0.5 pr-3 text-right font-mono tabular-nums text-body'>{formatCompactNumber(tokens)}</td>
+    <td className='py-0.5 pr-3 text-right font-mono tabular-nums text-faint'>{effectiveRate(costUsd, tokens)}</td>
+    <td className='py-0.5 text-right font-mono tabular-nums text-ok'>{formatUsd(costUsd)}</td>
   </tr>
 );
 
@@ -239,11 +239,11 @@ export const CostBreakdownContent: React.FC<{
   breakdown: CostBreakdown;
   totalUsd: number;
 }> = ({ tokensIn, tokensOut, cacheWrite, cacheRead, breakdown, totalUsd }) => (
-  <div className='text-slate-200'>
-    <p className='text-[11px] font-semibold text-slate-200 mb-1.5'>How this is estimated</p>
+  <div className='text-primary'>
+    <p className='text-[11px] font-semibold text-primary mb-1.5'>How this is estimated</p>
     <table className='w-full border-collapse'>
       <thead>
-        <tr className='text-[9px] uppercase tracking-wider text-slate-500'>
+        <tr className='text-[9px] uppercase tracking-wider text-faint'>
           <th className='py-0.5 pr-3 text-left font-medium'>Class</th>
           <th className='py-0.5 pr-3 text-right font-medium'>Tokens</th>
           <th className='py-0.5 pr-3 text-right font-medium'>Rate</th>
@@ -257,13 +257,13 @@ export const CostBreakdownContent: React.FC<{
         <BreakdownRow label='Cache read'  tokens={cacheRead}  costUsd={breakdown.cacheRead} />
       </tbody>
       <tfoot>
-        <tr className='text-[11px] font-semibold border-t border-slate-700/70'>
-          <td className='pt-1.5 pr-3 text-slate-200' colSpan={3}>Total</td>
-          <td className='pt-1.5 text-right font-mono tabular-nums text-emerald-300'>{formatUsd(totalUsd)}</td>
+        <tr className='text-[11px] font-semibold border-t border-edge/70'>
+          <td className='pt-1.5 pr-3 text-primary' colSpan={3}>Total</td>
+          <td className='pt-1.5 text-right font-mono tabular-nums text-ok'>{formatUsd(totalUsd)}</td>
         </tr>
       </tfoot>
     </table>
-    <p className='text-[10px] text-slate-500 mt-2 leading-snug'>
+    <p className='text-[10px] text-faint mt-2 leading-snug'>
       Cache writes bill at ≈1.25× the input rate; cache reads at ≈0.1× (≈90% cheaper). Rates are
       Anthropic API list prices and blend if an aggregate spans multiple models.
     </p>
@@ -271,9 +271,9 @@ export const CostBreakdownContent: React.FC<{
 );
 
 export const EmptyState: React.FC<{ message: string }> = ({ message }) => (
-  <div className='flex items-center justify-center py-8 text-sm text-slate-500'>{message}</div>
+  <div className='flex items-center justify-center py-8 text-sm text-faint'>{message}</div>
 );
 
 export const SkeletonLine: React.FC<{ width?: string; height?: string }> = ({ width = '100%', height = '0.75rem' }) => (
-  <div className='bg-slate-700/40 rounded animate-pulse' style={{ width, height }} />
+  <div className='bg-control/40 rounded animate-pulse' style={{ width, height }} />
 );

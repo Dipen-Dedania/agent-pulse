@@ -42,7 +42,7 @@ export const ModelUsageCard: React.FC = () => {
           <span className='inline-flex items-center gap-1.5'>
             <InfoPill>Source coverage</InfoPill>
             <InfoTooltip label='Model source coverage'>
-              <span className='text-[11px] text-slate-300 leading-snug'>{COVERAGE_NOTE}</span>
+              <span className='text-[11px] text-body leading-snug'>{COVERAGE_NOTE}</span>
             </InfoTooltip>
           </span>
         </div>
@@ -63,27 +63,27 @@ export const ModelUsageCard: React.FC = () => {
             const pct = total > 0 ? (value / total) * 100 : 0;
             const meta = row.toolId ? TOOL_META[row.toolId as ToolId] : null;
             return (
-              <div key={row.model} className='bg-slate-900/40 border border-slate-700/40 rounded-xl p-3'>
+              <div key={row.model} className='bg-glass/40 border border-edge/40 rounded-xl p-3'>
                 <div className='flex items-center gap-2.5 mb-2'>
                   {meta && (
-                    <div className='w-6 h-6 rounded-md bg-slate-700/60 flex items-center justify-center shrink-0'>
+                    <div className='w-6 h-6 rounded-md bg-control/60 flex items-center justify-center shrink-0'>
                       <img src={meta.icon} alt={meta.label} className='w-4 h-4 object-contain' />
                     </div>
                   )}
-                  <p className='text-sm font-medium text-slate-100 flex-1 truncate font-mono'>{row.model}</p>
+                  <p className='text-sm font-medium text-primary flex-1 truncate font-mono'>{row.model}</p>
                   {!row.priced && <InfoPill tone='warn'>unpriced</InfoPill>}
-                  <p className='text-xs text-slate-300 font-mono tabular-nums shrink-0'>
+                  <p className='text-xs text-body font-mono tabular-nums shrink-0'>
                     {mode === 'cost' ? formatUsd(row.costUsd) : `${pct.toFixed(1)}%`}
                   </p>
                 </div>
-                <div className='h-1.5 bg-slate-900/60 rounded-full overflow-hidden mb-2'>
+                <div className='h-1.5 bg-glass/60 rounded-full overflow-hidden mb-2'>
                   <div className='h-full bg-blue-500' style={{ width: `${pct}%` }} />
                 </div>
-                <div className='flex items-center justify-between text-[11px] text-slate-400 font-mono tabular-nums'>
+                <div className='flex items-center justify-between text-[11px] text-muted font-mono tabular-nums'>
                   <span className='inline-flex items-center gap-1.5'>
-                    in <span className='text-slate-200'>{formatCompactNumber(row.tokensIn)}</span> ·
-                    out <span className='text-slate-200'>{formatCompactNumber(row.tokensOut)}</span> ·
-                    <span className='text-slate-200'>{formatUsd(row.costUsd)}</span>
+                    in <span className='text-primary'>{formatCompactNumber(row.tokensIn)}</span> ·
+                    out <span className='text-primary'>{formatCompactNumber(row.tokensOut)}</span> ·
+                    <span className='text-primary'>{formatUsd(row.costUsd)}</span>
                     {row.priced && (
                       <InfoTooltip label={`${row.model} cost breakdown`}>
                         <CostBreakdownContent

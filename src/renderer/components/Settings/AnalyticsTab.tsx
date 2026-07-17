@@ -25,13 +25,13 @@ interface TimelineStatus {
 const UnavailableBanner: React.FC<{ reason: string }> = ({ reason }) => (
   <div className='mb-5 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5'>
     <div className='flex items-start gap-3'>
-      <div className='w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 shrink-0'>
+      <div className='w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-warn shrink-0'>
         !
       </div>
       <div className='flex-1'>
         <p className='font-semibold text-amber-200 leading-tight'>Pulse Timeline isn't running</p>
         <p className='text-sm text-amber-100/80 mt-1'>{reason}</p>
-        <p className='text-xs text-amber-100/70 mt-2 font-mono bg-slate-900/40 border border-slate-700/40 rounded-lg px-3 py-2'>
+        <p className='text-xs text-amber-100/70 mt-2 font-mono bg-glass/40 border border-edge/40 rounded-lg px-3 py-2'>
           npm run rebuild:native
         </p>
         <p className='text-[11px] text-amber-100/60 mt-2'>
@@ -54,13 +54,13 @@ const FreshnessControl: React.FC = () => {
   const ago = fetchedAt != null ? Math.max(0, Math.round((Date.now() - fetchedAt) / 1000)) : null;
   const label = ago == null ? 'loading…' : ago < 5 ? 'just now' : ago < 90 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
   return (
-    <div className='flex items-center gap-1.5 text-[11px] text-slate-500'>
+    <div className='flex items-center gap-1.5 text-[11px] text-faint'>
       <span>updated {label}</span>
       <button
         onClick={refreshAnalytics}
         aria-label='Refresh analytics'
         title='Refresh'
-        className='w-6 h-6 rounded-md border border-slate-700/60 bg-slate-800/60 text-slate-400 hover:text-white hover:border-slate-500/70 transition-colors cursor-pointer'
+        className='w-6 h-6 rounded-md border border-edge/60 bg-glass/60 text-muted hover:text-strong hover:border-edge-strong/70 transition-colors cursor-pointer'
       >
         ↻
       </button>
@@ -79,10 +79,10 @@ const PrivacyAndSettings: React.FC<Props> = ({ config, onConfigChange }) => {
     return (
       <button
         onClick={() => setOpen(true)}
-        className='w-full mb-5 bg-slate-800/40 border border-slate-700/50 rounded-2xl px-5 py-3 flex items-center justify-between text-left cursor-pointer hover:border-slate-600/70 transition-colors'
+        className='w-full mb-5 bg-glass/40 border border-edge/50 rounded-2xl px-5 py-3 flex items-center justify-between text-left cursor-pointer hover:border-edge-strong/70 transition-colors'
       >
-        <span className='text-sm font-medium text-slate-300'>Analytics settings</span>
-        <span className='text-xs text-slate-500'>Redaction · idle gap · show ▾</span>
+        <span className='text-sm font-medium text-body'>Analytics settings</span>
+        <span className='text-xs text-faint'>Redaction · idle gap · show ▾</span>
       </button>
     );
   }
@@ -92,22 +92,22 @@ const PrivacyAndSettings: React.FC<Props> = ({ config, onConfigChange }) => {
       title='Settings'
       subtitle='Local-only. None of this leaves your machine.'
       right={
-        <button onClick={() => setOpen(false)} className='text-xs text-slate-500 hover:text-white cursor-pointer'>
+        <button onClick={() => setOpen(false)} className='text-xs text-faint hover:text-strong cursor-pointer'>
           hide ▴
         </button>
       }
     >
       <div className='flex items-center justify-between gap-4 mb-4'>
         <div className='flex-1'>
-          <p className='font-medium text-white text-sm leading-tight'>Redact task text</p>
-          <p className='text-xs text-slate-400 mt-1'>
+          <p className='font-medium text-strong text-sm leading-tight'>Redact task text</p>
+          <p className='text-xs text-muted mt-1'>
             Drop task summaries when storing events. Use for screen-sharing — existing rows stay intact.
           </p>
         </div>
         <button
           onClick={() => onConfigChange({ redactTaskText: !config.redactTaskText })}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.redactTaskText ? 'bg-blue-500' : 'bg-slate-600'
+            config.redactTaskText ? 'bg-blue-500' : 'bg-control-strong'
           }`}
           aria-label='Toggle task-text redaction'
         >
@@ -121,8 +121,8 @@ const PrivacyAndSettings: React.FC<Props> = ({ config, onConfigChange }) => {
 
       <div className='flex items-center justify-between gap-4'>
         <div className='flex-1'>
-          <p className='font-medium text-white text-sm leading-tight'>Idle gap before closing a session</p>
-          <p className='text-xs text-slate-400 mt-1'>
+          <p className='font-medium text-strong text-sm leading-tight'>Idle gap before closing a session</p>
+          <p className='text-xs text-muted mt-1'>
             How long an agent must be quiet before its session closes. Shorter = more sessions, less aggregation.
           </p>
         </div>
@@ -138,7 +138,7 @@ const PrivacyAndSettings: React.FC<Props> = ({ config, onConfigChange }) => {
             onTouchEnd={() => onConfigChange({ idleGapMinutes: gap })}
             className='w-32 cursor-pointer'
           />
-          <span className='text-xs font-mono text-slate-300 w-12 text-right'>{gap} min</span>
+          <span className='text-xs font-mono text-body w-12 text-right'>{gap} min</span>
         </div>
       </div>
     </Card>
@@ -195,7 +195,7 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
         <GuardrailsCard />
         <SecretProtectionCard />
         <PrivacyAndSettings config={config} onConfigChange={handleConfigChange} />
-        <p className='text-[11px] text-slate-500 text-center mt-1 mb-3'>
+        <p className='text-[11px] text-faint text-center mt-1 mb-3'>
           Costs are estimates at public API list prices ({priceProvenance}), not your actual plan billing.
           Only agents that expose token usage can be priced.
         </p>
@@ -234,7 +234,7 @@ export const AnalyticsTabContainer: React.FC = () => {
   };
 
   if (!config) {
-    return <p className='text-slate-400 text-sm'>Analytics loading…</p>;
+    return <p className='text-muted text-sm'>Analytics loading…</p>;
   }
   return <AnalyticsTab config={config} onConfigChange={handleChange} status={status} />;
 };

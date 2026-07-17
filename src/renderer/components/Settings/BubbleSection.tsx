@@ -44,11 +44,11 @@ const PositionPicker: React.FC<{
     'bottom-right': 'bottom-2 right-2',
   };
   return (
-    <div className='relative w-full max-w-[280px] aspect-[16/10] rounded-xl bg-slate-900/60 border border-slate-700/70 overflow-hidden'>
+    <div className='relative w-full max-w-[280px] aspect-[16/10] rounded-xl bg-inset/60 border border-edge/70 overflow-hidden'>
       {/* faux taskbar */}
-      <div className='absolute bottom-0 left-0 right-0 h-2 bg-slate-700/50' />
+      <div className='absolute bottom-0 left-0 right-0 h-2 bg-control/50' />
       {hasCustomAnchor && (
-        <span className='absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-widest text-slate-400 font-semibold pointer-events-none'>
+        <span className='absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-widest text-muted font-semibold pointer-events-none'>
           Custom
         </span>
       )}
@@ -63,7 +63,7 @@ const PositionPicker: React.FC<{
             className={`absolute ${cornerClass[opt.id]} w-5 h-5 rounded-full cursor-pointer transition-all ${
               active
                 ? 'bg-blue-500 ring-2 ring-blue-300/60 scale-110'
-                : 'bg-slate-600/70 hover:bg-slate-500'
+                : 'bg-control-strong/70 hover:bg-control-strong'
             }`}
           />
         );
@@ -112,8 +112,8 @@ const DisplayPicker: React.FC<{
             title={`${displayName(d, i)} — ${d.bounds.width}×${d.bounds.height}${d.primary ? ' (primary)' : ''}`}
             className={`absolute rounded-lg border flex items-center justify-center transition-colors cursor-pointer ${
               active
-                ? 'bg-blue-500/25 border-blue-400/80 text-white'
-                : 'bg-slate-900/60 border-slate-600/80 text-slate-400 hover:border-slate-400 hover:text-slate-200'
+                ? 'bg-blue-500/25 border-blue-400/80 text-strong'
+                : 'bg-inset/60 border-edge-strong/80 text-muted hover:border-edge-strong hover:text-primary'
             }`}
             style={{
               left: Math.round((d.bounds.x - minX) * scale),
@@ -124,7 +124,7 @@ const DisplayPicker: React.FC<{
           >
             <span className='text-sm font-semibold'>{i + 1}</span>
             {d.primary && (
-              <span className='absolute bottom-1 text-[9px] uppercase tracking-wider text-slate-500'>
+              <span className='absolute bottom-1 text-[9px] uppercase tracking-wider text-faint'>
                 Primary
               </span>
             )}
@@ -158,19 +158,19 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
   const selectedDisplay = displays[selectedDisplayIndex] ?? displays.find((d) => d.primary);
 
   return (
-    <section className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl flex flex-col gap-7'>
+    <section className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl flex flex-col gap-7'>
       <div>
-        <h2 className='text-lg font-bold text-white'>Bubble appearance</h2>
-        <p className='text-sm text-slate-400 mt-1'>
+        <h2 className='text-lg font-bold text-strong'>Bubble appearance</h2>
+        <p className='text-sm text-muted mt-1'>
           Tune how the status bubbles look and sound. Changes apply instantly and persist across restarts.
         </p>
       </div>
 
       {/* ── Show bubbles (master visibility) ─────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
         <div className='min-w-0'>
-          <p className='text-sm font-medium text-white'>Show bubbles</p>
-          <p className='text-xs text-slate-400 mt-0.5'>
+          <p className='text-sm font-medium text-strong'>Show bubbles</p>
+          <p className='text-xs text-muted mt-0.5'>
             Hide every bubble from your screen while keeping tracking, usage, and guardrails fully active.
             The hooks keep running — only the floating bubbles disappear.
           </p>
@@ -179,7 +179,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           onClick={() => onChange({ hidden: !config.hidden })}
           aria-pressed={!config.hidden}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.hidden ? 'bg-slate-600' : 'bg-blue-500'
+            config.hidden ? 'bg-control-strong' : 'bg-blue-500'
           }`}
         >
           <span
@@ -191,10 +191,10 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       </div>
 
       {/* ── Clawd mascot (Claude Code) ───────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
         <div className='min-w-0'>
-          <p className='text-sm font-medium text-white'>Clawd mascot (Claude Code)</p>
-          <p className='text-xs text-slate-400 mt-0.5'>
+          <p className='text-sm font-medium text-strong'>Clawd mascot (Claude Code)</p>
+          <p className='text-xs text-muted mt-0.5'>
             Swap the Claude Code orb for an animated Clawd whose pose tracks the agent — sleeping when idle,
             waving a flag when it needs you, working out while it runs. Other tools keep the orb.
             The Claude bubble grows a little to give Clawd room.
@@ -204,7 +204,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           onClick={() => onChange({ mascotClaudeCode: !config.mascotClaudeCode })}
           aria-pressed={!!config.mascotClaudeCode}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotClaudeCode ? 'bg-blue-500' : 'bg-slate-600'
+            config.mascotClaudeCode ? 'bg-blue-500' : 'bg-control-strong'
           }`}
         >
           <span
@@ -216,10 +216,10 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       </div>
 
       {/* ── Frog mascot (OpenAI Codex) ───────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
         <div className='min-w-0'>
-          <p className='text-sm font-medium text-white'>Frog mascot (OpenAI Codex)</p>
-          <p className='text-xs text-slate-400 mt-0.5'>
+          <p className='text-sm font-medium text-strong'>Frog mascot (OpenAI Codex)</p>
+          <p className='text-xs text-muted mt-0.5'>
             Swap the OpenAI Codex orb for an animated frog whose pose tracks the agent — sleeping when idle,
             raising a sign when it needs you, hopping and working out while it runs. Other tools keep the orb.
             The Codex bubble grows a little to give the frog room.
@@ -229,7 +229,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           onClick={() => onChange({ mascotOpenaiCodex: !config.mascotOpenaiCodex })}
           aria-pressed={!!config.mascotOpenaiCodex}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotOpenaiCodex ? 'bg-blue-500' : 'bg-slate-600'
+            config.mascotOpenaiCodex ? 'bg-blue-500' : 'bg-control-strong'
           }`}
         >
           <span
@@ -241,10 +241,10 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       </div>
 
       {/* ── GIGI mascot (Antigravity) ────────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
         <div className='min-w-0'>
-          <p className='text-sm font-medium text-white'>GIGI mascot (Antigravity)</p>
-          <p className='text-xs text-slate-400 mt-0.5'>
+          <p className='text-sm font-medium text-strong'>GIGI mascot (Antigravity)</p>
+          <p className='text-xs text-muted mt-0.5'>
             Swap the Antigravity orb for an animated GIGI droplet whose pose tracks the agent — sleeping when idle,
             raising a flag when it needs you, bouncing and working out while it runs. Other tools keep the orb.
             The Antigravity bubble grows a little to give GIGI room.
@@ -254,7 +254,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           onClick={() => onChange({ mascotAntigravity: !config.mascotAntigravity })}
           aria-pressed={!!config.mascotAntigravity}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotAntigravity ? 'bg-blue-500' : 'bg-slate-600'
+            config.mascotAntigravity ? 'bg-blue-500' : 'bg-control-strong'
           }`}
         >
           <span
@@ -266,10 +266,10 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       </div>
 
       {/* ── Ghost mascot (Kiro) ──────────────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
         <div className='min-w-0'>
-          <p className='text-sm font-medium text-white'>Ghost mascot (Kiro)</p>
-          <p className='text-xs text-slate-400 mt-0.5'>
+          <p className='text-sm font-medium text-strong'>Ghost mascot (Kiro)</p>
+          <p className='text-xs text-muted mt-0.5'>
             Swap the Kiro orb for an animated ghost whose pose tracks the agent — sleeping when idle,
             raising a sign when it needs you, hopping and spinning while it runs. Other tools keep the orb.
             The Kiro bubble grows a little to give the ghost room.
@@ -279,7 +279,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           onClick={() => onChange({ mascotKiro: !config.mascotKiro })}
           aria-pressed={!!config.mascotKiro}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotKiro ? 'bg-blue-500' : 'bg-slate-600'
+            config.mascotKiro ? 'bg-blue-500' : 'bg-control-strong'
           }`}
         >
           <span
@@ -291,10 +291,10 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       </div>
 
       {/* ── Mico mascot (VS Code Copilot) ────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-slate-900/40 border border-slate-700/60 px-4 py-3'>
+      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
         <div className='min-w-0'>
-          <p className='text-sm font-medium text-white'>Mico mascot (VS Code Copilot)</p>
-          <p className='text-xs text-slate-400 mt-0.5'>
+          <p className='text-sm font-medium text-strong'>Mico mascot (VS Code Copilot)</p>
+          <p className='text-xs text-muted mt-0.5'>
             Swap the Copilot orb for an animated Mico blob whose pose tracks the agent — sleeping when idle,
             raising a sign when it needs you, bouncing and lifting weights while it runs. Other tools keep the orb.
             The Copilot bubble grows a little to give Mico room.
@@ -304,7 +304,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           onClick={() => onChange({ mascotVscodeCopilot: !config.mascotVscodeCopilot })}
           aria-pressed={!!config.mascotVscodeCopilot}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotVscodeCopilot ? 'bg-blue-500' : 'bg-slate-600'
+            config.mascotVscodeCopilot ? 'bg-blue-500' : 'bg-control-strong'
           }`}
         >
           <span
@@ -317,8 +317,8 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
       {/* ── Size ──────────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Size</p>
-        <p className='text-xs text-slate-400 -mt-1'>
+        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Size</p>
+        <p className='text-xs text-muted -mt-1'>
           Scales the whole bubble — orb, icon, and the usage bars beneath it (width &amp; thickness).
         </p>
         <div className='flex gap-3'>
@@ -330,8 +330,8 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
                 onClick={() => onChange({ size: opt.id })}
                 className={`flex-1 flex flex-col items-center justify-center gap-2 py-4 rounded-xl border transition-colors cursor-pointer ${
                   active
-                    ? 'bg-blue-500/15 border-blue-500/50 text-white'
-                    : 'bg-slate-900/40 border-slate-700/60 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                    ? 'bg-blue-500/15 border-blue-500/50 text-strong'
+                    : 'bg-inset/40 border-edge/60 text-muted hover:border-edge-strong hover:text-primary'
                 }`}
               >
                 <span
@@ -354,8 +354,8 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
       {/* ── Fill ─────────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Fill</p>
-        <p className='text-xs text-slate-400 -mt-1'>
+        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Fill</p>
+        <p className='text-xs text-muted -mt-1'>
           Frosted glass blends with your desktop, but a dark logo (e.g. Cursor) can vanish over a dark
           window. A solid fill paints a consistent backdrop so every logo stays clearly visible.
         </p>
@@ -368,8 +368,8 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
                 onClick={() => onChange({ fillMode: opt.id })}
                 className={`flex-1 flex flex-col items-center justify-center gap-2 py-4 rounded-xl border transition-colors cursor-pointer ${
                   active
-                    ? 'bg-blue-500/15 border-blue-500/50 text-white'
-                    : 'bg-slate-900/40 border-slate-700/60 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                    ? 'bg-blue-500/15 border-blue-500/50 text-strong'
+                    : 'bg-inset/40 border-edge/60 text-muted hover:border-edge-strong hover:text-primary'
                 }`}
               >
                 <span
@@ -402,18 +402,18 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
                   aria-label={`Fill color ${c}`}
                   title={c}
                   className={`w-7 h-7 rounded-full cursor-pointer transition-transform ${
-                    active ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-slate-800 scale-110' : 'hover:scale-105'
+                    active ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-glass scale-110' : 'hover:scale-105'
                   }`}
                   style={{ background: c, border: '1.5px solid rgba(255,255,255,0.25)' }}
                 />
               );
             })}
-            <label className='flex items-center gap-2 ml-1 text-xs text-slate-400 cursor-pointer'>
+            <label className='flex items-center gap-2 ml-1 text-xs text-muted cursor-pointer'>
               <input
                 type='color'
                 value={/^#[0-9a-f]{6}$/i.test(config.fillColor || '') ? config.fillColor : '#ffffff'}
                 onChange={(e) => onChange({ fillColor: e.target.value })}
-                className='w-7 h-7 rounded-lg bg-transparent border border-slate-700/70 cursor-pointer p-0'
+                className='w-7 h-7 rounded-lg bg-transparent border border-edge/70 cursor-pointer p-0'
                 aria-label='Custom fill color'
               />
               Custom
@@ -425,12 +425,12 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       {/* ── Opacity ──────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
         <div className='flex items-center justify-between'>
-          <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Opacity</p>
-          <span className='text-xs font-medium text-slate-300 tabular-nums'>
+          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Opacity</p>
+          <span className='text-xs font-medium text-body tabular-nums'>
             {Math.round((config.opacity ?? 1) * 100)}%
           </span>
         </div>
-        <p className='text-xs text-slate-400 -mt-1'>
+        <p className='text-xs text-muted -mt-1'>
           How see-through the whole bubble is — orb or mascot, usage bars, and badges all dim together.
         </p>
         <input
@@ -448,8 +448,8 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       {/* ── Monitor ──────────────────────────────────────────────────────── */}
       {displays.length > 1 && (
         <div className='flex flex-col gap-3'>
-          <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Monitor</p>
-          <p className='text-xs text-slate-400 -mt-1'>
+          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Monitor</p>
+          <p className='text-xs text-muted -mt-1'>
             Choose which screen the bubble stack lives on. The layout mirrors your OS display arrangement.
           </p>
           <DisplayPicker
@@ -458,7 +458,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             hasCustomAnchor={config.anchor != null}
             onChange={(id) => onChange({ displayId: id, anchor: null })}
           />
-          <p className='text-xs text-slate-500'>
+          <p className='text-xs text-faint'>
             {config.anchor != null
               ? 'Bubbles follow where you dragged them. Pick a monitor to snap the stack back to its corner on that screen.'
               : selectedDisplay
@@ -470,7 +470,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
       {/* ── Stack position ───────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Default stack position</p>
+        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Default stack position</p>
         <div className='flex flex-col sm:flex-row items-start gap-5'>
           <PositionPicker
             value={config.stackPosition}
@@ -487,7 +487,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                     active
                       ? 'bg-blue-600 text-white'
-                      : 'bg-slate-700/60 text-slate-300 hover:bg-slate-700'
+                      : 'bg-control/60 text-body hover:bg-control'
                   }`}
                 >
                   {opt.label}
@@ -496,7 +496,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             })}
           </div>
         </div>
-        <p className='text-xs text-slate-500'>
+        <p className='text-xs text-faint'>
           {config.anchor != null
             ? 'Bubbles stay where you dragged them — on any monitor — and stack toward that screen\'s middle. Pick a corner to snap back to a preset.'
             : `Bubbles anchor to the ${selectedPositionLabel.toLowerCase()} corner and stack toward the screen's middle. Drag a bubble to place the stack anywhere, on any monitor.`}
@@ -505,8 +505,8 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
       {/* ── Inactivity sound ─────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold'>Inactivity notification sound</p>
-        <p className='text-xs text-slate-400 -mt-1'>
+        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Inactivity notification sound</p>
+        <p className='text-xs text-muted -mt-1'>
           Plays when an agent finishes and flips to “waiting for input.”
         </p>
         <div className='flex flex-col gap-2'>
@@ -518,7 +518,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
                 className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border transition-colors ${
                   active
                     ? 'bg-blue-500/15 border-blue-500/50'
-                    : 'bg-slate-900/40 border-slate-700/60'
+                    : 'bg-inset/40 border-edge/60'
                 }`}
               >
                 <button
@@ -527,22 +527,22 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
                 >
                   <span
                     className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
-                      active ? 'border-blue-400' : 'border-slate-500'
+                      active ? 'border-blue-400' : 'border-edge-strong'
                     }`}
                   >
                     {active && <span className='w-2 h-2 rounded-full bg-blue-400' />}
                   </span>
                   <span>
-                    <span className={`text-sm font-medium ${active ? 'text-white' : 'text-slate-300'}`}>
+                    <span className={`text-sm font-medium ${active ? 'text-strong' : 'text-body'}`}>
                       {sound.label}
                     </span>
-                    <span className='text-xs text-slate-500 ml-2'>{sound.hint}</span>
+                    <span className='text-xs text-faint ml-2'>{sound.hint}</span>
                   </span>
                 </button>
                 {sound.id !== 'none' && (
                   <button
                     onClick={() => playBubbleSound(sound.id)}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700/70 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors shrink-0'
+                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control/70 hover:bg-control-strong text-primary cursor-pointer transition-colors shrink-0'
                     aria-label={`Preview ${sound.label}`}
                   >
                     ▶ Preview

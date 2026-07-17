@@ -63,8 +63,8 @@ export const BacklogBoardTab: React.FC = () => {
 
   if (!store.loaded) {
     return (
-      <div className='flex items-center gap-3 text-slate-400'>
-        <div className='w-4 h-4 border-2 border-slate-500 border-t-blue-400 rounded-full animate-spin' />
+      <div className='flex items-center gap-3 text-muted'>
+        <div className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
         Loading board…
       </div>
     );
@@ -72,9 +72,9 @@ export const BacklogBoardTab: React.FC = () => {
 
   if (!store.available) {
     return (
-      <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl'>
-        <h2 className='text-lg font-bold text-white'>Backlog board unavailable</h2>
-        <p className='text-sm text-slate-400 mt-2'>{store.reason}</p>
+      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+        <h2 className='text-lg font-bold text-strong'>Backlog board unavailable</h2>
+        <p className='text-sm text-muted mt-2'>{store.reason}</p>
       </div>
     );
   }
@@ -304,14 +304,14 @@ export const BacklogBoardTab: React.FC = () => {
     // stretch instead of hugging the top of a maximized window.
     <div className='flex flex-col gap-5 min-h-[calc(100vh-16rem)]'>
       {/* Header: glance + project filter + actions */}
-      <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-4 shadow-xl flex flex-col gap-3'>
+      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-4 shadow-xl flex flex-col gap-3'>
         <div className='flex items-center gap-3 flex-wrap'>
           <div className='flex-1 min-w-48'>
-            {glance && <p className='text-sm text-white'>{glance}</p>}
+            {glance && <p className='text-sm text-strong'>{glance}</p>}
             {status?.lastRun && (
-              <p className='text-xs text-slate-400 mt-0.5'>
+              <p className='text-xs text-muted mt-0.5'>
                 Last run: {status.lastRun.cardTitle} —{' '}
-                <span className={status.lastRun.outcome === 'success' ? 'text-emerald-300' : 'text-amber-300'}>
+                <span className={status.lastRun.outcome === 'success' ? 'text-ok' : 'text-warn'}>
                   {status.lastRun.outcome}
                 </span>
               </p>
@@ -319,14 +319,14 @@ export const BacklogBoardTab: React.FC = () => {
           </div>
           <button
             onClick={handleAddProject}
-            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'
+            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
           >
             + Add project
           </button>
           <button
             onClick={() => setEditor({ open: true, card: null })}
             disabled={store.projects.length === 0}
-            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700/40 disabled:text-slate-500 text-white cursor-pointer transition-colors'
+            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white cursor-pointer transition-colors'
             title={store.projects.length === 0 ? 'Register a project folder first' : undefined}
           >
             + New card
@@ -338,7 +338,7 @@ export const BacklogBoardTab: React.FC = () => {
             <button
               onClick={() => setProjectFilter('all')}
               className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-                projectFilter === 'all' ? 'bg-slate-700 text-white shadow-inner' : 'text-slate-400 hover:text-white'
+                projectFilter === 'all' ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
               }`}
             >
               All projects
@@ -356,7 +356,7 @@ export const BacklogBoardTab: React.FC = () => {
                 </button>
                 <button
                   onClick={() => void handleRemoveProject(p.id)}
-                  className='px-1.5 py-1 rounded-r-lg text-xs text-slate-500 hover:text-red-300 hover:bg-red-500/20 cursor-pointer transition-colors'
+                  className='px-1.5 py-1 rounded-r-lg text-xs text-faint hover:text-danger hover:bg-red-500/20 cursor-pointer transition-colors'
                   title={`Remove ${p.name} from the board`}
                   aria-label={`Remove ${p.name}`}
                 >
@@ -369,9 +369,9 @@ export const BacklogBoardTab: React.FC = () => {
       </div>
 
       {store.projects.length === 0 ? (
-        <div className='bg-slate-800/60 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 shadow-xl'>
-          <h2 className='text-lg font-bold text-white'>Add your first project</h2>
-          <p className='text-sm text-slate-400 mt-2 max-w-xl'>
+        <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+          <h2 className='text-lg font-bold text-strong'>Add your first project</h2>
+          <p className='text-sm text-muted mt-2 max-w-xl'>
             Cards belong to a project (a repo folder — the agent runs there). Register one, queue research
             cards, and the Backlog Scheduler executes them during your idle windows — turning unused
             5-hour-window credit into reports waiting for you in the morning.
@@ -403,7 +403,7 @@ export const BacklogBoardTab: React.FC = () => {
           {(blocked.length > 0 || rework.length > 0 || paused.length > 0) && (
             <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
               {blocked.length > 0 && (
-                <BoardColumn title='Blocked' count={blocked.length} accent='text-red-300' hint='needs your attention'>
+                <BoardColumn title='Blocked' count={blocked.length} accent='text-danger' hint='needs your attention'>
                   {blocked.map(renderTile)}
                 </BoardColumn>
               )}
@@ -413,7 +413,7 @@ export const BacklogBoardTab: React.FC = () => {
                 </BoardColumn>
               )}
               {paused.length > 0 && (
-                <BoardColumn title='Paused' count={paused.length} accent='text-amber-300' hint='resumes next window'>
+                <BoardColumn title='Paused' count={paused.length} accent='text-warn' hint='resumes next window'>
                   {paused.map(renderTile)}
                 </BoardColumn>
               )}

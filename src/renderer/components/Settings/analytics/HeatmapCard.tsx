@@ -5,6 +5,7 @@ import { ToolId } from '../../../../common/types';
 import { useHeatmap } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, Segmented, SkeletonLine, formatDuration, useChartTip } from './shared';
+import { useIsDark } from '../../../hooks/useTheme';
 
 // Logarithmic intensity scale: most days are short, a few are outliers. Linear
 // would compress the differences. 0 → empty, 1 → faintest cell, 1.0 → max.
@@ -19,9 +20,10 @@ function bgFor(alpha: number): string {
   return `rgba(96, 165, 250, ${alpha.toFixed(2)})`; // blue-400-ish
 }
 
-// Lighter than the slate-800/60 card so days with no activity still read as
-// filled cells — otherwise weekend rows vanish and the grid looks Mon–Fri only.
-const EMPTY_BG = 'rgb(71 85 105 / 0.45)';
+// Lighter than the card so days with no activity still read as filled cells.
+function emptyBg(isDark: boolean): string {
+  return isDark ? 'rgb(71 85 105 / 0.45)' : 'rgb(148 163 184 / 0.25)';
+}
 
 function seriesLabel(key: string, displayName: string): string {
   // For toolId series we already have a display name from TOOL_META.
@@ -49,8 +51,8 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 const CellTip: React.FC<{ label: string; cell: HeatmapCell }> = ({ label, cell }) => (
   <span>
-    <span className='font-semibold text-white'>{formatDuration(cell.activeMs)}</span>
-    <span className='text-slate-400'>
+    <span className='font-semibold text-strong'>{formatDuration(cell.activeMs)}</span>
+    <span className='text-muted'>
       {' '}· {label} · {cell.sessions} {cell.sessions === 1 ? 'session' : 'sessions'}
     </span>
   </span>
@@ -65,6 +67,7 @@ const CalendarGrid: React.FC<{
   cellPx: number;
   tipHandlers: (content: React.ReactNode) => object;
 }> = ({ cells, maxMs, cellPx, tipHandlers }) => {
+  const isDark = useIsDark();
   const GAP = 2;
   const col = cellPx + GAP;
 
@@ -97,7 +100,7 @@ const CalendarGrid: React.FC<{
         {monthLabels.map(({ week, label }) => (
           <span
             key={`${week}-${label}`}
-            className='absolute top-0 text-[9px] text-slate-500 whitespace-nowrap'
+            className='absolute top-0 text-[9px] text-faint whitespace-nowrap'
             style={{ left: week * col }}
           >
             {label}
@@ -109,7 +112,7 @@ const CalendarGrid: React.FC<{
           {([['Mon', 1], ['Wed', 3], ['Fri', 5]] as const).map(([d, row]) => (
             <span
               key={d}
-              className='absolute right-1.5 flex items-center text-[9px] text-slate-500 leading-none'
+              className='absolute right-1.5 flex items-center text-[9px] text-faint leading-none'
               style={{ top: row * col, height: cellPx }}
             >
               {d}
@@ -128,11 +131,11 @@ const CalendarGrid: React.FC<{
                 return (
                   <div
                     key={d}
-                    className='rounded-[2px] hover:ring-1 hover:ring-slate-300/60'
+                    className='rounded-[2px] hover:ring-1 hover:ring-edge-strong/60'
                     style={{
                       width: cellPx,
                       height: cellPx,
-                      backgroundColor: a === 0 ? EMPTY_BG : bgFor(a),
+                      backgroundColor: a === 0 ? emptyBg(isDark) : bgFor(a),
                     }}
                     {...tipHandlers(<CellTip label={cell.date} cell={cell} />)}
                   />
@@ -156,7 +159,7 @@ const SeriesRow: React.FC<{
   tipHandlers: (content: React.ReactNode) => object;
 }> = ({ series, cells, maxMs, weekly, tipHandlers }) => (
   <div className='flex items-center gap-2 mb-1'>
-    <div className='w-24 text-[11px] text-slate-400 truncate shrink-0' title={series.displayName}>
+    <div className='w-24 text-[11px] text-muted truncate shrink-0' title={series.displayName}>
       {seriesLabel(series.key, series.displayName)}
     </div>
     <div className='flex gap-px flex-1 min-w-0'>
@@ -165,7 +168,7 @@ const SeriesRow: React.FC<{
         return (
           <div
             key={cell.date}
-            className='flex-1 min-w-0 h-3 rounded-[1px] hover:ring-1 hover:ring-slate-300/60'
+            className='flex-1 min-w-0 h-3 rounded-[1px] hover:ring-1 hover:ring-edge-strong/60'
             style={{ backgroundColor: a === 0 ? EMPTY_BG : bgFor(a) }}
             {...tipHandlers(
               <CellTip label={weekly ? `week of ${cell.date}` : cell.date} cell={cell} />,
@@ -258,7 +261,7 @@ export const HeatmapCard: React.FC = () => {
               />
             ))
           )}
-          <div className='mt-3 flex items-center gap-2 text-[10px] text-slate-500'>
+          <div className='mt-3 flex items-center gap-2 text-[10px] text-faint'>
             <span>Less</span>
             <div className='flex gap-0.5'>
               {[0.1, 0.3, 0.5, 0.75, 1].map((a) => (

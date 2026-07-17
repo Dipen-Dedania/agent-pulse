@@ -28,12 +28,12 @@ function formatDuration(attempt: BacklogAttempt): string | null {
 }
 
 const OUTCOME_COLOR: Record<string, string> = {
-  success: 'text-emerald-300',
-  failed: 'text-red-300',
-  paused: 'text-amber-300',
-  killed: 'text-amber-300',
+  success: 'text-ok',
+  failed: 'text-danger',
+  paused: 'text-warn',
+  killed: 'text-warn',
   'qa-failed': 'text-orange-300',
-  'no-changes': 'text-amber-300',
+  'no-changes': 'text-warn',
   blocked: 'text-rose-300',
 };
 
@@ -207,33 +207,33 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
       <div
-        className={`apple-scroll relative w-full mx-4 bg-slate-900/95 border border-slate-700/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-3 overflow-y-auto ${
+        className={`apple-scroll relative w-full mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-3 overflow-y-auto ${
           isDiff ? 'max-w-[1600px] max-h-[92vh]' : 'max-w-3xl max-h-[85vh]'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-slate-700/60 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors text-sm cursor-pointer'
+          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
           aria-label='Close'
         >
           ✕
         </button>
 
         <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-slate-500 mb-1'>Card history</p>
-          <h2 className='text-lg font-bold text-white leading-tight pr-8'>{card.title}</h2>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>Card history</p>
+          <h2 className='text-lg font-bold text-strong leading-tight pr-8'>{card.title}</h2>
         </div>
 
         {loading ? (
-          <p className='text-sm text-slate-400'>Loading…</p>
+          <p className='text-sm text-muted'>Loading…</p>
         ) : (
           <>
             {/* Attempt history */}
-            <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl px-4 py-3'>
-              <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold mb-1.5'>Attempts</p>
+            <div className='bg-glass/40 border border-edge/50 rounded-xl px-4 py-3'>
+              <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-1.5'>Attempts</p>
               {attempts.length === 0 ? (
-                <p className='text-sm text-slate-400'>No runs yet.</p>
+                <p className='text-sm text-muted'>No runs yet.</p>
               ) : (
                 <div className='flex flex-col gap-2'>
                   {attempts.map((a) => {
@@ -247,28 +247,28 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                     return (
                       <div key={a.id} className='flex flex-col gap-0.5'>
                         <div className='flex items-center gap-3 text-xs flex-wrap'>
-                          <span className='text-slate-400 w-32 shrink-0'>{formatWhen(a.startedAt)}</span>
-                          <span className={`font-medium ${OUTCOME_COLOR[a.outcome ?? ''] ?? 'text-slate-300'}`}>
+                          <span className='text-muted w-32 shrink-0'>{formatWhen(a.startedAt)}</span>
+                          <span className={`font-medium ${OUTCOME_COLOR[a.outcome ?? ''] ?? 'text-body'}`}>
                             {OUTCOME_LABEL[a.outcome ?? ''] ?? a.outcome ?? 'running…'}
                           </span>
                           {noChanges && a.outcome !== 'no-changes' && (
-                            <span className='px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-semibold uppercase tracking-wide'>
+                            <span className='px-1.5 py-0.5 rounded bg-amber-500/15 text-warn text-[10px] font-semibold uppercase tracking-wide'>
                               no file changes
                             </span>
                           )}
-                          {formatDuration(a) && <span className='text-slate-500'>{formatDuration(a)}</span>}
-                          {a.costUsd != null && <span className='text-slate-500'>${a.costUsd.toFixed(2)}</span>}
-                          {a.numTurns != null && <span className='text-slate-500'>{a.numTurns} turns</span>}
-                          {a.manual && <span className='text-slate-500'>manual</span>}
+                          {formatDuration(a) && <span className='text-faint'>{formatDuration(a)}</span>}
+                          {a.costUsd != null && <span className='text-faint'>${a.costUsd.toFixed(2)}</span>}
+                          {a.numTurns != null && <span className='text-faint'>{a.numTurns} turns</span>}
+                          {a.manual && <span className='text-faint'>manual</span>}
                           {/* reason only when there's no richer report summary (failed/killed
                               runs write no report) — avoids showing the same line twice. */}
                           {a.reason && !summary && (
-                            <span className='text-slate-500 truncate max-w-64' title={a.reason}>{a.reason}</span>
+                            <span className='text-faint truncate max-w-64' title={a.reason}>{a.reason}</span>
                           )}
                         </div>
                         {summary && (
                           <p
-                            className='text-slate-400 leading-snug line-clamp-2 pl-[8.75rem] text-xs'
+                            className='text-muted leading-snug line-clamp-2 pl-[8.75rem] text-xs'
                             title={report?.preview}
                           >
                             {summary}
@@ -283,15 +283,15 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
 
             {/* Artifact — grouped by kind: Summary / Diff / QA report */}
             {artifacts.length > 0 && (
-              <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl p-4 flex flex-col gap-3'>
+              <div className='bg-glass/40 border border-edge/50 rounded-xl p-4 flex flex-col gap-3'>
                 <div className='flex items-center gap-2 flex-wrap'>
-                  <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold flex-1'>
+                  <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>
                     {selected ? KIND_LABEL[selected.kind] : 'Report'}
                   </p>
                   {qaVerdict && (
                     <span
                       className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                        qaVerdict === 'passed' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'
+                        qaVerdict === 'passed' ? 'bg-emerald-500/15 text-ok' : 'bg-red-500/15 text-danger'
                       }`}
                     >
                       {qaVerdict === 'passed' ? 'PASS' : 'FAIL'}
@@ -301,7 +301,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                     <select
                       value={selected?.id ?? ''}
                       onChange={(e) => setSelected(artifacts.find((x) => x.id === e.target.value) ?? null)}
-                      className='bg-slate-900/60 border border-slate-700/70 rounded-lg px-2 py-1 text-xs text-white cursor-pointer focus:outline-none'
+                      className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong cursor-pointer focus:outline-none'
                     >
                       {KIND_ORDER.map((kind) => {
                         const inKind = artifacts.filter((x) => x.kind === kind);
@@ -318,14 +318,14 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                   )}
                   <button
                     onClick={openFile}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'
+                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
                   >
                     Open file
                   </button>
                 </div>
                 {selected?.kind === 'diff' ? (
                   content == null ? (
-                    <p className='text-sm text-slate-400'>Loading diff…</p>
+                    <p className='text-sm text-muted'>Loading diff…</p>
                   ) : (
                     <DiffView patch={content} truncated={contentTruncated} />
                   )
@@ -334,19 +334,19 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                   // preview instead of raw source. Falls back to the ~500-char
                   // preview when the artifact file couldn't be read.
                   content == null ? (
-                    <p className='text-sm text-slate-400'>Loading…</p>
+                    <p className='text-sm text-muted'>Loading…</p>
                   ) : (
                     <div className='max-h-96 overflow-y-auto apple-scroll'>
                       <Markdown content={content} />
                       {contentTruncated && (
-                        <p className='mt-2 text-[11px] text-slate-500 italic'>
+                        <p className='mt-2 text-[11px] text-faint italic'>
                           Preview truncated — use “Open file” to read the full report.
                         </p>
                       )}
                     </div>
                   )
                 ) : (
-                  <pre className='whitespace-pre-wrap text-xs text-slate-200 leading-relaxed font-mono max-h-96 overflow-y-auto apple-scroll'>
+                  <pre className='whitespace-pre-wrap text-xs text-primary leading-relaxed font-mono max-h-96 overflow-y-auto apple-scroll'>
                     {content ?? 'Loading…'}
                   </pre>
                 )}
@@ -355,15 +355,15 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
 
             {/* Worktree — execution cards only, preserved until removed by hand */}
             {card.taskType === 'execution' && card.worktreePath && !worktreeGone && (
-              <div className='bg-slate-900/40 border border-slate-700/50 rounded-xl px-4 py-3 flex flex-col gap-2'>
+              <div className='bg-glass/40 border border-edge/50 rounded-xl px-4 py-3 flex flex-col gap-2'>
                 <div className='flex items-baseline gap-2 min-w-0'>
-                  <p className='text-xs uppercase tracking-widest text-slate-500 font-semibold shrink-0'>Worktree</p>
-                  <span className='text-xs text-slate-300 font-mono truncate flex-1 min-w-0' title={card.worktreePath}>
+                  <p className='text-xs uppercase tracking-widest text-faint font-semibold shrink-0'>Worktree</p>
+                  <span className='text-xs text-body font-mono truncate flex-1 min-w-0' title={card.worktreePath}>
                     {card.worktreePath}
                   </span>
                   {card.baseSha && (
-                    <span className='text-xs text-slate-500 shrink-0'>
-                      base <span className='font-mono text-slate-400'>{card.baseSha.slice(0, 7)}</span>
+                    <span className='text-xs text-faint shrink-0'>
+                      base <span className='font-mono text-muted'>{card.baseSha.slice(0, 7)}</span>
                     </span>
                   )}
                 </div>
@@ -371,19 +371,19 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                   <button
                     onClick={() => void handleApplyWorktree()}
                     disabled={applying}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                    className='px-3 py-1 rounded-lg text-xs font-medium bg-emerald-500/20 hover:bg-emerald-500/30 text-ok cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                   >
                     {applying ? 'Applying…' : 'Apply to project'}
                   </button>
                   <button
                     onClick={openWorktreeFolder}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 cursor-pointer transition-colors'
+                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
                   >
                     Open folder
                   </button>
                   <button
                     onClick={() => void handleRemoveWorktree()}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 hover:bg-red-500/30 text-slate-300 hover:text-red-300 cursor-pointer transition-colors'
+                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-red-500/30 text-body hover:text-danger cursor-pointer transition-colors'
                   >
                     Remove worktree
                   </button>

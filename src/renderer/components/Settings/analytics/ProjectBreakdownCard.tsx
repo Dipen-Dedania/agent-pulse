@@ -21,12 +21,12 @@ export const ProjectBreakdownCard: React.FC = () => {
       ) : (
         <div className='flex flex-col gap-1.5'>
           {data.rows.map((row) => (
-            <div key={row.projectId} className='flex items-center gap-3 px-3 py-2 bg-slate-900/40 border border-slate-700/40 rounded-lg'>
+            <div key={row.projectId} className='flex items-center gap-3 px-3 py-2 bg-glass/40 border border-edge/40 rounded-lg'>
               <div className='flex-1 min-w-0'>
-                <p className='text-sm font-medium text-slate-100 truncate' title={row.projectPath}>
+                <p className='text-sm font-medium text-primary truncate' title={row.projectPath}>
                   {row.displayName}
                 </p>
-                <p className='text-[10px] text-slate-500 font-mono truncate' title={row.projectPath}>
+                <p className='text-[10px] text-faint font-mono truncate' title={row.projectPath}>
                   {row.projectPath}
                 </p>
               </div>
@@ -35,7 +35,7 @@ export const ProjectBreakdownCard: React.FC = () => {
                   const meta = TOOL_META[tid as ToolId];
                   if (!meta) return null;
                   return (
-                    <div key={tid} className='w-5 h-5 rounded-md bg-slate-700/60 flex items-center justify-center' title={meta.label}>
+                    <div key={tid} className='w-5 h-5 rounded-md bg-control/60 flex items-center justify-center' title={meta.label}>
                       <img src={meta.icon} alt={meta.label} className='w-3.5 h-3.5 object-contain' />
                     </div>
                   );
@@ -48,16 +48,16 @@ export const ProjectBreakdownCard: React.FC = () => {
                     className='text-right shrink-0 w-20'
                     title={`fresh in+out: ${fresh.toLocaleString()} · cache reads: ${row.cacheRead.toLocaleString()}`}
                   >
-                    <p className='text-xs font-mono text-slate-200 tabular-nums'>
+                    <p className='text-xs font-mono text-primary tabular-nums'>
                       {fresh > 0 ? formatCompactNumber(fresh) : '—'}
                     </p>
-                    <p className='text-[10px] text-slate-500'>tokens</p>
+                    <p className='text-[10px] text-faint'>tokens</p>
                   </div>
                 );
               })()}
               <div className='text-right shrink-0 w-20'>
-                <p className='text-xs font-mono text-slate-200 tabular-nums'>{formatDuration(row.activeMs)}</p>
-                <p className='text-[10px] text-slate-500'>{row.sessions} {row.sessions === 1 ? 'session' : 'sessions'}</p>
+                <p className='text-xs font-mono text-primary tabular-nums'>{formatDuration(row.activeMs)}</p>
+                <p className='text-[10px] text-faint'>{row.sessions} {row.sessions === 1 ? 'session' : 'sessions'}</p>
               </div>
             </div>
           ))}

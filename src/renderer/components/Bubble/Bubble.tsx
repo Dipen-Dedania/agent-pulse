@@ -1,4 +1,5 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
+import { useIsDark } from '../../hooks/useTheme';
 import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, CopilotQuotaWindow, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload, TourDemoState } from '../../../common/types';
 import { GuardrailEvent } from '../../../common/guardrails';
 import { SecretAccessEvent } from '../../../common/secretProtection';
@@ -73,18 +74,6 @@ interface BubbleProps {
   demo?: boolean;
 }
 
-function useDarkMode() {
-  const [isDark, setIsDark] = useState(
-    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-  return isDark;
-}
 
 function formatLastSeen(ts: number | undefined): string {
   if (!ts) return 'Never';
@@ -508,7 +497,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
     },
     lastUpdated: Date.now(),
   }), []);
-  const isDark = useDarkMode();
+  const isDark = useIsDark();
   const meta = TOOL_META[toolId];
   const [hovered, setHovered] = useState(false);
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
@@ -1279,7 +1268,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
             }}
             title={`${guardrailSignal.decision === 'block' ? 'Blocked' : 'Warning'}: ${guardrailSignal.matched.map(m => m.message).join(' | ')}`}
           >
-            <span className='text-white text-[9px] font-bold leading-none'>!</span>
+            <span className='text-strong text-[9px] font-bold leading-none'>!</span>
           </button>
         )}
 
@@ -1330,7 +1319,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
             }}
             title={`${secretSignal.decision === 'block' ? 'Blocked read' : 'Observed read'} of ${secretSignal.filePath}${secretSignal.viaShell ? ' (shell, best-effort)' : ''}`}
           >
-            <span className='text-white text-[9px] font-bold leading-none'>🔑</span>
+            <span className='text-strong text-[9px] font-bold leading-none'>🔑</span>
           </button>
         )}
 

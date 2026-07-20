@@ -32,7 +32,9 @@ type DatabaseConstructor = new (path: string) => Database;
 // v4: card_attachments — text files attached to a card, inlined into the
 //     executor prompt so a card can carry uncommitted context (e.g. a plan
 //     that isn't in the repo yet, invisible to the detached worktree).
-const SCHEMA_VERSION = 4;
+// v5: cards.qa_url — QA task type (browser-verification cards, see
+//     backlog-qa-tasktype-plan.md).
+const SCHEMA_VERSION = 5;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -65,6 +67,7 @@ CREATE TABLE IF NOT EXISTS cards (
   worktree_path       TEXT,
   base_sha            TEXT,
   qa_command          TEXT,
+  qa_url              TEXT,
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
 );
@@ -154,6 +157,7 @@ export function openBacklogDb(dbPath: string): Database | null {
         // table exists — this branch only advances the version marker for
         // pre-existing boards. Kept explicit for parity with other versions.
       }
+      if (current < 5) db.exec('ALTER TABLE cards ADD COLUMN qa_url TEXT');
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }
 

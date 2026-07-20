@@ -59,13 +59,15 @@ function attemptSummary(preview: string | undefined): string | null {
 }
 
 // report = markdown summary, diff = git patch (rendered monospace, no wrap),
-// qa-report = QA command output (first line carries the pass/fail verdict).
+// qa-report = QA command output (first line carries the pass/fail verdict),
+// screenshot = QA-card browser evidence (rendered as an image via dataUrl).
 const KIND_LABEL: Record<BacklogArtifactKind, string> = {
   report: 'Summary',
   diff: 'Diff',
   'qa-report': 'QA report',
+  screenshot: 'Screenshot',
 };
-const KIND_ORDER: BacklogArtifactKind[] = ['report', 'diff', 'qa-report'];
+const KIND_ORDER: BacklogArtifactKind[] = ['report', 'diff', 'qa-report', 'screenshot'];
 
 /** Parses the qa.ts-written verdict line, e.g. "# QA: PASSED" / "# QA: FAILED". */
 function parseQaVerdict(content: string | null): 'passed' | 'failed' | null {
@@ -85,6 +87,11 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
   const [artifacts, setArtifacts] = useState<BacklogArtifact[]>([]);
   const [selected, setSelected] = useState<BacklogArtifact | null>(null);
   const [content, setContent] = useState<string | null>(null);
+  // Screenshot artifacts arrive as a data URL (binary can't travel as utf8 content).
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  // For QA reports: the same attempt's screenshots keyed by filename, so image
+  // references in the report markdown render inline.
+  const [reportImages, setReportImages] = useState<Record<string, string>>({});
   // True when only the ~500-char preview was available (artifact file unreadable).
   const [contentTruncated, setContentTruncated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -112,17 +119,41 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
   }, [card.id]);
 
   useEffect(() => {
-    if (!selected) { setContent(null); setContentTruncated(false); return; }
+    if (!selected) { setContent(null); setDataUrl(null); setContentTruncated(false); return; }
     let cancelled = false;
     window.electron.invoke('backlog:read-artifact', { artifactId: selected.id })
-      .then((res: { content: string | null; truncated?: boolean }) => {
+      .then((res: { content: string | null; dataUrl?: string | null; truncated?: boolean }) => {
         if (cancelled) return;
         setContent(res?.content ?? null);
+        setDataUrl(res?.dataUrl ?? null);
         setContentTruncated(Boolean(res?.truncated));
       })
       .catch((e: unknown) => logger.error('[ArtifactViewer] failed to read artifact', e));
     return () => { cancelled = true; };
   }, [selected]);
+
+  // Resolve the selected report's sibling screenshots (same attempt) to data
+  // URLs so the Markdown renderer can inline them where the report references
+  // their filenames. Reports without screenshots skip the fetch entirely.
+  useEffect(() => {
+    if (!selected || selected.kind !== 'report') { setReportImages({}); return; }
+    const shots = artifacts.filter((x) => x.attemptId === selected.attemptId && x.kind === 'screenshot');
+    if (shots.length === 0) { setReportImages({}); return; }
+    let cancelled = false;
+    void Promise.all(
+      shots.map(async (s) => {
+        const res = await window.electron.invoke('backlog:read-artifact', { artifactId: s.id });
+        // preview carries the bare filename (set by the engine's sweep)
+        return [s.preview, (res?.dataUrl as string | undefined) ?? null] as const;
+      }),
+    ).then((pairs) => {
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const [name, url] of pairs) if (url) map[name] = url;
+      setReportImages(map);
+    }).catch((e: unknown) => logger.error('[ArtifactViewer] failed to load report screenshots', e));
+    return () => { cancelled = true; };
+  }, [selected, artifacts]);
 
   const openFile = () => {
     if (selected) void window.electron.invoke('open-path', selected.path);
@@ -309,7 +340,10 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                         return (
                           <optgroup key={kind} label={KIND_LABEL[kind]}>
                             {inKind.map((x) => (
-                              <option key={x.id} value={x.id}>{formatWhen(x.createdAt)}</option>
+                              <option key={x.id} value={x.id}>
+                                {/* screenshots share a timestamp per attempt — the filename tells them apart */}
+                                {x.kind === 'screenshot' ? x.preview : formatWhen(x.createdAt)}
+                              </option>
                             ))}
                           </optgroup>
                         );
@@ -323,7 +357,20 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                     Open file
                   </button>
                 </div>
-                {selected?.kind === 'diff' ? (
+                {selected?.kind === 'screenshot' ? (
+                  dataUrl == null ? (
+                    <p className='text-sm text-muted'>Loading screenshot…</p>
+                  ) : (
+                    <div className='max-h-96 overflow-y-auto apple-scroll'>
+                      <img
+                        src={dataUrl}
+                        alt={selected.preview}
+                        className='max-w-full rounded-lg border border-edge/50'
+                      />
+                      <p className='mt-1.5 text-[11px] text-faint font-mono'>{selected.preview}</p>
+                    </div>
+                  )
+                ) : selected?.kind === 'diff' ? (
                   content == null ? (
                     <p className='text-sm text-muted'>Loading diff…</p>
                   ) : (
@@ -337,7 +384,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                     <p className='text-sm text-muted'>Loading…</p>
                   ) : (
                     <div className='max-h-96 overflow-y-auto apple-scroll'>
-                      <Markdown content={content} />
+                      <Markdown content={content} images={reportImages} />
                       {contentTruncated && (
                         <p className='mt-2 text-[11px] text-faint italic'>
                           Preview truncated — use “Open file” to read the full report.

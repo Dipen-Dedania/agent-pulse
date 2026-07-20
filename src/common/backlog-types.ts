@@ -27,7 +27,10 @@ export type QaProvider = 'browser' | 'tests' | 'lint' | 'typecheck' | 'custom' |
 
 // Phase 2: research cards keep the Phase 1 read-only path; execution cards run
 // with Write/Edit in a detached git worktree and deliver an uncommitted diff.
-export type BacklogTaskType = 'research' | 'execution';
+// 'qa': research's read-only pipeline + chrome-devtools-mcp browser tools — the
+// agent opens the card's qaUrl, checks each acceptance criterion against the
+// live UI, and delivers a report + evidence screenshots. Changes nothing.
+export type BacklogTaskType = 'research' | 'execution' | 'qa';
 
 export interface BacklogProject {
   id: string;          // uuid
@@ -48,9 +51,10 @@ export interface BacklogCard {
   estimatedMinutes: number | null; // drives size-fit + hard time budget
   estimatedCostUsd: number | null; // drives the forecast glance
   prereqIds: string[];             // card ids that must be done first
-  qaProvider: QaProvider;          // execution cards only; research ignores it
+  qaProvider: QaProvider;          // execution cards only; research/qa ignore it
   qaCommand: string | null;        // command line for qaProvider 'custom'
-  acceptanceCriteria: string[];    // injected into the prompt; not machine-checked in Phase 2
+  qaUrl: string | null;            // qa cards: the running app URL the agent opens
+  acceptanceCriteria: string[];    // execution: prompt checklist; qa: agent-checked per criterion
   worktreePath: string | null;     // execution: detached worktree dir (userData/backlog-worktrees/<id>)
   baseSha: string | null;          // execution: HEAD the worktree was created at
   sortOrder: number;               // position within Todo
@@ -110,10 +114,13 @@ export interface BacklogAttempt {
   manual: boolean;                       // true for "Run now"
 }
 
-// report = markdown (research report, or the executor's change summary);
-// diff = staged patch of the worktree (git diff --cached --binary + untracked
-// listing); qa-report = QA command output with pass/fail verdict.
-export type BacklogArtifactKind = 'report' | 'diff' | 'qa-report';
+// report = markdown (research report, the executor's change summary, or a QA
+// card's verification report); diff = staged patch of the worktree (git diff
+// --cached --binary + untracked listing); qa-report = QA command output with
+// pass/fail verdict; screenshot = PNG evidence saved by a QA card's browser
+// (written by chrome-devtools-mcp via take_screenshot filePath, swept into
+// artifacts by the engine after the run).
+export type BacklogArtifactKind = 'report' | 'diff' | 'qa-report' | 'screenshot';
 
 export interface BacklogArtifact {
   id: string;
@@ -184,6 +191,11 @@ export interface BacklogSchedulerConfig {
   enabled: boolean;
   slots: BacklogSlot[];
   requireIdle: boolean;    // only claim when no input for K min, even inside a slot
+  // Proactive usage gate: don't claim a new card once the Claude 5-hour window
+  // is at/above this % — a run that would just die mid-task. 100 = never gate
+  // proactively (only the reactive latch stops runs when the window is truly
+  // spent). Clamped to 50–100 by migration.
+  usageGatePercent: number;
   maxConcurrent: number;   // fixed at 1 in Phase 1 (migration clamps it)
   // Discord/Slack webhooks pinged when a card settles into a terminal state
   // (done / blocked / rework). Independent of the attention-escalation list so

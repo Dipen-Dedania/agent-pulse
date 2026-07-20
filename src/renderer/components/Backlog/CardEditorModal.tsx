@@ -32,6 +32,7 @@ interface Props {
       prereqIds: string[];
       qaProvider: QaProvider;
       qaCommand: string | null;
+      qaUrl: string | null;
       acceptanceCriteria: string[];
       state?: 'refinement' | 'todo';
     },
@@ -65,6 +66,19 @@ const inputClass =
   'bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60';
 const labelClass = 'text-xs uppercase tracking-widest text-faint font-semibold';
 
+// Small "ⓘ" affordance carrying a native-title tooltip — matches the app's
+// existing title-attribute hint pattern (see CardTile) without a portal.
+const InfoHint: React.FC<{ text: string }> = ({ text }) => (
+  <span
+    tabIndex={0}
+    title={text}
+    aria-label={text}
+    className='inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-edge/70 text-[9px] leading-none text-faint cursor-help select-none hover:text-body hover:border-edge-strong'
+  >
+    i
+  </span>
+);
+
 export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, cards, onSave, onClose }) => {
   const [title, setTitle] = useState(card?.title ?? '');
   const [description, setDescription] = useState(card?.description ?? '');
@@ -75,6 +89,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   const [acceptanceCriteria, setAcceptanceCriteria] = useState<string>((card?.acceptanceCriteria ?? []).join('\n'));
   const [qaProvider, setQaProvider] = useState<QaProvider>(card?.qaProvider ?? 'none');
   const [qaCommand, setQaCommand] = useState<string>(card?.qaCommand ?? '');
+  const [qaUrl, setQaUrl] = useState<string>(card?.qaUrl ?? '');
   const [estimatedMinutes, setEstimatedMinutes] = useState<string>(card?.estimatedMinutes?.toString() ?? '');
   const [estimatedCostUsd, setEstimatedCostUsd] = useState<string>(card?.estimatedCostUsd?.toString() ?? '');
   const [prereqIds, setPrereqIds] = useState<string[]>(card?.prereqIds ?? []);
@@ -174,12 +189,14 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
     estimatedMinutes: estimatedMinutes.trim() === '' ? null : Math.min(120, Math.max(5, Number(estimatedMinutes) || 0)),
     estimatedCostUsd: estimatedCostUsd.trim() === '' ? null : Math.max(0, Number(estimatedCostUsd) || 0),
     prereqIds,
-    // QA fields are execution-only; research cards persist whatever was last
-    // set (harmless — the engine ignores them for research runs) but we send
-    // 'none'/empty so switching a card back to research reads cleanly.
+    // Provider/command are execution-only, the app URL is qa-only; the others
+    // send 'none'/empty so switching a card between types reads cleanly.
     qaProvider: taskType === 'execution' ? qaProvider : 'none',
     qaCommand: taskType === 'execution' && qaProvider === 'custom' ? (qaCommand.trim() || null) : null,
-    acceptanceCriteria: taskType === 'execution'
+    qaUrl: taskType === 'qa' ? (qaUrl.trim() || null) : null,
+    // Criteria are the executor's checklist (execution) or the checks the QA
+    // agent actually verifies in the browser (qa).
+    acceptanceCriteria: taskType === 'execution' || taskType === 'qa'
       ? acceptanceCriteria.split('\n').map((line) => line.trim()).filter((line) => line.length > 0)
       : [],
     ...(state ? { state } : {}),
@@ -324,6 +341,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
               {([
                 { value: 'research', label: 'Research', hint: 'Read-only — the agent produces a report.' },
                 { value: 'execution', label: 'Execution', hint: 'Edits files in an isolated worktree — delivers a diff + report.' },
+                { value: 'qa', label: 'QA', hint: 'Read-only — opens the running app in a headless browser and checks each acceptance criterion. Delivers a report + screenshots.' },
               ] as { value: BacklogTaskType; label: string; hint: string }[]).map((t) => (
                 <button
                   key={t.value}
@@ -391,7 +409,10 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           </label>
 
           <label className='flex flex-col gap-1.5'>
-            <span className={labelClass}>Est. minutes</span>
+            <span className={`${labelClass} inline-flex items-center gap-1.5`}>
+              Est. minutes
+              <InfoHint text='Size-fit + hard time budget. The scheduler only claims this card if it fits the time left in the window, and kills the run if it exceeds this many minutes. Default 30, clamped 5–120.' />
+            </span>
             <input
               type='number' min={5} max={120} value={estimatedMinutes}
               onChange={(e) => setEstimatedMinutes(e.target.value)}
@@ -400,7 +421,10 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           </label>
 
           <label className='flex flex-col gap-1.5'>
-            <span className={labelClass}>Est. cost ($)</span>
+            <span className={`${labelClass} inline-flex items-center gap-1.5`}>
+              Est. cost ($)
+              <InfoHint text='Informational only — feeds the "queue will burn ~$X next window" forecast. It never limits or stops a run. Default $0.50.' />
+            </span>
             <input
               type='number' min={0} step={0.1} value={estimatedCostUsd}
               onChange={(e) => setEstimatedCostUsd(e.target.value)}
@@ -491,6 +515,42 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
                 )}
               </label>
             )}
+          </div>
+        ) : taskType === 'qa' ? (
+          <div className='bg-glass/40 border border-edge/50 rounded-xl p-4 flex flex-col gap-3'>
+            <div>
+              <p className='text-sm font-medium text-strong'>Browser verification</p>
+              <p className='text-xs text-muted mt-1'>
+                A read-only agent opens the app in a headless browser (chrome-devtools-mcp) and checks
+                each criterion against the live UI. The app must already be running — the agent can’t start it.
+              </p>
+            </div>
+
+            <label className='flex flex-col gap-1.5'>
+              <span className={labelClass}>App URL</span>
+              <input
+                value={qaUrl}
+                onChange={(e) => setQaUrl(e.target.value)}
+                className={inputClass}
+                placeholder='http://localhost:5173'
+              />
+              {qaUrl.trim() === '' && (
+                <span className='text-[11px] text-warn'>
+                  Recommended — without a URL the agent only has the description to go on.
+                </span>
+              )}
+            </label>
+
+            <label className='flex flex-col gap-1.5'>
+              <span className={labelClass}>Acceptance criteria</span>
+              <textarea
+                value={acceptanceCriteria}
+                onChange={(e) => setAcceptanceCriteria(e.target.value)}
+                rows={4}
+                className={`${inputClass} resize-y leading-relaxed`}
+                placeholder='One per line — the agent checks each against the live UI and reports PASS/FAIL with screenshots.'
+              />
+            </label>
           </div>
         ) : (
           <div className='bg-glass/40 border border-edge/50 rounded-xl p-3 opacity-50'>

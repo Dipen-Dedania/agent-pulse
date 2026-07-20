@@ -28,18 +28,20 @@ const CARD_STATES: BacklogCardState[] = [
   'refinement', 'todo', 'claimed', 'in-progress', 'done', 'blocked', 'rework', 'paused',
 ];
 const RISK_TIERS: RiskTier[] = ['green', 'amber', 'red'];
-const TASK_TYPES: BacklogTaskType[] = ['research', 'execution'];
+const TASK_TYPES: BacklogTaskType[] = ['research', 'execution', 'qa'];
 // 'browser' exists in the QaProvider type but isn't selectable until the
 // browser-QA phase — the store rejects it like any unknown value.
 const QA_PROVIDERS_ENABLED: QaProvider[] = ['tests', 'lint', 'typecheck', 'custom', 'none'];
 
 const QA_COMMAND_MAX_LENGTH = 500;
+const QA_URL_MAX_LENGTH = 2000;
 
 interface CardRow {
   id: string; title: string; description: string; project_id: string;
   state: string; task_type: string; risk_tier: string;
   estimated_minutes: number | null; estimated_cost_usd: number | null;
   prereq_ids: string; qa_provider: string; qa_command: string | null;
+  qa_url: string | null;
   acceptance_criteria: string;
   worktree_path: string | null; base_sha: string | null;
   sort_order: number; blocked_reason: string | null; model: string | null;
@@ -70,6 +72,21 @@ function normalizeQaCommand(value: unknown): string | null {
   return trimmed.length > 0 && trimmed.length <= QA_COMMAND_MAX_LENGTH ? trimmed : null;
 }
 
+/** Untrusted (IPC) QA-card URL → stored value. Only http(s) URLs the browser
+ * agent can open; anything else becomes null. The value reaches the prompt via
+ * stdin (never argv), so this is a sanity gate, not an injection barrier. */
+function normalizeQaUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > QA_URL_MAX_LENGTH) return null;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Untrusted (IPC) criteria list → trimmed non-empty strings. */
 function normalizeCriteria(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -86,7 +103,7 @@ function rowToCard(row: CardRow): BacklogCard {
     description: row.description,
     projectId: row.project_id,
     state: row.state as BacklogCardState,
-    taskType: row.task_type === 'execution' ? 'execution' : 'research',
+    taskType: row.task_type === 'execution' || row.task_type === 'qa' ? row.task_type : 'research',
     riskTier: row.risk_tier as RiskTier,
     model: row.model,
     estimatedMinutes: row.estimated_minutes,
@@ -94,6 +111,7 @@ function rowToCard(row: CardRow): BacklogCard {
     prereqIds: parseJsonStringArray(row.prereq_ids),
     qaProvider: row.qa_provider as QaProvider,
     qaCommand: row.qa_command,
+    qaUrl: row.qa_url,
     acceptanceCriteria: parseJsonStringArray(row.acceptance_criteria),
     worktreePath: row.worktree_path,
     baseSha: row.base_sha,
@@ -117,13 +135,14 @@ export interface CreateCardInput {
   prereqIds?: string[];
   qaProvider?: QaProvider;
   qaCommand?: string | null;
+  qaUrl?: string | null;
   acceptanceCriteria?: string[];
 }
 
 export type UpdateCardPatch = Partial<Pick<BacklogCard,
   'title' | 'description' | 'projectId' | 'taskType' | 'riskTier' | 'model' |
   'estimatedMinutes' | 'estimatedCostUsd' | 'prereqIds' |
-  'qaProvider' | 'qaCommand' | 'acceptanceCriteria'
+  'qaProvider' | 'qaCommand' | 'qaUrl' | 'acceptanceCriteria'
 >>;
 
 export interface MoveResult {
@@ -202,6 +221,7 @@ export class BacklogStore {
       prereqIds: Array.isArray(input.prereqIds) ? input.prereqIds : [],
       qaProvider: QA_PROVIDERS_ENABLED.includes(input.qaProvider as QaProvider) ? (input.qaProvider as QaProvider) : 'none',
       qaCommand: normalizeQaCommand(input.qaCommand),
+      qaUrl: normalizeQaUrl(input.qaUrl),
       acceptanceCriteria: normalizeCriteria(input.acceptanceCriteria),
       worktreePath: null,
       baseSha: null,
@@ -214,13 +234,13 @@ export class BacklogStore {
       INSERT INTO cards (
         id, title, description, project_id, state, task_type, risk_tier, model,
         estimated_minutes, estimated_cost_usd, prereq_ids, qa_provider, qa_command,
-        acceptance_criteria, worktree_path, base_sha, sort_order, blocked_reason,
-        created_at, updated_at
+        qa_url, acceptance_criteria, worktree_path, base_sha, sort_order,
+        blocked_reason, created_at, updated_at
       ) VALUES (
         @id, @title, @description, @projectId, @state, @taskType, @riskTier, @model,
         @estimatedMinutes, @estimatedCostUsd, @prereqIds, @qaProvider, @qaCommand,
-        @acceptanceCriteria, @worktreePath, @baseSha, @sortOrder, @blockedReason,
-        @createdAt, @updatedAt
+        @qaUrl, @acceptanceCriteria, @worktreePath, @baseSha, @sortOrder,
+        @blockedReason, @createdAt, @updatedAt
       )
     `).run({
       ...card,
@@ -246,6 +266,7 @@ export class BacklogStore {
       ...(Array.isArray(patch.prereqIds) ? { prereqIds: patch.prereqIds } : {}),
       ...(QA_PROVIDERS_ENABLED.includes(patch.qaProvider as QaProvider) ? { qaProvider: patch.qaProvider as QaProvider } : {}),
       ...(patch.qaCommand !== undefined ? { qaCommand: normalizeQaCommand(patch.qaCommand) } : {}),
+      ...(patch.qaUrl !== undefined ? { qaUrl: normalizeQaUrl(patch.qaUrl) } : {}),
       ...(Array.isArray(patch.acceptanceCriteria) ? { acceptanceCriteria: normalizeCriteria(patch.acceptanceCriteria) } : {}),
       updatedAt: Date.now(),
     };
@@ -255,7 +276,7 @@ export class BacklogStore {
         task_type = @taskType, risk_tier = @riskTier, model = @model,
         estimated_minutes = @estimatedMinutes,
         estimated_cost_usd = @estimatedCostUsd, prereq_ids = @prereqIds,
-        qa_provider = @qaProvider, qa_command = @qaCommand,
+        qa_provider = @qaProvider, qa_command = @qaCommand, qa_url = @qaUrl,
         acceptance_criteria = @acceptanceCriteria,
         updated_at = @updatedAt
       WHERE id = @id

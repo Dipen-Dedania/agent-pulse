@@ -37,6 +37,7 @@ function card(partial: Partial<BacklogCard>): BacklogCard {
     prereqIds: [],
     qaProvider: 'none',
     qaCommand: null,
+    qaUrl: null,
     acceptanceCriteria: [],
     worktreePath: null,
     baseSha: null,

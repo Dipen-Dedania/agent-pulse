@@ -248,6 +248,7 @@ const DEFAULTS: UserConfig = {
     enabled: false,
     slots: [],
     requireIdle: true,
+    usageGatePercent: 95, // pause new claims once the 5-hour window is ≥95% spent
     maxConcurrent: 1, // Phase 1: sequential only; migration clamps this
     webhooks: [],
   },
@@ -437,10 +438,18 @@ export function migrateBacklogScheduler(raw: unknown): BacklogSchedulerConfig {
         }))
     : [];
 
+  // Clamp to a sane band: below 50% would gate almost immediately every window;
+  // above 100 is meaningless. A non-number (older config) falls back to default.
+  const rawGate = typeof s.usageGatePercent === 'number' && Number.isFinite(s.usageGatePercent)
+    ? s.usageGatePercent
+    : d.usageGatePercent;
+  const usageGatePercent = Math.min(100, Math.max(50, Math.round(rawGate)));
+
   return {
     enabled: typeof s.enabled === 'boolean' ? s.enabled : d.enabled,
     slots,
     requireIdle: typeof s.requireIdle === 'boolean' ? s.requireIdle : d.requireIdle,
+    usageGatePercent,
     maxConcurrent: 1,
     webhooks,
   };

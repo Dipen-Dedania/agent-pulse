@@ -35,6 +35,10 @@ import { buildCmdShimArgs, resolveClaudeBin, resetClaudeBinCache } from '../sche
 // but card cost estimates are forecasts, not enforcement, so it is not passed).
 const RESEARCH_DISALLOWED_TOOLS = 'Write,Edit,NotebookEdit,Bash';
 const EXECUTION_DISALLOWED_TOOLS = 'Bash,NotebookEdit';
+// QA cards: research's read-only posture + ONLY the chrome-devtools-mcp tools
+// auto-approved. --strict-mcp-config ignores every other configured MCP server
+// (user-level ones included), so the run gets browser eyes and nothing else.
+const QA_ALLOWED_TOOLS = 'mcp__chrome-devtools__*';
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024; // guard against a runaway stdout
 const POSIX_SIGKILL_DELAY_MS = 5_000;
 
@@ -54,9 +58,34 @@ export function isSafeSessionId(value: string): boolean {
 // instead of blocking it. Pattern-based; unmatched wordings fall back to the
 // generic failure path (one card blocked, no cascade thanks to the engine's
 // proactive gate).
-const USAGE_LIMIT_RE = /usage limit|rate.?limit|limit (?:reached|exceeded)|out of (?:credits?|quota)|exceeded.*quota|hit.*limit/i;
+const USAGE_LIMIT_RE = /usage limit|rate.?limit|session limit|limit (?:reached|exceeded)|out of (?:credits?|quota)|exceeded.*quota|hit.*limit/i;
 export function isUsageLimitError(text: string | null | undefined): boolean {
   return !!text && USAGE_LIMIT_RE.test(text);
+}
+
+/** Last up-to-3 non-empty lines of a stream, capped, for a compact failure detail. */
+function tailDetail(text: string): string {
+  return text.trim().split(/\r?\n/).slice(-3).join(' ').slice(0, 500);
+}
+
+/**
+ * Classify a non-zero `claude -p` exit whose stdout held no parseable JSON
+ * result. Usage/session-limit notices are printed to STDOUT and the process
+ * exits 1 BEFORE emitting the result object, so stderr is typically empty —
+ * the detail (and the usage-limit verdict) must consider stdout too. Missing
+ * this is why a limit exhaustion is misfiled as a generic blocked failure and
+ * cascades into the next card instead of latching until reset. Pure + tested.
+ */
+export function classifyNonZeroExit(
+  code: number | null,
+  stdout: string,
+  stderr: string,
+): { reason: string; usageLimit: boolean } {
+  const detail = tailDetail(stderr) || tailDetail(stdout);
+  return {
+    reason: `claude exited with code ${code}${detail ? `: ${detail}` : ''}`,
+    usageLimit: isUsageLimitError(detail),
+  };
 }
 
 export type RunnerOutcome = 'success' | 'failed' | 'killed';
@@ -101,12 +130,16 @@ export interface RunnerResult {
 
 export interface ExecuteCardOptions {
   prompt: string;
-  cwd: string;                 // project repo (research) or worktree (execution)
+  cwd: string;                 // project repo (research/qa) or worktree (execution)
   budgetMs: number;
   taskType: BacklogTaskType;
   model?: string | null;
   /** Resume a paused run's session (execution cards keep their worktree). */
   resumeSessionId?: string | null;
+  /** QA cards: path to the generated chrome-devtools MCP config (engine-written
+   * fixed location under userData — spaced paths are fine, buildCmdShimArgs
+   * quotes argv entries with whitespace). Required when taskType is 'qa'. */
+  mcpConfigPath?: string | null;
 }
 
 export interface RunnerHandle {
@@ -218,7 +251,7 @@ function killTreeSync(child: ChildProcess): void {
  * for window-end grace expiry and app quit.
  */
 export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
-  const { prompt, cwd, budgetMs, taskType, model, resumeSessionId } = opts;
+  const { prompt, cwd, budgetMs, taskType, model, resumeSessionId, mcpConfigPath } = opts;
   let killInfo: { reason: string; attemptOutcome: 'killed' | 'paused' } | null = null;
   let child: ChildProcess | null = null;
 
@@ -242,10 +275,25 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
     // untrusted prompt goes over stdin.
     const isWin = process.platform === 'win32';
     const file = isWin ? (process.env.ComSpec || 'cmd.exe') : bin;
+    if (taskType === 'qa' && !mcpConfigPath) {
+      // The browser tools ARE the task — a QA run without them would burn a
+      // turn discovering it can't see anything.
+      resolve(failed('QA run started without an MCP config path'));
+      return;
+    }
     const baseArgs = taskType === 'execution'
       ? ['-p', '--output-format', 'json', '--permission-mode', 'acceptEdits',
          '--disallowedTools', EXECUTION_DISALLOWED_TOOLS, '--setting-sources', 'user']
       : ['-p', '--output-format', 'json', '--disallowedTools', RESEARCH_DISALLOWED_TOOLS];
+    if (taskType === 'qa') {
+      // The config path is engine-controlled (fixed file under userData), not
+      // user text; buildCmdShimArgs quotes it if the path contains spaces.
+      baseArgs.push(
+        '--mcp-config', mcpConfigPath!,
+        '--strict-mcp-config',
+        '--allowedTools', QA_ALLOWED_TOOLS,
+      );
+    }
     if (model) {
       // Store normalization should have rejected unsafe values already —
       // re-check here since this string reaches cmd.exe argv.
@@ -328,11 +376,8 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
         return;
       }
       if (code !== 0 && !parsed.ok) {
-        const detail = stderr.trim().split(/\r?\n/).slice(-3).join(' ').slice(0, 500);
-        settle({
-          ...failed(`claude exited with code ${code}${detail ? `: ${detail}` : ''}`),
-          usageLimit: isUsageLimitError(detail),
-        });
+        const { reason, usageLimit } = classifyNonZeroExit(code, stdout, stderr);
+        settle({ ...failed(reason), usageLimit });
         return;
       }
       if (!parsed.ok) {

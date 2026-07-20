@@ -19,7 +19,7 @@ import {
 } from '../../common/backlog-types';
 import { BacklogStore } from './store';
 import { activeWindow, nextWindowStart, pickNextCard, cardBudgetMs, forecastNextWindow, isPickableState } from './timing';
-import { buildExecutionPrompt, buildResearchPrompt } from './prompt';
+import { buildExecutionPrompt, buildQaPrompt, buildResearchPrompt } from './prompt';
 import { executeCard, RunnerHandle, RunnerResult } from './runner';
 import { captureDiff, createWorktree, reconcileWorktrees } from './worktree';
 import { runQa } from './qa';
@@ -38,11 +38,14 @@ const MAX_CONSECUTIVE_BUDGET_KILLS = 2;
 // Same shape for QA: one bounded auto-retry via Rework, then Blocked.
 const MAX_CONSECUTIVE_QA_FAILS = 2;
 const ARTIFACT_PREVIEW_CHARS = 500;
-// Proactive usage gate: don't claim a card when the 5-hour window is already
-// nearly spent — the run would die mid-task.
-const USAGE_GATE_UTILIZATION = 95;
+// Proactive usage gate default (used only if a config somehow lacks the field).
+// The live threshold is user-configurable via config.usageGatePercent.
+const USAGE_GATE_UTILIZATION_DEFAULT = 95;
 // When the usage snapshot can't say when the window resets, re-check on this cadence.
 const USAGE_RECHECK_FALLBACK_MS = 30 * 60_000;
+// Screenshot evidence a QA card's browser saved (take_screenshot filePath) —
+// swept into artifacts after the run.
+const SCREENSHOT_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 /**
  * First human-meaningful line of a report, for the attempt's one-line `reason`.
@@ -263,9 +266,12 @@ export class BacklogEngine {
       this.usageExhaustedUntil = null;
     }
     // Proactive gate: don't start a card the exhausted window would kill anyway.
+    // Threshold is user-configurable; 100 disables it (only the reactive latch
+    // stops runs once the window is truly spent).
+    const gatePercent = this.config.usageGatePercent ?? USAGE_GATE_UTILIZATION_DEFAULT;
     const usage = this.getUsage();
-    if (usage && usage.utilization >= USAGE_GATE_UTILIZATION) {
-      this.engageUsageLatch(`5-hour window at ${Math.round(usage.utilization)}% — waiting for reset`);
+    if (usage && usage.utilization >= gatePercent) {
+      this.engageUsageLatch(`5-hour window at ${Math.round(usage.utilization)}% (limit ${gatePercent}%) — waiting for reset`);
       return;
     }
 
@@ -350,12 +356,32 @@ export class BacklogEngine {
       // Inline any attached files into the prompt so the card can carry context
       // that isn't in the repo (the detached worktree only sees committed files).
       const attachments = this.store.listAttachmentContents(card.id);
-      const prompt = card.taskType === 'execution'
-        ? buildExecutionPrompt(card, attachments)
-        : buildResearchPrompt(card, attachments);
+      let mcpConfigPath: string | null = null;
+      let prompt: string;
+      if (card.taskType === 'execution') {
+        prompt = buildExecutionPrompt(card, attachments);
+      } else if (card.taskType === 'qa') {
+        // Browser-verification run: the agent needs the chrome-devtools MCP
+        // config and a place the MCP server can save screenshot evidence.
+        let screensDir: string;
+        try {
+          screensDir = this.screenshotsDir(card.id, attempt.id);
+          fs.mkdirSync(screensDir, { recursive: true });
+          mcpConfigPath = this.ensureQaMcpConfig();
+        } catch (e: any) {
+          const reason = `QA setup failed: ${e?.message ?? e}`;
+          this.store.finishAttempt(attempt.id, { outcome: 'failed', reason });
+          this.store.setCardState(card.id, 'blocked', reason);
+          this.broadcastChanged();
+          return { ok: false, reason };
+        }
+        prompt = buildQaPrompt(card, screensDir, attachments);
+      } else {
+        prompt = buildResearchPrompt(card, attachments);
+      }
       const handle = executeCard({
         prompt, cwd, budgetMs: cardBudgetMs(card),
-        taskType: card.taskType, model: card.model, resumeSessionId,
+        taskType: card.taskType, model: card.model, resumeSessionId, mcpConfigPath,
       });
       this.running = {
         cardId: card.id,
@@ -465,6 +491,9 @@ export class BacklogEngine {
     const blockedLike = selfStatus === 'blocked';
 
     if (card.taskType !== 'execution') {
+      // QA cards: register whatever evidence the browser saved — even a
+      // blocked run may have captured the failure it saw.
+      if (card.taskType === 'qa') this.sweepScreenshots(card.id, attemptId);
       if (blockedLike) {
         const reason = firstReportLine(result.report) ?? 'agent reported it was blocked';
         this.store.setCardState(card.id, 'blocked', reason);
@@ -601,6 +630,57 @@ export class BacklogEngine {
       this.graceTimer.unref?.();
     }
     this.reschedule(); // arms the next window-start edge and broadcasts
+  }
+
+  /** Where a QA attempt's browser saves screenshot evidence (given in the prompt). */
+  private screenshotsDir(cardId: string, attemptId: string): string {
+    return path.join(this.artifactsDir, cardId, `${attemptId}-screens`);
+  }
+
+  /**
+   * Write (idempotently) the MCP config a QA run's `--mcp-config` points at:
+   * chrome-devtools-mcp, headless (no visible window) and isolated (throwaway
+   * Chrome profile — no user cookies/sessions, no profile-lock collisions).
+   * Lives beside the artifacts dir under userData. npx is a .cmd shim on
+   * Windows, so the config routes through cmd /c there — same class of problem
+   * the runner solves for the claude bin itself.
+   */
+  private ensureQaMcpConfig(): string {
+    const configPath = path.join(path.dirname(this.artifactsDir), 'backlog-qa-mcp.json');
+    const serverArgs = ['-y', 'chrome-devtools-mcp@latest', '--headless', '--isolated'];
+    const config = {
+      mcpServers: {
+        'chrome-devtools': process.platform === 'win32'
+          ? { command: 'cmd', args: ['/c', 'npx', ...serverArgs] }
+          : { command: 'npx', args: serverArgs },
+      },
+    };
+    const body = JSON.stringify(config, null, 2);
+    // Rewrite only on drift so the file stays user-inspectable but self-heals.
+    try {
+      if (fs.readFileSync(configPath, 'utf8') === body) return configPath;
+    } catch { /* missing or unreadable — write it */ }
+    fs.writeFileSync(configPath, body, 'utf8');
+    return configPath;
+  }
+
+  /** Register the screenshot files a QA run saved as `screenshot` artifacts. */
+  private sweepScreenshots(cardId: string, attemptId: string): void {
+    const dir = this.screenshotsDir(cardId, attemptId);
+    try {
+      const files = fs.readdirSync(dir)
+        .filter((f) => SCREENSHOT_EXTENSIONS.has(path.extname(f).toLowerCase()))
+        .sort();
+      for (const file of files) {
+        this.store.insertArtifact({
+          cardId, attemptId, kind: 'screenshot',
+          path: path.join(dir, file), preview: file,
+        });
+      }
+      if (files.length > 0) logger.info(`[Backlog] registered ${files.length} QA screenshot(s) for card ${cardId}`);
+    } catch (e: any) {
+      logger.warn(`[Backlog] screenshot sweep failed: ${e?.message ?? e}`);
+    }
   }
 
   private writeArtifactFile(cardId: string, attemptId: string, kind: BacklogArtifactKind, content: string): string {

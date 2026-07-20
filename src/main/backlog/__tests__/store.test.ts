@@ -200,6 +200,34 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(store.getCard(a.id)!.qaCommand).toBeNull();
   });
 
+  // ── QA task type (browser verification cards) ─────────────────────────────
+
+  it('qa taskType persists and round-trips like the others', () => {
+    const a = store.createCard({ title: 'a', projectId, taskType: 'qa' });
+    expect(store.getCard(a.id)!.taskType).toBe('qa');
+    store.updateCard(a.id, { taskType: 'research' });
+    expect(store.getCard(a.id)!.taskType).toBe('research');
+    store.updateCard(a.id, { taskType: 'qa' });
+    expect(store.getCard(a.id)!.taskType).toBe('qa');
+  });
+
+  it('normalizes qaUrl: http(s) only, trimmed, bounded', () => {
+    const a = store.createCard({ title: 'a', projectId, taskType: 'qa', qaUrl: '  http://localhost:5173/settings  ' });
+    expect(a.qaUrl).toBe('http://localhost:5173/settings');
+    expect(store.getCard(a.id)!.qaUrl).toBe('http://localhost:5173/settings');
+
+    // Non-http schemes and non-URLs become null instead of reaching the prompt.
+    const b = store.createCard({ title: 'b', projectId, taskType: 'qa', qaUrl: 'file:///C:/secrets.txt' });
+    expect(b.qaUrl).toBeNull();
+    const c = store.createCard({ title: 'c', projectId, taskType: 'qa', qaUrl: 'localhost:5173' });
+    expect(c.qaUrl).toBeNull();
+
+    store.updateCard(a.id, { qaUrl: 'https://staging.example.com' });
+    expect(store.getCard(a.id)!.qaUrl).toBe('https://staging.example.com');
+    store.updateCard(a.id, { qaUrl: '   ' });
+    expect(store.getCard(a.id)!.qaUrl).toBeNull();
+  });
+
   it('claimCard also claims rework cards', () => {
     const card = store.createCard({ title: 'x', projectId, state: 'todo' });
     store.setCardState(card.id, 'rework');

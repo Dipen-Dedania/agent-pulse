@@ -80,14 +80,20 @@ export const CardTile: React.FC<Props> = ({
       </div>
 
       <div className='flex items-center gap-2 flex-wrap text-[11px] text-muted'>
-        {/* Task type: quiet "R" for research, called-out "exec" chip for execution */}
+        {/* Task type: quiet "R" for research, called-out chips for execution/qa */}
         <span
           className={`px-1.5 py-0.5 rounded font-mono ${
-            card.taskType === 'execution' ? 'bg-cyan-500/15 text-cyan-300' : 'bg-control/40 text-faint'
+            card.taskType === 'execution' ? 'bg-cyan-500/15 text-cyan-300'
+              : card.taskType === 'qa' ? 'bg-purple-500/15 text-purple-300'
+              : 'bg-control/40 text-faint'
           }`}
-          title={card.taskType === 'execution' ? 'Execution — edits files in an isolated worktree' : 'Research — read-only, produces a report'}
+          title={
+            card.taskType === 'execution' ? 'Execution — edits files in an isolated worktree'
+              : card.taskType === 'qa' ? 'QA — read-only browser verification of the running app'
+              : 'Research — read-only, produces a report'
+          }
         >
-          {card.taskType === 'execution' ? '⚡ exec' : 'R'}
+          {card.taskType === 'execution' ? '⚡ exec' : card.taskType === 'qa' ? '👁 qa' : 'R'}
         </span>
         <span className={`px-1.5 py-0.5 rounded ${projectColor(card.projectId).chip}`}>{projectName}</span>
         {card.worktreePath && (

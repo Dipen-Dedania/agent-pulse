@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseClaudeJsonOutput, isUsageLimitError, isSafeSessionId, parseSelfReportedStatus } from '../runner';
-import { buildResearchPrompt, buildExecutionPrompt } from '../prompt';
+import { parseClaudeJsonOutput, isUsageLimitError, isSafeSessionId, parseSelfReportedStatus, classifyNonZeroExit } from '../runner';
+import { buildResearchPrompt, buildExecutionPrompt, buildQaPrompt } from '../prompt';
 import { buildCmdShimArgs } from '../../scheduler/opener';
 
 // Shape captured from a real `claude -p --output-format json` run (see plan spike).
@@ -113,6 +113,48 @@ describe('buildExecutionPrompt', () => {
   });
 });
 
+describe('buildQaPrompt', () => {
+  const card = {
+    title: 'Verify dark mode',
+    description: 'The settings window gained a theme toggle.',
+    qaUrl: 'http://localhost:5173',
+    acceptanceCriteria: ['toggle switches theme', '  no console errors  ', ''],
+  };
+
+  it('carries title/description/url/criteria and the read-only browser contract', () => {
+    const prompt = buildQaPrompt(card, 'C:\\artifacts\\c1\\a1-screens');
+    expect(prompt).toContain('Verify dark mode');
+    expect(prompt).toContain('theme toggle');
+    expect(prompt).toContain('App URL: http://localhost:5173');
+    expect(prompt).toContain('C:\\artifacts\\c1\\a1-screens');
+    expect(prompt).toContain('1. toggle switches theme');
+    expect(prompt).toContain('2. no console errors');
+    expect(prompt).toContain('READ-ONLY');
+    expect(prompt).toContain('take_screenshot');
+    expect(prompt).toContain('filePath');
+    // Screenshots must be embedded with markdown image syntax so the report
+    // viewer can render them inline.
+    expect(prompt).toContain('![');
+    expect(prompt).toContain('STATUS: blocked');
+  });
+
+  it('a failing criterion is still a completed QA run — the contract says so', () => {
+    const prompt = buildQaPrompt(card, '/tmp/screens');
+    expect(prompt).toContain('pass OR fail');
+  });
+
+  it('flags a missing URL instead of omitting the line silently', () => {
+    const prompt = buildQaPrompt({ ...card, qaUrl: null }, '/tmp/screens');
+    expect(prompt).toContain('none set');
+    expect(prompt).toContain('STATUS: blocked');
+  });
+
+  it('asks for derived checks when the card has no criteria', () => {
+    const prompt = buildQaPrompt({ ...card, acceptanceCriteria: [] }, '/tmp/screens');
+    expect(prompt).toContain('None were provided');
+  });
+});
+
 describe('prompt attachments', () => {
   it('inlines attached files verbatim under an Attached files section', () => {
     const prompt = buildResearchPrompt(
@@ -208,6 +250,40 @@ describe('isUsageLimitError', () => {
     expect(isUsageLimitError('claude exited with code 1: syntax error')).toBe(false);
     expect(isUsageLimitError(null)).toBe(false);
     expect(isUsageLimitError('')).toBe(false);
+  });
+
+  it('matches the real session-limit wording claude prints on exhaustion', () => {
+    // Captured verbatim from a failed backlog run's transcript.
+    expect(isUsageLimitError("You've hit your session limit — resets 3am (Asia/Calcutta)")).toBe(true);
+  });
+});
+
+describe('classifyNonZeroExit', () => {
+  // Regression: claude prints the session-limit notice to STDOUT and exits 1
+  // before emitting the JSON result, leaving stderr empty. The old code only
+  // scanned stderr, so usageLimit came back false and the card was blocked
+  // (and cascaded) instead of paused-until-reset.
+  it('flags a usage limit from stdout when stderr is empty', () => {
+    const out = classifyNonZeroExit(1, "You've hit your session limit — resets 3am (Asia/Calcutta)", '');
+    expect(out.usageLimit).toBe(true);
+    expect(out.reason).toContain('session limit');
+  });
+
+  it('prefers stderr for the detail but still checks it for usage limits', () => {
+    const out = classifyNonZeroExit(1, 'irrelevant stdout', 'usage limit reached, try again later');
+    expect(out.usageLimit).toBe(true);
+    expect(out.reason).toContain('usage limit reached');
+  });
+
+  it('reports a bare exit code with no usage flag for an ordinary crash', () => {
+    const out = classifyNonZeroExit(1, '', '');
+    expect(out).toEqual({ reason: 'claude exited with code 1', usageLimit: false });
+  });
+
+  it('does not mistake an ordinary stderr failure for a usage limit', () => {
+    const out = classifyNonZeroExit(1, '', 'SyntaxError: Unexpected token');
+    expect(out.usageLimit).toBe(false);
+    expect(out.reason).toContain('SyntaxError');
   });
 });
 

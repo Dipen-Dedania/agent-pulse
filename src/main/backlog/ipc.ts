@@ -4,6 +4,7 @@
 // (same posture as the timeline's IPC).
 
 import fs from 'fs';
+import path from 'path';
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { logger } from '../../common/logger';
 import {
@@ -209,6 +210,14 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     const artifact = store.getArtifact(args.artifactId);
     if (!artifact) return { content: null };
     try {
+      // Screenshots are binary — the sandboxed renderer can't read file paths,
+      // so ship a data URL instead of utf8 content.
+      if (artifact.kind === 'screenshot') {
+        const ext = path.extname(artifact.path).toLowerCase();
+        const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png';
+        const dataUrl = `data:${mime};base64,${fs.readFileSync(artifact.path).toString('base64')}`;
+        return { content: null, dataUrl, path: artifact.path };
+      }
       return { content: fs.readFileSync(artifact.path, 'utf8'), path: artifact.path };
     } catch (e: any) {
       logger.warn('[Backlog] failed to read artifact file:', e?.message ?? e);

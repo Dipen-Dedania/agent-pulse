@@ -15,6 +15,11 @@ import React from 'react';
 interface Props {
   content: string;
   className?: string;
+  /** Local image resolution: filename → data URL. Markdown image refs and bare
+   * filename mentions that hit this map render inline; anything else stays
+   * text — the renderer never fetches remote images, so an untrusted report
+   * can't trigger network requests. Used for QA-card screenshot previews. */
+  images?: Record<string, string>;
 }
 
 // Opens links in the user's default browser rather than navigating the
@@ -25,13 +30,21 @@ function openExternal(url: string): void {
 }
 
 // ---- Inline formatting -------------------------------------------------
-// Earliest-match scan over: `code`, **bold**, __bold__, *italic*, _italic_,
-// [text](url) links, and bare http(s) URLs. Non-greedy so adjacent tokens on
-// one line don't get swallowed into a single match.
+// Earliest-match scan over: `code`, ![alt](src) images, **bold**, __bold__,
+// *italic*, _italic_, [text](url) links, bare http(s) URLs, and bare image
+// filenames (resolved against the `images` map). Non-greedy so adjacent
+// tokens on one line don't get swallowed into a single match.
 const INLINE_RE =
-  /(`[^`]+`)|(\*\*[\s\S]+?\*\*)|(__[\s\S]+?__)|(\*[^*\n]+?\*)|(_[^_\n]+?_)|(\[[^\]]+\]\([^)\s]+\))|(https?:\/\/[^\s)]+)/;
+  /(`[^`]+`)|(!\[[^\]]*\]\([^)\s]+\))|(\*\*[\s\S]+?\*\*)|(__[\s\S]+?__)|(\*[^*\n]+?\*)|(_[^_\n]+?_)|(\[[^\]]+\]\([^)\s]+\))|(https?:\/\/[^\s)]+)|([A-Za-z0-9][\w.-]*\.(?:png|jpe?g|webp)\b)/;
 
-function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
+/** Resolve an image src to a data URL by bare filename (paths are stripped —
+ * the agent may write `screens/foo.png` while the map is keyed by `foo.png`). */
+function resolveImage(src: string, images?: Record<string, string>): { name: string; dataUrl: string | null } {
+  const name = src.split(/[\\/]/).pop() ?? src;
+  return { name, dataUrl: images?.[name] ?? null };
+}
+
+function renderInline(text: string, keyPrefix: string, images?: Record<string, string>): React.ReactNode[] {
   const out: React.ReactNode[] = [];
   let rest = text;
   let i = 0;
@@ -45,24 +58,64 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
     const tok = m[0];
     const key = `${keyPrefix}-${i++}`;
     if (tok.startsWith('`')) {
-      out.push(
-        <code
-          key={key}
-          className='px-1 py-0.5 rounded bg-glass/80 text-ok font-mono text-[0.85em]'
-        >
-          {tok.slice(1, -1)}
-        </code>,
-      );
+      // Agents often write screenshot references as inline code
+      // (`qa-screens/foo.png`) rather than image syntax — when the code span
+      // is exactly an image path that resolves in the map, show the image.
+      const inner = tok.slice(1, -1).trim();
+      const codeImage = /\.(?:png|jpe?g|webp)$/i.test(inner) ? resolveImage(inner, images) : null;
+      if (codeImage?.dataUrl) {
+        out.push(
+          <img
+            key={key}
+            src={codeImage.dataUrl}
+            alt={codeImage.name}
+            title={codeImage.name}
+            className='block my-2 max-w-full max-h-80 rounded-lg border border-edge/50'
+          />,
+        );
+      } else {
+        out.push(
+          <code
+            key={key}
+            className='px-1 py-0.5 rounded bg-glass/80 text-ok font-mono text-[0.85em]'
+          >
+            {tok.slice(1, -1)}
+          </code>,
+        );
+      }
+    } else if (tok.startsWith('![')) {
+      // ![alt](src) — inline image. Only local screenshots from the images map
+      // render; an unresolved src degrades to its alt text + filename.
+      const im = /^!\[([^\]]*)\]\(([^)\s]+)\)$/.exec(tok)!;
+      const { name, dataUrl } = resolveImage(im[2], images);
+      if (dataUrl) {
+        out.push(
+          <img
+            key={key}
+            src={dataUrl}
+            alt={im[1] || name}
+            title={name}
+            className='block my-2 max-w-full max-h-80 rounded-lg border border-edge/50'
+          />,
+        );
+      } else {
+        out.push(
+          <span key={key} className='text-faint'>
+            {im[1] ? `${im[1]} ` : ''}
+            <code className='px-1 py-0.5 rounded bg-glass/80 font-mono text-[0.85em]'>{name}</code>
+          </span>,
+        );
+      }
     } else if (tok.startsWith('**') || tok.startsWith('__')) {
       out.push(
         <strong key={key} className='font-semibold text-strong'>
-          {renderInline(tok.slice(2, -2), key)}
+          {renderInline(tok.slice(2, -2), key, images)}
         </strong>,
       );
     } else if (tok.startsWith('*') || tok.startsWith('_')) {
       out.push(
         <em key={key} className='italic'>
-          {renderInline(tok.slice(1, -1), key)}
+          {renderInline(tok.slice(1, -1), key, images)}
         </em>,
       );
     } else if (tok.startsWith('[')) {
@@ -78,10 +131,10 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
           }}
           className='text-sky-400 hover:text-sky-300 underline underline-offset-2 cursor-pointer'
         >
-          {renderInline(lm[1], key)}
+          {renderInline(lm[1], key, images)}
         </a>,
       );
-    } else {
+    } else if (tok.startsWith('http://') || tok.startsWith('https://')) {
       out.push(
         <a
           key={key}
@@ -95,6 +148,23 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
           {tok}
         </a>,
       );
+    } else {
+      // Bare image filename (e.g. "see theme-toggle.png") — render inline when
+      // the report's screenshot map has it, otherwise leave the text as-is.
+      const { dataUrl } = resolveImage(tok, images);
+      if (dataUrl) {
+        out.push(
+          <img
+            key={key}
+            src={dataUrl}
+            alt={tok}
+            title={tok}
+            className='block my-2 max-w-full max-h-80 rounded-lg border border-edge/50'
+          />,
+        );
+      } else {
+        out.push(tok);
+      }
     }
     rest = rest.slice(m.index + tok.length);
   }
@@ -130,7 +200,8 @@ const RE_QUOTE = /^\s*>\s?/;
 const RE_UL = /^\s*[-*+]\s+/;
 const RE_OL = /^\s*\d+[.)]\s+/;
 
-function renderBlocks(src: string): React.ReactNode[] {
+function renderBlocks(src: string, images?: Record<string, string>): React.ReactNode[] {
+  const inline = (t: string, kp: string) => renderInline(t, kp, images);
   const lines = src.replace(/\r\n/g, '\n').split('\n');
   const blocks: React.ReactNode[] = [];
   let key = 0;
@@ -176,7 +247,7 @@ function renderBlocks(src: string): React.ReactNode[] {
         React.createElement(
           `h${level}`,
           { key: k(), className: HEADING_CLASS[level] },
-          renderInline(h[2].trim(), k()),
+          inline(h[2].trim(), k()),
         ),
       );
       i++;
@@ -209,7 +280,7 @@ function renderBlocks(src: string): React.ReactNode[] {
                     key={ci}
                     className='border border-edge/60 px-2 py-1 text-left font-semibold text-primary bg-glass/40'
                   >
-                    {renderInline(c, `th-${ci}`)}
+                    {inline(c, `th-${ci}`)}
                   </th>
                 ))}
               </tr>
@@ -222,7 +293,7 @@ function renderBlocks(src: string): React.ReactNode[] {
                       key={ci}
                       className='border border-edge/60 px-2 py-1 text-body align-top'
                     >
-                      {renderInline(r[ci] ?? '', `td-${ri}-${ci}`)}
+                      {inline(r[ci] ?? '', `td-${ri}-${ci}`)}
                     </td>
                   ))}
                 </tr>
@@ -246,7 +317,7 @@ function renderBlocks(src: string): React.ReactNode[] {
           key={k()}
           className='my-2 pl-3 border-l-2 border-edge-strong text-muted italic'
         >
-          {renderInline(buf.join(' '), k())}
+          {inline(buf.join(' '), k())}
         </blockquote>,
       );
       continue;
@@ -266,7 +337,7 @@ function renderBlocks(src: string): React.ReactNode[] {
         >
           {items.map((it, ii) => (
             <li key={ii} className='text-primary leading-relaxed'>
-              {renderInline(it, `li-${ii}`)}
+              {inline(it, `li-${ii}`)}
             </li>
           ))}
         </ul>,
@@ -288,7 +359,7 @@ function renderBlocks(src: string): React.ReactNode[] {
         >
           {items.map((it, ii) => (
             <li key={ii} className='text-primary leading-relaxed'>
-              {renderInline(it, `oli-${ii}`)}
+              {inline(it, `oli-${ii}`)}
             </li>
           ))}
         </ol>,
@@ -314,7 +385,7 @@ function renderBlocks(src: string): React.ReactNode[] {
     }
     blocks.push(
       <p key={k()} className='my-2 text-primary leading-relaxed'>
-        {renderInline(buf.join('\n'), k())}
+        {inline(buf.join('\n'), k())}
       </p>,
     );
   }
@@ -322,7 +393,7 @@ function renderBlocks(src: string): React.ReactNode[] {
   return blocks;
 }
 
-export const Markdown: React.FC<Props> = ({ content, className }) => {
-  const blocks = React.useMemo(() => renderBlocks(content), [content]);
+export const Markdown: React.FC<Props> = ({ content, className, images }) => {
+  const blocks = React.useMemo(() => renderBlocks(content, images), [content, images]);
   return <div className={`ap-markdown break-words ${className ?? ''}`}>{blocks}</div>;
 };

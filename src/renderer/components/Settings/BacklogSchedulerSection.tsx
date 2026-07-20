@@ -267,6 +267,39 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
         />
       </div>
 
+      {/* Proactive usage gate — how full the Claude 5-hour window may get before
+          the scheduler stops claiming NEW cards (a run started near the ceiling
+          just dies mid-task). 100 = never gate proactively. */}
+      <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4 flex items-start gap-3'>
+        <div className='flex-1 min-w-0'>
+          <p className='font-medium text-strong text-sm leading-tight'>Pause new tasks near the usage limit</p>
+          <p className='text-xs text-muted mt-1'>
+            Stop claiming new cards once the Claude 5-hour window is this full — a task started with
+            little left just dies partway through.{' '}
+            {config.usageGatePercent >= 100
+              ? 'At 100% the scheduler keeps claiming until the window is fully spent.'
+              : `Currently pausing at ${config.usageGatePercent}% used.`}
+          </p>
+        </div>
+        <div className='flex items-center gap-1.5 shrink-0'>
+          <input
+            type='number'
+            min={50}
+            max={100}
+            step={5}
+            value={config.usageGatePercent}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isFinite(n)) return;
+              onChange({ usageGatePercent: Math.min(100, Math.max(50, Math.round(n))) });
+            }}
+            className='w-16 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-sm text-strong text-right focus:outline-none focus:border-blue-500/60'
+            aria-label='Usage limit percentage to pause new tasks'
+          />
+          <span className='text-faint text-sm'>%</span>
+        </div>
+      </div>
+
       {/* Completion notifications — collapsed behind a toggle so an empty list
           doesn't clutter the section; expands inline (no screen-covering modal). */}
       <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4'>

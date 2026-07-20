@@ -44,6 +44,7 @@ interface BacklogStore {
     prereqIds?: string[];
     qaProvider?: BacklogCard['qaProvider'];
     qaCommand?: string | null;
+    qaUrl?: string | null;
     acceptanceCriteria?: string[];
   }) => Promise<BacklogCard | null>;
   updateCard: (id: string, patch: Partial<BacklogCard>) => Promise<BacklogCard | null>;

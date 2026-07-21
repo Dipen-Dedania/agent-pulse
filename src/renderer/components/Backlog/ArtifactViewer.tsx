@@ -82,7 +82,16 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
   const removeWorktree = useBacklogStore((s) => s.removeWorktree);
   const applyWorktree = useBacklogStore((s) => s.applyWorktree);
   const applyWorktreeStashed = useBacklogStore((s) => s.applyWorktreeStashed);
+  const resumeSession = useBacklogStore((s) => s.resumeSession);
   const [applying, setApplying] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  // When set, the modal shows this report in full (rich markdown) with a Back
+  // button. Kept separate from `selected` so opening/closing it never disturbs
+  // the artifact panel's own selection or the modal's width.
+  const [fullReport, setFullReport] = useState<BacklogArtifact | null>(null);
+  const [fullContent, setFullContent] = useState<string | null>(null);
+  const [fullImages, setFullImages] = useState<Record<string, string>>({});
+  const [fullTruncated, setFullTruncated] = useState(false);
   const [attempts, setAttempts] = useState<BacklogAttempt[]>([]);
   const [artifacts, setArtifacts] = useState<BacklogArtifact[]>([]);
   const [selected, setSelected] = useState<BacklogArtifact | null>(null);
@@ -155,6 +164,37 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
     return () => { cancelled = true; };
   }, [selected, artifacts]);
 
+  // Loads the "Show more" full-report content + its sibling screenshots,
+  // independent of the artifact panel's `selected` so the two never collide.
+  useEffect(() => {
+    if (!fullReport) { setFullContent(null); setFullImages({}); setFullTruncated(false); return; }
+    let cancelled = false;
+    window.electron.invoke('backlog:read-artifact', { artifactId: fullReport.id })
+      .then((res: { content: string | null; truncated?: boolean }) => {
+        if (cancelled) return;
+        setFullContent(res?.content ?? null);
+        setFullTruncated(Boolean(res?.truncated));
+      })
+      .catch((e: unknown) => logger.error('[ArtifactViewer] failed to read full report', e));
+    const shots = artifacts.filter((x) => x.attemptId === fullReport.attemptId && x.kind === 'screenshot');
+    if (shots.length === 0) {
+      setFullImages({});
+    } else {
+      void Promise.all(
+        shots.map(async (s) => {
+          const res = await window.electron.invoke('backlog:read-artifact', { artifactId: s.id });
+          return [s.preview, (res?.dataUrl as string | undefined) ?? null] as const;
+        }),
+      ).then((pairs) => {
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        for (const [name, url] of pairs) if (url) map[name] = url;
+        setFullImages(map);
+      }).catch((e: unknown) => logger.error('[ArtifactViewer] failed to load full report screenshots', e));
+    }
+    return () => { cancelled = true; };
+  }, [fullReport, artifacts]);
+
   const openFile = () => {
     if (selected) void window.electron.invoke('open-path', selected.path);
   };
@@ -217,6 +257,20 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
     }
   };
 
+  // Attempts arrive newest-first; the worktree reflects the latest run, so its
+  // session is the newest attempt carrying one. Null hides the Resume button.
+  const resumeSessionId = attempts.find((a) => a.sessionId)?.sessionId ?? null;
+
+  const handleResumeSession = async () => {
+    setResuming(true);
+    try {
+      const res = await resumeSession(card.id);
+      if (!res.ok && res.reason) void appAlert(res.reason, 'Resume in Claude Code');
+    } finally {
+      setResuming(false);
+    }
+  };
+
   const handleRemoveWorktree = async () => {
     const ok = await appConfirm({
       title: 'Remove worktree?',
@@ -239,7 +293,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
       <div
         className={`apple-scroll relative w-full mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-3 overflow-y-auto ${
-          isDiff ? 'max-w-[1600px] max-h-[92vh]' : 'max-w-3xl max-h-[85vh]'
+          isDiff && !fullReport ? 'max-w-[1600px] max-h-[92vh]' : 'max-w-3xl max-h-[85vh]'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
@@ -258,6 +312,37 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
 
         {loading ? (
           <p className='text-sm text-muted'>Loading…</p>
+        ) : fullReport ? (
+          /* Full report — one attempt's complete markdown, reached via "Show more" */
+          <div className='flex flex-col gap-3 min-h-0'>
+            <div className='flex items-center gap-2'>
+              <button
+                onClick={() => setFullReport(null)}
+                className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
+              >
+                ← Back
+              </button>
+              <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>Full report</p>
+              <button
+                onClick={() => void window.electron.invoke('open-path', fullReport.path)}
+                className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
+              >
+                Open file
+              </button>
+            </div>
+            {fullContent == null ? (
+              <p className='text-sm text-muted'>Loading…</p>
+            ) : (
+              <div className='max-h-[70vh] overflow-y-auto apple-scroll bg-glass/40 border border-edge/50 rounded-xl p-4'>
+                <Markdown content={fullContent} images={fullImages} />
+                {fullTruncated && (
+                  <p className='mt-2 text-[11px] text-faint italic'>
+                    Preview truncated — use “Open file” to read the full report.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         ) : (
           <>
             {/* Attempt history */}
@@ -304,6 +389,14 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                           >
                             {summary}
                           </p>
+                        )}
+                        {report && (
+                          <button
+                            onClick={() => setFullReport(report)}
+                            className='self-start ml-[8.75rem] text-[11px] text-primary hover:underline cursor-pointer bg-transparent border-0'
+                          >
+                            Show more
+                          </button>
                         )}
                       </div>
                     );
@@ -428,6 +521,16 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                   >
                     Open folder
                   </button>
+                  {resumeSessionId && (
+                    <button
+                      onClick={() => void handleResumeSession()}
+                      disabled={resuming}
+                      title='Open an interactive Claude Code session on this worktree, resumed from the last run'
+                      className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                    >
+                      {resuming ? 'Opening…' : 'Resume in Claude Code'}
+                    </button>
+                  )}
                   <button
                     onClick={() => void handleRemoveWorktree()}
                     className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-red-500/30 text-body hover:text-danger cursor-pointer transition-colors'

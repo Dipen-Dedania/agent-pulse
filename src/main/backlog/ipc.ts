@@ -19,6 +19,9 @@ import { BacklogStore, CreateCardInput, UpdateCardPatch } from './store';
 import { BacklogEngine } from './engine';
 import { resolveProjectDefaultModel, ProjectDefaultModel } from './claude-settings';
 import { applyWorktree, applyWorktreeStashed, removeWorktree } from './worktree';
+import { isSafeSessionId } from './runner';
+import { resolveClaudeBin, resetClaudeBinCache } from '../scheduler/opener';
+import { launchResumeTerminal } from './resume-terminal';
 
 export interface BacklogIpcDeps {
   store: BacklogStore | null;
@@ -195,6 +198,27 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     const project = store.listProjects().find((p) => p.id === card.projectId);
     if (!project) return { ok: false, reason: 'project not found for this card' };
     return applyWorktreeStashed(project.path, card.worktreePath);
+  });
+
+  // "Resume in Claude Code": open an interactive terminal on the worktree that
+  // picks up the latest attempt's session by hand. The session id lives on the
+  // attempt (never the renderer) and the cwd is the DB-stored worktree path, so
+  // resume resolves against the same directory the headless run created it in.
+  ipcMain.handle('backlog:resume-session', (_e, args: { cardId: string }) => {
+    if (!store) return { ok: false, reason: 'backlog storage unavailable' };
+    const card = store.getCard(args?.cardId);
+    if (!card) return { ok: false, reason: 'card not found' };
+    if (!card.worktreePath) return { ok: false, reason: 'card has no worktree to resume in' };
+    // Attempts come back newest-first; the worktree reflects the most recent run.
+    const sessionId = store.listAttempts(card.id).find((a) => a.sessionId)?.sessionId ?? null;
+    if (!sessionId) return { ok: false, reason: 'no resumable session recorded for this card' };
+    if (!isSafeSessionId(sessionId)) return { ok: false, reason: 'recorded session id is malformed' };
+    const bin = resolveClaudeBin();
+    if (!bin) {
+      resetClaudeBinCache();
+      return { ok: false, reason: 'claude CLI not found on PATH' };
+    }
+    return launchResumeTerminal(bin, card.worktreePath, sessionId);
   });
 
   ipcMain.handle('backlog:get-attempts', (_e, args: { cardId: string }) => {

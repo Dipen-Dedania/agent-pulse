@@ -17,7 +17,7 @@
 
 Agent Pulse is a cross-platform Electron desktop app that surfaces the state of every AI coding agent on your machine through floating, always-on-top status bubbles. Instead of tab-hopping between Claude Code, Cursor, Codex, Copilot, Kiro, and Antigravity to check whether an agent is still working, idle, or has crashed, you see it at a glance in a frosted-glass bubble — anywhere on your desktop.
 
-It also bundles a unified status bridge, subscription usage meters for Claude / Codex / Cursor / Antigravity, a local Pulse Timeline with estimated-cost analytics, a configurable Claude Code status line, Discord/Slack attention webhooks, a cowork session scheduler, and a configurable shell-command guardrail engine.
+It also bundles a unified status bridge, subscription usage meters for Claude / Codex / Cursor / Antigravity, a local Pulse Timeline with estimated-cost analytics, a self-running Backlog board that executes queued tasks during your idle windows, a configurable Claude Code status line, Discord/Slack attention webhooks, a cowork session scheduler, and a configurable shell-command guardrail engine.
 
 <p align="center">
   <a href="https://github.com/Dipen-Dedania/agent-pulse/raw/main/brag-output/brag.mp4"><img src="github-pages/public/assets/demo-preview.gif" alt="Agent Pulse demo" width="720" /></a>
@@ -59,6 +59,7 @@ In-progress builds for any commit on `main` are also available as workflow artif
   - **Idle / Idle-active** — calm breathing effect.
   - **Error / Dead** — red glow plus a shake.
 - Toggle each bubble independently from Settings; the layout persists across restarts.
+- **Light / dark mode** — bubbles and Settings follow your OS `prefers-color-scheme` and re-theme live when it changes.
 
 ### Unified status bridge
 
@@ -93,6 +94,20 @@ Want a tool that isn't listed? Open a [tool support request](https://github.com/
 - Block or warn on risky shell commands before they reach an agent (e.g. `rm -rf /`, `git push --force` to protected branches).
 - Built-in core rule set plus user-defined custom rules with validated regex.
 - Live event log of triggered guardrails in the Settings panel.
+
+### Backlog board & scheduler
+
+- A Kanban-style **board** (Refinement → Todo → In-progress → Done, plus Blocked / Rework / Paused) where you queue tasks for agents to run themselves.
+- Three **task types**:
+  - **Research** — read-only; delivers a markdown report.
+  - **Execution** — runs with Write/Edit in an isolated detached **git worktree** and delivers an uncommitted diff plus a change summary. Optional **QA** gate (tests / lint / typecheck / custom command) auto-retries once via Rework before escalating to Blocked.
+  - **QA** — opens the running app's URL, checks each acceptance criterion against the live UI, and delivers a report with evidence screenshots. Changes nothing.
+- **Scheduler windows** — define time ranges (per weekday) during which queued cards auto-execute. Inside a window the loop is completion-driven: each finished card immediately claims the next.
+- **Gating** — optional "only when idle" (no input for K minutes) and a proactive Claude usage gate that stops claiming new cards once your 5-hour window is near-exhausted (a run that would just die mid-task).
+- **Card controls** — per-card model, time/cost estimate, prerequisites (card must wait on another), risk tier (only green cards autorun; amber/red are manual "Run now"), file attachments inlined into the prompt, and reusable quick-task templates.
+- **Cost forecast** — "the queue will burn ~$X in the next window (N cards fit)."
+- Discord/Slack **completion webhooks** ping when a card settles into Done / Blocked / Rework, on their own channel independent of attention escalation.
+- Backed by the same local SQLite store as the timeline; worktrees and artifacts live under `<userData>`.
 
 ### Pulse Timeline (Analytics tab)
 
@@ -243,6 +258,7 @@ src/
 │   ├── antigravity-usage/  # Antigravity IDE usage poller
 │   ├── llm-pricing/   # LiteLLM price-table poller (estimated-cost analytics)
 │   ├── timeline/      # SQLite Pulse Timeline store + writers
+│   ├── backlog/       # Backlog board store + scheduler engine, runner, worktrees, QA
 │   ├── attention/     # Waiting-state escalation engine
 │   ├── notifications/ # Discord/Slack webhook senders
 │   ├── scheduler/     # Cowork session opener scheduler
@@ -253,7 +269,8 @@ src/
 │   └── index.ts       # App entry: single-instance lock, IPC wiring
 └── renderer/
     ├── components/Bubble/    # Animated status bubbles
-    ├── components/Settings/  # Hooks, Usage, Guardrails tabs
+    ├── components/Backlog/   # Backlog board tab, card tiles, diff/artifact viewers
+    ├── components/Settings/  # Hooks, Usage, Backlog, Analytics, Guardrails tabs
     ├── hooks/                # React hooks
     └── store/                # Zustand store
 ```
@@ -273,6 +290,7 @@ What's covered:
 - **Zustand status store** — state updates, multi-tool independence, initial hydration.
 - **Hook installer** — `installHook` / `uninstallHook` round-trip for each tool.
 - **Guardrail engine** — pattern matching and regex safety validation.
+- **Backlog** — scheduler timing/window edges, card picker, store round-trips, worktree lifecycle, and QA gating.
 
 For a quick end-to-end check without launching the GUI:
 
@@ -286,7 +304,7 @@ npm run test:bridge
 
 | Path                                                     | Purpose                                                                                                                |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `~/.claude/agent-pulse-config.json`                      | Persisted user settings (enabled bubbles, usage, guardrails, status line, attention webhooks, scheduler, auto-launch). |
+| `~/.claude/agent-pulse-config.json`                      | Persisted user settings (enabled bubbles, usage, guardrails, status line, attention webhooks, cowork + backlog schedulers, auto-launch). |
 | `~/.claude/settings.json`                                | Claude Code HTTP hooks + status line registration.                                                                     |
 | `~/.claude/` status-line script (`.js` / `.py` / `.ps1`) | Status line renderer invoked by Claude Code.                                                                           |
 | `~/.claude/llm-pricing-cache.json`                       | Cached LiteLLM price table for estimated-cost analytics.                                                               |

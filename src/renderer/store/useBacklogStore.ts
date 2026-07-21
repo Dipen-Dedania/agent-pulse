@@ -56,6 +56,7 @@ interface BacklogStore {
   removeWorktree: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
   applyWorktree: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; conflicted?: boolean; dirtyTarget?: boolean; changedFiles?: string[] }>;
   applyWorktreeStashed: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; stashed?: boolean; stashConflicted?: boolean; changedFiles?: string[] }>;
+  resumeSession: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
   updateTemplates: (templates: BacklogTemplate[]) => Promise<BacklogTemplate[] | null>;
 
   listAttachments: (cardId: string) => Promise<BacklogAttachment[]>;
@@ -217,6 +218,18 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
       return res ?? { ok: false, reason: 'unavailable' };
     } catch (e) {
       logger.error('[useBacklogStore] applyWorktreeStashed failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  // Opens an interactive `claude --resume` terminal on the card's worktree.
+  // Detaches in main — no state changes here, so no hydrate.
+  resumeSession: async (cardId) => {
+    try {
+      const res = await window.electron.invoke('backlog:resume-session', { cardId });
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] resumeSession failed', e);
       return { ok: false, reason: String(e) };
     }
   },

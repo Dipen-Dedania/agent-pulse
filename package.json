@@ -1,6 +1,6 @@
 {
   "name": "agent-pulse",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "",
   "main": "dist/main/index.js",
   "scripts": {
@@ -14,8 +14,10 @@
     "start:warn": "cross-env AGENT_PULSE_LOG_LEVEL=warn npm start",
     "start:error": "cross-env AGENT_PULSE_LOG_LEVEL=error npm start",
     "start:debug": "cross-env AGENT_PULSE_LOG_LEVEL=debug npm start",
+    "demo:groklet": "node clawd-svgs/build-groklet-demo.js groklet.svg --open",
     "test:bridge": "tsx src/main/test-bridge.ts",
-    "test": "vitest run",
+    "lint:ui": "node scripts/lint-ui.mjs",
+    "test": "npm run lint:ui && vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "pack": "npm run build && electron-builder --dir --config electron-builder.config.cjs",

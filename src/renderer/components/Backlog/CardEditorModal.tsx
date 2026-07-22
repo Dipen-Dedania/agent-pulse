@@ -4,7 +4,7 @@ import {
   BacklogTemplate, PendingAttachment, QaProvider, RiskTier, isSafeModelId,
 } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert } from '../Dialog/AppDialog';
+import { appAlert, Button, Select, Tooltip } from '../Shared';
 import { TIER_META } from './CardTile';
 import { TemplateManagerModal } from './TemplateManagerModal';
 
@@ -66,17 +66,18 @@ const inputClass =
   'bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60';
 const labelClass = 'text-xs uppercase tracking-widest text-faint font-semibold';
 
-// Small "ⓘ" affordance carrying a native-title tooltip — matches the app's
-// existing title-attribute hint pattern (see CardTile) without a portal.
+// Small "ⓘ" affordance carrying a glass tooltip — uses the shared Tooltip
+// primitive so it matches the rest of the app instead of a native browser hint.
 const InfoHint: React.FC<{ text: string }> = ({ text }) => (
-  <span
-    tabIndex={0}
-    title={text}
-    aria-label={text}
-    className='inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-edge/70 text-[9px] leading-none text-faint cursor-help select-none hover:text-body hover:border-edge-strong'
-  >
-    i
-  </span>
+  <Tooltip content={text}>
+    <span
+      tabIndex={0}
+      aria-label={text}
+      className='inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-edge/70 text-[9px] leading-none text-faint cursor-help select-none hover:text-body hover:border-edge-strong'
+    >
+      i
+    </span>
+  </Tooltip>
 );
 
 export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, cards, onSave, onClose }) => {
@@ -228,27 +229,29 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           <div className='flex flex-col gap-1.5'>
             <div className='flex items-center gap-2'>
               <span className={labelClass}>Quick tasks</span>
-              <button
-                onClick={() => setManagingTemplates(true)}
-                className='text-[11px] text-faint hover:text-body cursor-pointer transition-colors'
-                title='Add, edit, or remove quick-task templates'
-              >
-                manage
-              </button>
+              <Tooltip content='Add, edit, or remove quick-task templates'>
+                <button
+                  onClick={() => setManagingTemplates(true)}
+                  className='text-[11px] text-faint hover:text-body cursor-pointer transition-colors'
+                >
+                  manage
+                </button>
+              </Tooltip>
             </div>
             {templates.length === 0 ? (
               <p className='text-xs text-faint'>No templates yet — "manage" to add some.</p>
             ) : (
               <div className='flex gap-2 flex-wrap'>
                 {templates.map((tpl) => (
-                  <button
-                    key={tpl.id}
-                    onClick={() => applyTemplate(tpl)}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
-                    title={tpl.description}
-                  >
-                    {tpl.name}
-                  </button>
+                  <Tooltip key={tpl.id} content={tpl.description}>
+                    <Button
+                      variant='secondary'
+                      size='sm'
+                      onClick={() => applyTemplate(tpl)}
+                    >
+                      {tpl.name}
+                    </Button>
+                  </Tooltip>
                 ))}
               </div>
             )}
@@ -277,14 +280,15 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         <div className='flex flex-col gap-1.5'>
           <div className='flex items-center gap-2'>
             <span className={labelClass}>Attachments</span>
-            <button
+            <Button
+              variant='secondary'
+              size='xs'
               type='button'
               onClick={() => void handlePickAttachments()}
               disabled={picking}
-              className='px-2 py-0.5 rounded-md text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors disabled:opacity-50'
             >
               {picking ? 'Choosing…' : '+ Attach files'}
-            </button>
+            </Button>
           </div>
           {keptExisting.length === 0 && pendingAttachments.length === 0 ? (
             <p className='text-xs text-faint'>
@@ -294,7 +298,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             <div className='flex flex-wrap gap-1.5'>
               {keptExisting.map((a) => (
                 <span key={a.id} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-glass/70 border border-edge/60 text-xs text-primary'>
-                  <span className='truncate max-w-48' title={a.filename}>{a.filename}</span>
+                  <Tooltip content={a.filename}><span className='truncate max-w-48'>{a.filename}</span></Tooltip>
                   <span className='text-faint'>{formatBytes(a.bytes)}</span>
                   <button
                     type='button'
@@ -307,13 +311,13 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
                 </span>
               ))}
               {pendingAttachments.map((a, i) => (
-                <span key={`pending-${a.filename}-${i}`} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-200'>
-                  <span className='truncate max-w-48' title={a.filename}>{a.filename}</span>
-                  <span className='text-emerald-400/70'>{formatBytes(a.bytes)} · new</span>
+                <span key={`pending-${a.filename}-${i}`} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-ok'>
+                  <Tooltip content={a.filename}><span className='truncate max-w-48'>{a.filename}</span></Tooltip>
+                  <span className='text-ok/80'>{formatBytes(a.bytes)} · new</span>
                   <button
                     type='button'
                     onClick={() => setPendingAttachments((prev) => prev.filter((_, j) => j !== i))}
-                    className='text-emerald-400/70 hover:text-danger cursor-pointer'
+                    className='text-ok/70 hover:text-danger cursor-pointer'
                     aria-label={`Remove ${a.filename}`}
                   >
                     ✕
@@ -327,12 +331,17 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
           <label className='flex flex-col gap-1.5'>
             <span className={labelClass}>Project</span>
-            <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={`${inputClass} cursor-pointer`}>
-              {projects.length === 0 && <option value=''>No projects registered</option>}
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+            <Select
+              value={projectId}
+              onChange={(v) => setProjectId(v)}
+              ariaLabel='Project'
+              className={`${inputClass} cursor-pointer`}
+              options={
+                projects.length === 0
+                  ? [{ value: '', label: 'No projects registered' }]
+                  : projects.map((p) => ({ value: p.id, label: p.name }))
+              }
+            />
           </label>
 
           <div className='flex flex-col gap-1.5'>
@@ -343,16 +352,16 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
                 { value: 'execution', label: 'Execution', hint: 'Edits files in an isolated worktree — delivers a diff + report.' },
                 { value: 'qa', label: 'QA', hint: 'Read-only — opens the running app in a headless browser and checks each acceptance criterion. Delivers a report + screenshots.' },
               ] as { value: BacklogTaskType; label: string; hint: string }[]).map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => setTaskType(t.value)}
-                  title={t.hint}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-                    taskType === t.value ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
-                  }`}
-                >
-                  {t.label}
-                </button>
+                <Tooltip key={t.value} content={t.hint}>
+                  <button
+                    onClick={() => setTaskType(t.value)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
+                      taskType === t.value ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                </Tooltip>
               ))}
             </div>
           </div>
@@ -361,17 +370,17 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             <span className={labelClass}>Risk tier</span>
             <div className='flex gap-1 p-1 bg-glass/50 border border-edge/60 rounded-xl w-fit'>
               {(Object.keys(TIER_META) as RiskTier[]).map((tier) => (
-                <button
-                  key={tier}
-                  onClick={() => setRiskTier(tier)}
-                  title={TIER_META[tier].hint}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 ${
-                    riskTier === tier ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
-                  }`}
-                >
-                  <span className={`w-2 h-2 rounded-full ${TIER_META[tier].dot}`} />
-                  {TIER_META[tier].label}
-                </button>
+                <Tooltip key={tier} content={TIER_META[tier].hint}>
+                  <button
+                    onClick={() => setRiskTier(tier)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 ${
+                      riskTier === tier ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${TIER_META[tier].dot}`} />
+                    {TIER_META[tier].label}
+                  </button>
+                </Tooltip>
               ))}
             </div>
           </div>
@@ -440,7 +449,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             <p className='text-xs text-muted -mt-0.5'>
               Autorun waits until these cards are Done ("Run now" overrides).
             </p>
-            <div className='apple-scroll flex flex-col gap-1 max-h-36 overflow-y-auto bg-glass/40 border border-edge/50 rounded-xl p-2'>
+            <div className='apple-scroll flex flex-col gap-1 max-h-36 overflow-y-auto glass-secondary shrink-0 p-2'>
               {prereqCandidates.map((c) => (
                 <label key={c.id} className='flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-glass/60 cursor-pointer'>
                   <input
@@ -463,7 +472,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
 
         {/* Acceptance criteria & QA provider — execution cards only */}
         {taskType === 'execution' ? (
-          <div className='bg-glass/40 border border-edge/50 rounded-xl p-4 flex flex-col gap-3'>
+          <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
             <div>
               <p className='text-sm font-medium text-strong'>Acceptance criteria & QA</p>
               <p className='text-xs text-muted mt-1'>
@@ -517,7 +526,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             )}
           </div>
         ) : taskType === 'qa' ? (
-          <div className='bg-glass/40 border border-edge/50 rounded-xl p-4 flex flex-col gap-3'>
+          <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
             <div>
               <p className='text-sm font-medium text-strong'>Browser verification</p>
               <p className='text-xs text-muted mt-1'>
@@ -553,7 +562,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             </label>
           </div>
         ) : (
-          <div className='bg-glass/40 border border-edge/50 rounded-xl p-3 opacity-50'>
+          <div className='glass-secondary shrink-0 p-3 opacity-50'>
             <p className='text-xs text-muted'>
               QA applies to execution tasks — research cards are done when their report is attached.
             </p>
@@ -561,36 +570,31 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         )}
 
         <div className='flex items-center gap-2 justify-end'>
-          <button
-            onClick={onClose}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
-          >
+          <Button variant='secondary' onClick={onClose}>
             Cancel
-          </button>
+          </Button>
           {card ? (
-            <button
+            <Button
               onClick={() => valid && onSave(buildInput(), attachmentIntent())}
               disabled={!valid}
-              className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white transition-colors cursor-pointer'
             >
               Save
-            </button>
+            </Button>
           ) : (
             <>
-              <button
+              <Button
+                variant='secondary'
                 onClick={() => valid && onSave(buildInput('refinement'), attachmentIntent())}
                 disabled={!valid}
-                className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong disabled:bg-control/40 disabled:text-faint text-primary transition-colors cursor-pointer'
               >
                 Save to Refinement
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => valid && onSave(buildInput('todo'), attachmentIntent())}
                 disabled={!valid}
-                className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white transition-colors cursor-pointer'
               >
                 Queue in Todo
-              </button>
+              </Button>
             </>
           )}
         </div>

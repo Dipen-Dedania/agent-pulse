@@ -1,5 +1,6 @@
 import React from 'react';
 import { CopilotUsageStatus, CopilotQuotaWindow, UsageState } from '../../../common/types';
+import { GlassToggle, Button } from '../Shared';
 
 export interface CopilotUsageNotificationUI {
   enabled: boolean;
@@ -65,25 +66,18 @@ interface NotifyRowProps {
 const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, onChange }) => {
   const op = comparator === 'lte' ? '≤' : '≥';
   return (
-    <div className='bg-glass/40 border border-edge/50 rounded-xl p-4'>
+    <div className='glass-secondary p-4'>
       <div className='flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
           <p className='font-medium text-strong text-sm leading-tight'>{title}</p>
           <p className='text-xs text-muted mt-1'>{hint}</p>
         </div>
-        <button
-          onClick={() => onChange({ ...value, enabled: !value.enabled })}
-          className={`relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            value.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label={`Toggle ${title}`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-              value.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={value.enabled}
+          onChange={() => onChange({ ...value, enabled: !value.enabled })}
+          size='md'
+          label={`Toggle ${title}`}
+        />
       </div>
 
       <div className={`flex items-center gap-3 mt-3 ${value.enabled ? '' : 'opacity-50'}`}>
@@ -108,7 +102,7 @@ const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, o
 const QuotaBar: React.FC<{ window: CopilotQuotaWindow }> = ({ window: w }) => {
   const remaining = w.unlimited ? 100 : Math.round(100 - w.utilization);
   return (
-    <div className='bg-glass/50 border border-edge/60 rounded-xl p-4'>
+    <div className='glass-secondary p-4'>
       <p className='text-xs uppercase tracking-widest text-faint font-semibold'>{w.label}</p>
       <p className='text-2xl font-bold text-strong mt-1'>
         {w.unlimited ? '∞' : `${remaining}%`}
@@ -138,7 +132,7 @@ export const CopilotUsageSection: React.FC<Props> = ({ config, status, onChange,
   const hasLiveBars = config.liveQuota && quotas.length > 0;
 
   return (
-    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+    <section className='glass-primary mt-6 p-6'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-3'>
@@ -155,19 +149,12 @@ export const CopilotUsageSection: React.FC<Props> = ({ config, status, onChange,
           </p>
         </div>
 
-        <button
-          onClick={() => onChange({ enabled: !config.enabled })}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label='Toggle Copilot usage tracking'
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={config.enabled}
+          onChange={() => onChange({ enabled: !config.enabled })}
+          size='lg'
+          label='Toggle Copilot usage tracking'
+        />
       </div>
 
       {config.enabled && (
@@ -211,7 +198,7 @@ export const CopilotUsageSection: React.FC<Props> = ({ config, status, onChange,
       {config.enabled && (
         <>
           {/* Live-quota opt-in with ToS disclosure. */}
-          <div className='mt-6 bg-glass/40 border border-edge/50 rounded-xl p-4'>
+          <div className='glass-secondary mt-6 p-4'>
             <div className='flex items-start gap-3'>
               <div className='flex-1 min-w-0'>
                 <p className='font-medium text-strong text-sm leading-tight'>Live quota</p>
@@ -220,19 +207,12 @@ export const CopilotUsageSection: React.FC<Props> = ({ config, status, onChange,
                   endpoint (used by the VS Code Copilot client). Off by default.
                 </p>
               </div>
-              <button
-                onClick={() => onChange({ liveQuota: !config.liveQuota })}
-                className={`relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-                  config.liveQuota ? 'bg-blue-500' : 'bg-control-strong'
-                }`}
-                aria-label='Toggle Copilot live quota'
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-                    config.liveQuota ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </button>
+              <GlassToggle
+                checked={config.liveQuota}
+                onChange={() => onChange({ liveQuota: !config.liveQuota })}
+                size='md'
+                label='Toggle Copilot live quota'
+              />
             </div>
           </div>
 
@@ -288,13 +268,12 @@ export const CopilotUsageSection: React.FC<Props> = ({ config, status, onChange,
       )}
 
       <div className='mt-5 flex gap-2'>
-        <button
+        <Button
           onClick={onRefresh}
           disabled={!config.enabled}
-          className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
         >
           Refresh now
-        </button>
+        </Button>
       </div>
     </section>
   );

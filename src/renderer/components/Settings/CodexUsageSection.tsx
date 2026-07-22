@@ -1,5 +1,6 @@
 import React from 'react';
 import { CodexUsageStatus, UsageState } from '../../../common/types';
+import { GlassToggle, Button } from '../Shared';
 
 export interface CodexUsageNotificationUI {
   enabled: boolean;
@@ -64,25 +65,18 @@ interface NotifyRowProps {
 const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, onChange }) => {
   const op = comparator === 'lte' ? '≤' : '≥';
   return (
-    <div className='bg-glass/40 border border-edge/50 rounded-xl p-4'>
+    <div className='glass-secondary p-4'>
       <div className='flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
           <p className='font-medium text-strong text-sm leading-tight'>{title}</p>
           <p className='text-xs text-muted mt-1'>{hint}</p>
         </div>
-        <button
-          onClick={() => onChange({ ...value, enabled: !value.enabled })}
-          className={`relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            value.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label={`Toggle ${title}`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-              value.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={value.enabled}
+          onChange={() => onChange({ ...value, enabled: !value.enabled })}
+          size='md'
+          label={`Toggle ${title}`}
+        />
       </div>
 
       <div className={`flex items-center gap-3 mt-3 ${value.enabled ? '' : 'opacity-50'}`}>
@@ -109,7 +103,7 @@ export const CodexUsageSection: React.FC<Props> = ({ config, status, onChange, o
   const snapshot = status.snapshot;
 
   return (
-    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+    <section className='glass-primary mt-6 p-6'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-3'>
@@ -126,24 +120,17 @@ export const CodexUsageSection: React.FC<Props> = ({ config, status, onChange, o
           </p>
         </div>
 
-        <button
-          onClick={() => onChange({ enabled: !config.enabled })}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label='Toggle Codex usage tracking'
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={config.enabled}
+          onChange={() => onChange({ enabled: !config.enabled })}
+          size='lg'
+          label='Toggle Codex usage tracking'
+        />
       </div>
 
       {config.enabled && (
         <div className={`mt-5 grid gap-4 ${snapshot?.secondary ? 'grid-cols-2' : 'grid-cols-1'}`}>
-          <div className='bg-glass/50 border border-edge/60 rounded-xl p-4'>
+          <div className='glass-secondary p-4'>
             <p className='text-xs uppercase tracking-widest text-faint font-semibold'>
               Weekly window
             </p>
@@ -156,7 +143,7 @@ export const CodexUsageSection: React.FC<Props> = ({ config, status, onChange, o
             </p>
           </div>
           {snapshot?.secondary && (
-            <div className='bg-glass/50 border border-edge/60 rounded-xl p-4'>
+            <div className='glass-secondary p-4'>
               <p className='text-xs uppercase tracking-widest text-faint font-semibold'>
                 Secondary window
               </p>
@@ -228,13 +215,12 @@ export const CodexUsageSection: React.FC<Props> = ({ config, status, onChange, o
       )}
 
       <div className='mt-5 flex gap-2'>
-        <button
+        <Button
           onClick={onRefresh}
           disabled={!config.enabled}
-          className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
         >
           Refresh now
-        </button>
+        </Button>
       </div>
     </section>
   );

@@ -69,7 +69,6 @@ function renderInline(text: string, keyPrefix: string, images?: Record<string, s
             key={key}
             src={codeImage.dataUrl}
             alt={codeImage.name}
-            title={codeImage.name}
             className='block my-2 max-w-full max-h-80 rounded-lg border border-edge/50'
           />,
         );
@@ -94,7 +93,6 @@ function renderInline(text: string, keyPrefix: string, images?: Record<string, s
             key={key}
             src={dataUrl}
             alt={im[1] || name}
-            title={name}
             className='block my-2 max-w-full max-h-80 rounded-lg border border-edge/50'
           />,
         );
@@ -129,7 +127,7 @@ function renderInline(text: string, keyPrefix: string, images?: Record<string, s
             e.preventDefault();
             openExternal(href);
           }}
-          className='text-sky-400 hover:text-sky-300 underline underline-offset-2 cursor-pointer'
+          className='text-info hover:text-info/80 underline underline-offset-2 cursor-pointer'
         >
           {renderInline(lm[1], key, images)}
         </a>,
@@ -143,7 +141,7 @@ function renderInline(text: string, keyPrefix: string, images?: Record<string, s
             e.preventDefault();
             openExternal(tok);
           }}
-          className='text-sky-400 hover:text-sky-300 underline underline-offset-2 cursor-pointer break-all'
+          className='text-info hover:text-info/80 underline underline-offset-2 cursor-pointer break-all'
         >
           {tok}
         </a>,
@@ -158,7 +156,6 @@ function renderInline(text: string, keyPrefix: string, images?: Record<string, s
             key={key}
             src={dataUrl}
             alt={tok}
-            title={tok}
             className='block my-2 max-w-full max-h-80 rounded-lg border border-edge/50'
           />,
         );

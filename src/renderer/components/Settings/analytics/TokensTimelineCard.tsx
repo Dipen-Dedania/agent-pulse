@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { TokensTimelineBucket } from '../../../../common/timeline-types';
 import { formatUsd } from '../../../../common/pricing';
+import { AnimatedNumber } from '../../Shared';
 import { useTokensTimeline } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, Segmented, SkeletonLine, formatCompactNumber, useChartTip } from './shared';
@@ -167,16 +168,41 @@ export const TokensTimelineCard: React.FC = () => {
           <div className='mb-2 flex items-center gap-4 text-[11px] text-muted font-mono tabular-nums'>
             {isCost ? (
               <>
-                <span>est. spend <span className='text-ok'>{formatUsd(data.totalCostUsd)}</span></span>
-                <span>peak <span className='text-primary'>{formatUsd(costBarMax)}</span>/{barsAreWeekly ? 'wk' : 'day'}</span>
+                <span>est. spend{' '}
+                  <AnimatedNumber value={data.totalCostUsd} format={formatUsd} className='text-ok' />
+                </span>
+                <span>peak{' '}
+                  <AnimatedNumber
+                    value={costBarMax}
+                    format={(n) => `${formatUsd(n)}/${barsAreWeekly ? 'wk' : 'day'}`}
+                    className='text-primary'
+                  />
+                </span>
               </>
             ) : isRatio ? (
-              <span>avg <span className='text-primary'>{(avgRatio * 100).toFixed(0)}%</span> of input served from cache</span>
+              <span>avg{' '}
+                <AnimatedNumber
+                  value={avgRatio * 100}
+                  format={(n) => `${n.toFixed(0)}%`}
+                  className='text-primary'
+                />{' '}
+                of input served from cache
+              </span>
             ) : (
               <>
-                <span>fresh <span className='text-primary'>{formatCompactNumber(data.totalFresh)}</span></span>
-                <span>cache <span className='text-primary'>{formatCompactNumber(data.totalCacheRead)}</span></span>
-                <span>peak <span className='text-primary'>{formatCompactNumber(data.maxFresh)}</span>/day</span>
+                <span>fresh{' '}
+                  <AnimatedNumber value={data.totalFresh} format={formatCompactNumber} className='text-primary' />
+                </span>
+                <span>cache{' '}
+                  <AnimatedNumber value={data.totalCacheRead} format={formatCompactNumber} className='text-primary' />
+                </span>
+                <span>peak{' '}
+                  <AnimatedNumber
+                    value={data.maxFresh}
+                    format={(n) => `${formatCompactNumber(n)}/day`}
+                    className='text-primary'
+                  />
+                </span>
               </>
             )}
           </div>

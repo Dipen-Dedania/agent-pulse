@@ -1,6 +1,8 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import { AttentionConfig, WebhookTarget } from '../../../common/types';
 import { WebhookRow } from './WebhookRow';
+import { GlassToggle, Button } from '../Shared';
 
 interface Props {
   config: AttentionConfig;
@@ -18,26 +20,18 @@ const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
   label,
   hint,
 }) => (
-  <button
-    onClick={() => onChange(!checked)}
-    className='flex items-center gap-3 text-left cursor-pointer'
-  >
-    <span
-      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
-        checked ? 'bg-blue-600' : 'bg-control-strong'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
-          checked ? 'left-[18px]' : 'left-0.5'
-        }`}
-      />
-    </span>
+  <div className='flex items-center gap-3'>
+    <GlassToggle
+      checked={checked}
+      onChange={onChange}
+      size='sm'
+      label={label}
+    />
     <span>
       <span className='text-sm font-medium text-primary'>{label}</span>
       {hint && <span className='text-xs text-faint ml-2'>{hint}</span>}
     </span>
-  </button>
+  </div>
 );
 
 export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
@@ -59,7 +53,11 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
   const disabled = !config.enabled;
 
   return (
-    <section className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl flex flex-col gap-7'>
+    <motion.section
+      whileHover={{ scale: 1.003 }}
+      transition={{ duration: 0.15, ease: 'easeOut' }}
+      className='glass-primary p-6 flex flex-col gap-7'
+    >
       <div>
         <h2 className='text-lg font-bold text-strong'>“Needs you” escalation</h2>
         <p className='text-sm text-muted mt-1'>
@@ -131,14 +129,15 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
               onDelete={() => deleteWebhook(w.id)}
             />
           ))}
-          <button
+          <Button
+            variant='secondary'
             onClick={addWebhook}
-            className='self-start px-4 py-2 rounded-lg text-sm font-medium bg-control/60 hover:bg-control text-primary cursor-pointer transition-colors'
+            className='self-start'
           >
             + Add webhook
-          </button>
+          </Button>
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 };

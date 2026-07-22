@@ -1,7 +1,10 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { formatUsd } from '../../../../common/pricing';
+import { AnimatedNumber, Tooltip } from '../../Shared';
+import { smooth } from '../../../motion';
 import { useToolMix } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, InfoPill, InfoTooltip, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
@@ -35,14 +38,16 @@ export const ToolMixCard: React.FC = () => {
         <EmptyState message='No activity in this window.' />
       ) : (
         <div>
-          {/* Share-of-active-time bar */}
+          {/* Share-of-active-time bar — each segment springs to its width on data change */}
           <div className='flex h-3 rounded-full overflow-hidden bg-glass/60'>
             {data.slices.map((s, i) => (
-              <div
-                key={s.toolId}
-                title={`${TOOL_META[s.toolId as ToolId]?.label ?? s.toolId}: ${s.pct.toFixed(1)}% (${formatDuration(s.activeMs)})`}
-                style={{ width: `${s.pct}%`, backgroundColor: COLORS[i % COLORS.length] }}
-              />
+              <Tooltip key={s.toolId} content={`${TOOL_META[s.toolId as ToolId]?.label ?? s.toolId}: ${s.pct.toFixed(1)}% (${formatDuration(s.activeMs)})`}>
+                <motion.div
+                  animate={{ width: `${s.pct}%` }}
+                  transition={smooth}
+                  style={{ width: `${s.pct}%`, backgroundColor: COLORS[i % COLORS.length] }}
+                />
+              </Tooltip>
             ))}
           </div>
 
@@ -51,7 +56,7 @@ export const ToolMixCard: React.FC = () => {
             {data.slices.map((s, i) => {
               const meta = TOOL_META[s.toolId as ToolId];
               return (
-                <div key={s.toolId} className='bg-glass/40 border border-edge/40 rounded-xl p-3'>
+                <div key={s.toolId} className='glass-secondary p-3'>
                   <div className='flex items-center gap-2.5 mb-2'>
                     <span className='w-2.5 h-2.5 rounded-sm shrink-0' style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                     {meta && (
@@ -62,7 +67,7 @@ export const ToolMixCard: React.FC = () => {
                     <span className='text-sm font-medium text-primary flex-1 truncate'>{meta?.label ?? s.toolId}</span>
                     {s.hasTokenData ? (
                       <span className='text-sm font-semibold text-ok font-mono tabular-nums shrink-0'>
-                        {formatUsd(s.costUsd)}
+                        <AnimatedNumber value={s.costUsd} format={formatUsd} />
                       </span>
                     ) : (
                       <InfoPill tone='warn'>no token data</InfoPill>
@@ -70,16 +75,21 @@ export const ToolMixCard: React.FC = () => {
                   </div>
                   <div className='flex items-center justify-between text-[11px] text-muted font-mono tabular-nums'>
                     <span>
+                      {/* formatDuration output is non-numeric ("2h 15m") — left static */}
                       {formatDuration(s.activeMs)} active
                       {s.hasTokenData && (
                         <>
-                          {' · '}in <span className='text-primary'>{formatCompactNumber(s.tokensIn)}</span>
-                          {' · '}out <span className='text-primary'>{formatCompactNumber(s.tokensOut)}</span>
+                          {' · '}in{' '}
+                          <AnimatedNumber value={s.tokensIn} format={formatCompactNumber} className='text-primary' />
+                          {' · '}out{' '}
+                          <AnimatedNumber value={s.tokensOut} format={formatCompactNumber} className='text-primary' />
                         </>
                       )}
                     </span>
                     <span>
-                      {s.hasTokenData ? `${s.costPct.toFixed(1)}% of spend` : `${s.pct.toFixed(1)}% of time`}
+                      {s.hasTokenData
+                        ? <AnimatedNumber value={s.costPct} format={(n) => `${n.toFixed(1)}% of spend`} />
+                        : <AnimatedNumber value={s.pct} format={(n) => `${n.toFixed(1)}% of time`} />}
                     </span>
                   </div>
                 </div>
@@ -89,10 +99,12 @@ export const ToolMixCard: React.FC = () => {
 
           <p className='text-[11px] text-faint mt-3 flex items-center justify-between'>
             <span>
+              {/* formatDuration output is non-numeric ("2h 15m") — left static */}
               Total active: <span className='text-body font-mono'>{formatDuration(data.totalActiveMs)}</span>
             </span>
             <span>
-              Est. spend: <span className='text-ok font-mono'>{formatUsd(data.totalCostUsd)}</span>
+              Est. spend:{' '}
+              <AnimatedNumber value={data.totalCostUsd} format={formatUsd} className='text-ok font-mono' />
             </span>
           </p>
         </div>

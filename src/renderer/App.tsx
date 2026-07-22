@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Bubble } from './components/Bubble/Bubble';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
-import { TooltipOverlay } from './components/Tooltip/TooltipOverlay';
+import { TooltipOverlay, Tooltip } from './components/Shared';
 import { TourCard } from './components/Tour/TourCard';
 import { ToolId, TourState } from '../common/types';
-import { motion } from 'framer-motion';
+import { motion, MotionConfig } from 'framer-motion';
 
 type Feature = {
   title: string;
@@ -141,17 +141,17 @@ const FeatureCard: React.FC<{ feature: Feature; index: number }> = ({
     initial={{ opacity: 0, y: 12 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ duration: 0.5, delay: 0.3 + index * 0.06, ease: 'easeOut' }}
-    className='text-left bg-white/[0.03] border border-white/10 rounded-xl p-3 backdrop-blur-md hover:bg-white/[0.06] hover:border-white/20 transition-colors'
+    className='text-left glass-secondary p-3 transition-colors'
   >
     <div className='flex items-center gap-2 mb-1'>
-      <div className='w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-white/10 flex items-center justify-center text-blue-200 shrink-0'>
+      <div className='w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-edge flex items-center justify-center text-info shrink-0'>
         {feature.icon}
       </div>
-      <h3 className='text-[13px] font-semibold text-white leading-tight'>
+      <h3 className='text-[13px] font-semibold text-strong leading-tight'>
         {feature.title}
       </h3>
     </div>
-    <p className='text-[11px] text-slate-400 leading-snug'>
+    <p className='text-[11px] text-muted leading-snug'>
       {feature.description}
     </p>
   </motion.div>
@@ -197,12 +197,12 @@ const Landing: React.FC = () => {
   const firstRun = tourState ? !tourState.hasSeenTour : false;
 
   const primaryClass =
-    'px-8 py-4 bg-white text-slate-900 font-bold rounded-full hover:bg-blue-50 transition-all hover:scale-105 active:scale-95 shadow-xl shadow-white/10 cursor-pointer';
+    'px-8 py-4 bg-strong text-base font-bold rounded-full hover:opacity-90 transition-all hover:scale-105 active:scale-95 shadow-xl shadow-black/10 cursor-pointer';
   const secondaryClass =
-    'px-6 py-3 rounded-full text-sm font-semibold text-slate-300 border border-slate-600/60 hover:border-slate-400 hover:text-white transition-all hover:scale-105 active:scale-95 cursor-pointer';
+    'px-6 py-3 rounded-full text-sm font-semibold text-body border border-edge hover:border-edge-strong hover:text-strong transition-all hover:scale-105 active:scale-95 cursor-pointer';
 
   return (
-    <div className='h-screen w-screen bg-slate-900 text-white flex items-center justify-center font-sans overflow-hidden relative py-5'>
+    <div className='h-screen w-screen bg-base text-body flex items-center justify-center font-sans overflow-hidden relative py-5'>
       {/* Background glow effects for "Enterprise" feel */}
       <div className='absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 blur-[120px] rounded-full pointer-events-none' />
       <div className='absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 blur-[120px] rounded-full pointer-events-none' />
@@ -218,17 +218,17 @@ const Landing: React.FC = () => {
           alt='Agent Pulse'
           className='w-24 h-24 sm:w-20 sm:h-20 mx-auto mb-4 object-contain drop-shadow-[0_8px_32px_rgba(59,130,246,0.35)]'
         />
-        <h1 className='text-6xl font-extrabold tracking-tight pb-5 bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-400'>
+        <h1 className='text-6xl font-extrabold tracking-tight pb-5 bg-clip-text text-transparent bg-gradient-to-b from-strong to-muted'>
           Agent Pulse
         </h1>
-        <p className='text-lg text-slate-400 leading-relaxed'>
+        <p className='text-lg text-muted leading-relaxed'>
           Ambient, glanceable awareness for your AI coding team.
           <br />
           <span className='text-sm opacity-60'>
             Stop tab-switching. Start observing.
           </span>
         </p>
-        <p className='text-slate-500 text-sm flex items-center gap-2 mb-8 justify-center'>
+        <p className='text-faint text-sm flex items-center gap-2 mb-8 justify-center'>
           <span className='w-2 h-2 bg-green-500 rounded-full animate-pulse' />
           Status Bridge Active
         </p>
@@ -254,22 +254,23 @@ const Landing: React.FC = () => {
               <a href='?view=settings' className={primaryClass}>
                 Configure Tools
               </a>
-              <button
-                onClick={startTour}
-                className={secondaryClass}
-                title='Replay the welcome tour'
-              >
-                <span className='flex items-center gap-2'>
-                  <svg
-                    viewBox='0 0 24 24'
-                    className='w-3.5 h-3.5'
-                    fill='currentColor'
-                  >
-                    <path d='M8 5v14l11-7z' />
-                  </svg>
-                  Welcome tour
-                </span>
-              </button>
+              <Tooltip content='Replay the welcome tour'>
+                <button
+                  onClick={startTour}
+                  className={secondaryClass}
+                >
+                  <span className='flex items-center gap-2'>
+                    <svg
+                      viewBox='0 0 24 24'
+                      className='w-3.5 h-3.5'
+                      fill='currentColor'
+                    >
+                      <path d='M8 5v14l11-7z' />
+                    </svg>
+                    Welcome tour
+                  </span>
+                </button>
+              </Tooltip>
             </>
           )}
         </div>
@@ -283,23 +284,26 @@ const App: React.FC = () => {
   const toolId = (params.get('toolId') as ToolId) || null;
   const view = params.get('view');
 
-  if (view === 'settings') {
-    return <SettingsPanel />;
-  }
-
-  if (view === 'tooltip') {
-    return <TooltipOverlay />;
-  }
-
-  if (view === 'tour') {
-    return <TourCard />;
-  }
-
+  // Bubbles render outside MotionConfig — their animation is hand-tuned for the
+  // always-on-top transparent window and must stay as-is for performance.
   if (toolId) {
     return <Bubble toolId={toolId} demo={params.get('demo') === '1'} />;
   }
 
-  return <Landing />;
+  const content =
+    view === 'settings' ? (
+      <SettingsPanel />
+    ) : view === 'tooltip' ? (
+      <TooltipOverlay />
+    ) : view === 'tour' ? (
+      <TourCard />
+    ) : (
+      <Landing />
+    );
+
+  // Every non-bubble view honors the OS "reduce motion" setting: transforms and
+  // layout animations collapse to instant, cross-fades stay.
+  return <MotionConfig reducedMotion='user'>{content}</MotionConfig>;
 };
 
 export default App;

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnalyticsConfig, TimelineRange } from '../../../common/timeline-types';
+import { GlassToggle, Tooltip } from '../Shared';
 import { logger } from '../../../common/logger';
 import { DigestCard } from './analytics/DigestCard';
 import { WindowValueCard } from './analytics/WindowValueCard';
@@ -29,12 +30,12 @@ const UnavailableBanner: React.FC<{ reason: string }> = ({ reason }) => (
         !
       </div>
       <div className='flex-1'>
-        <p className='font-semibold text-amber-200 leading-tight'>Pulse Timeline isn't running</p>
-        <p className='text-sm text-amber-100/80 mt-1'>{reason}</p>
-        <p className='text-xs text-amber-100/70 mt-2 font-mono bg-glass/40 border border-edge/40 rounded-lg px-3 py-2'>
+        <p className='font-semibold text-warn leading-tight'>Pulse Timeline isn't running</p>
+        <p className='text-sm text-warn/90 mt-1'>{reason}</p>
+        <p className='text-xs text-warn/80 mt-2 font-mono bg-glass/40 border border-edge/40 rounded-lg px-3 py-2'>
           npm run rebuild:native
         </p>
-        <p className='text-[11px] text-amber-100/60 mt-2'>
+        <p className='text-[11px] text-warn/70 mt-2'>
           Run that in your terminal, then restart the app. The rest of Agent Pulse works without the timeline.
         </p>
       </div>
@@ -56,14 +57,15 @@ const FreshnessControl: React.FC = () => {
   return (
     <div className='flex items-center gap-1.5 text-[11px] text-faint'>
       <span>updated {label}</span>
-      <button
-        onClick={refreshAnalytics}
-        aria-label='Refresh analytics'
-        title='Refresh'
-        className='w-6 h-6 rounded-md border border-edge/60 bg-glass/60 text-muted hover:text-strong hover:border-edge-strong/70 transition-colors cursor-pointer'
-      >
-        ↻
-      </button>
+      <Tooltip content='Refresh'>
+        <button
+          onClick={refreshAnalytics}
+          aria-label='Refresh analytics'
+          className='w-6 h-6 rounded-md border border-edge/60 bg-glass/60 text-muted hover:text-strong hover:border-edge-strong/70 transition-colors cursor-pointer'
+        >
+          ↻
+        </button>
+      </Tooltip>
     </div>
   );
 };
@@ -79,7 +81,7 @@ const PrivacyAndSettings: React.FC<Props> = ({ config, onConfigChange }) => {
     return (
       <button
         onClick={() => setOpen(true)}
-        className='w-full mb-5 bg-glass/40 border border-edge/50 rounded-2xl px-5 py-3 flex items-center justify-between text-left cursor-pointer hover:border-edge-strong/70 transition-colors'
+        className='w-full mb-5 glass-secondary rounded-2xl px-5 py-3 flex items-center justify-between text-left cursor-pointer hover:border-edge-strong/70 transition-colors'
       >
         <span className='text-sm font-medium text-body'>Analytics settings</span>
         <span className='text-xs text-faint'>Redaction · idle gap · show ▾</span>
@@ -104,19 +106,12 @@ const PrivacyAndSettings: React.FC<Props> = ({ config, onConfigChange }) => {
             Drop task summaries when storing events. Use for screen-sharing — existing rows stay intact.
           </p>
         </div>
-        <button
-          onClick={() => onConfigChange({ redactTaskText: !config.redactTaskText })}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.redactTaskText ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label='Toggle task-text redaction'
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.redactTaskText ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={config.redactTaskText}
+          onChange={() => onConfigChange({ redactTaskText: !config.redactTaskText })}
+          size='lg'
+          label='Toggle task-text redaction'
+        />
       </div>
 
       <div className='flex items-center justify-between gap-4'>

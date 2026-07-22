@@ -24,12 +24,12 @@ describe('Markdown screenshot inlining', () => {
 
   it('renders an inline-code image reference (`qa-screens/shot.png`) as the image', () => {
     render(<Markdown content='Screenshot: `qa-screens/shot.png`' images={images} />);
-    expect((screen.getByTitle('shot.png') as HTMLImageElement).src).toBe(IMG);
+    expect((screen.getByAltText('shot.png') as HTMLImageElement).src).toBe(IMG);
   });
 
   it('renders a bare filename mention as the image', () => {
     render(<Markdown content='see shot.png for evidence' images={images} />);
-    expect((screen.getByTitle('shot.png') as HTMLImageElement).src).toBe(IMG);
+    expect((screen.getByAltText('shot.png') as HTMLImageElement).src).toBe(IMG);
   });
 
   it('leaves unresolved references as text/code — never fetches', () => {

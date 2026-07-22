@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { create } from 'zustand';
+import { gentle } from '../../motion';
+import { Button } from './Button';
 
 // App-styled replacement for native alert()/confirm(): promise-based API over
 // a Zustand queue, rendered once per window by <AppDialogHost/>. Native
@@ -117,7 +119,7 @@ export const AppDialogHost: React.FC = () => {
             initial={{ opacity: 0, scale: 0.95, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
-            transition={{ duration: 0.15 }}
+            transition={{ ...gentle, opacity: { duration: 0.12 } }}
             onClick={(e) => e.stopPropagation()}
             role='dialog'
             aria-modal='true'
@@ -127,22 +129,17 @@ export const AppDialogHost: React.FC = () => {
             <p className='text-sm text-body leading-relaxed whitespace-pre-wrap break-words'>{current.message}</p>
             <div className='flex items-center justify-end gap-2 mt-2'>
               {current.kind === 'confirm' && (
-                <button
-                  onClick={() => settle(false)}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
-                >
+                <Button variant='secondary' onClick={() => settle(false)}>
                   {current.cancelLabel}
-                </button>
+                </Button>
               )}
-              <button
+              <Button
                 autoFocus
+                variant={current.danger ? 'danger' : 'primary'}
                 onClick={() => settle(true)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium text-strong cursor-pointer transition-colors ${
-                  current.danger ? 'bg-red-600 hover:bg-red-500' : 'bg-blue-600 hover:bg-blue-500'
-                }`}
               >
                 {current.confirmLabel}
-              </button>
+              </Button>
             </div>
           </motion.div>
         </motion.div>

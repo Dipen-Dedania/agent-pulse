@@ -1,5 +1,7 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import { UsageStatus, UsageState } from '../../../common/types';
+import { GlassToggle, Button } from '../Shared';
 
 export interface UsageNotificationUI {
   enabled: boolean;
@@ -66,25 +68,18 @@ interface NotifyRowProps {
 const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, onChange }) => {
   const op = comparator === 'lte' ? '≤' : '≥';
   return (
-    <div className='bg-glass/40 border border-edge/50 rounded-xl p-4'>
+    <div className='glass-secondary p-4'>
       <div className='flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
           <p className='font-medium text-strong text-sm leading-tight'>{title}</p>
           <p className='text-xs text-muted mt-1'>{hint}</p>
         </div>
-        <button
-          onClick={() => onChange({ ...value, enabled: !value.enabled })}
-          className={`relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            value.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label={`Toggle ${title}`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-              value.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={value.enabled}
+          onChange={() => onChange({ ...value, enabled: !value.enabled })}
+          size='md'
+          label={`Toggle ${title}`}
+        />
       </div>
 
       <div className={`flex items-center gap-3 mt-3 ${value.enabled ? '' : 'opacity-50'}`}>
@@ -111,7 +106,11 @@ export const UsageSection: React.FC<Props> = ({ config, status, onChange, onRefr
   const snapshot = status.snapshot;
 
   return (
-    <section className='mt-10 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+    <motion.section
+      whileHover={{ scale: 1.003 }}
+      transition={{ duration: 0.15, ease: 'easeOut' }}
+      className='glass-primary mt-10 p-6'
+    >
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-3'>
@@ -128,25 +127,18 @@ export const UsageSection: React.FC<Props> = ({ config, status, onChange, onRefr
           </p>
         </div>
 
-        <button
-          onClick={() => onChange({ enabled: !config.enabled })}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label='Toggle usage tracking'
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={config.enabled}
+          onChange={() => onChange({ enabled: !config.enabled })}
+          size='lg'
+          label='Toggle usage tracking'
+        />
       </div>
 
       {/* Current snapshot — shows REMAINING credit to match bar semantics */}
       {config.enabled && (
         <div className='mt-5 grid grid-cols-2 gap-4'>
-          <div className='bg-glass/50 border border-edge/60 rounded-xl p-4'>
+          <div className='glass-secondary p-4'>
             <p className='text-xs uppercase tracking-widest text-faint font-semibold'>5-hour window</p>
             <p className='text-2xl font-bold text-strong mt-1'>
               {snapshot ? `${100 - snapshot.fiveHour.utilization}%` : '—'}
@@ -156,7 +148,7 @@ export const UsageSection: React.FC<Props> = ({ config, status, onChange, onRefr
               Resets {formatRelativeReset(snapshot?.fiveHour.resetsAt)}
             </p>
           </div>
-          <div className='bg-glass/50 border border-edge/60 rounded-xl p-4'>
+          <div className='glass-secondary p-4'>
             <p className='text-xs uppercase tracking-widest text-faint font-semibold'>7-day window</p>
             <p className='text-2xl font-bold text-strong mt-1'>
               {snapshot ? `${100 - snapshot.sevenDay.utilization}%` : '—'}
@@ -176,26 +168,19 @@ export const UsageSection: React.FC<Props> = ({ config, status, onChange, onRefr
       )}
 
       {config.enabled && (
-        <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4 flex items-start gap-3'>
+        <div className='glass-secondary mt-5 p-4 flex items-start gap-3'>
           <div className='flex-1 min-w-0'>
             <p className='font-medium text-strong text-sm leading-tight'>Show 7-day bar on bubble</p>
             <p className='text-xs text-muted mt-1'>
               Hide to keep the bubble focused on the 5-hour window only. The 7-day window is still tracked.
             </p>
           </div>
-          <button
-            onClick={() => onChange({ showSevenDayBar: !config.showSevenDayBar })}
-            className={`relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-              config.showSevenDayBar ? 'bg-blue-500' : 'bg-control-strong'
-            }`}
-            aria-label='Toggle 7-day bar on bubble'
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-                config.showSevenDayBar ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
+          <GlassToggle
+            checked={config.showSevenDayBar}
+            onChange={() => onChange({ showSevenDayBar: !config.showSevenDayBar })}
+            size='md'
+            label='Toggle 7-day bar on bubble'
+          />
         </div>
       )}
 
@@ -239,7 +224,7 @@ export const UsageSection: React.FC<Props> = ({ config, status, onChange, onRefr
                     const next = Math.max(60, Math.min(3600, Number(e.target.value) || 600));
                     onChange({ intervalMs: next * 1000 });
                   }}
-                  className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
+                  className='glass-secondary rounded-lg w-24 px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
                 />
                 <span className='text-xs text-faint'>seconds (min 60)</span>
               </div>
@@ -249,14 +234,13 @@ export const UsageSection: React.FC<Props> = ({ config, status, onChange, onRefr
       )}
 
       <div className='mt-5 flex gap-2'>
-        <button
+        <Button
           onClick={onRefresh}
           disabled={!config.enabled}
-          className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
         >
           Refresh now
-        </button>
+        </Button>
       </div>
-    </section>
+    </motion.section>
   );
 };

@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { BacklogCard, BacklogCardState, countUnmetPrereqs } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { logger } from '../../../common/logger';
 import { BoardColumn } from './BoardColumn';
-import { appAlert, appConfirm } from '../Dialog/AppDialog';
+import { appAlert, appConfirm, Button, Tooltip } from '../Shared';
 import { CardTile } from './CardTile';
 import { CardEditorModal } from './CardEditorModal';
 import { ArtifactViewer } from './ArtifactViewer';
 import { projectColor } from './project-colors';
+import { listItem } from '../../motion';
 
 // Global Kanban board (backlog.md Phase 1): all projects on one board, every
 // card labelled by project and filterable down to one. The Todo column is the
@@ -72,7 +74,7 @@ export const BacklogBoardTab: React.FC = () => {
 
   if (!store.available) {
     return (
-      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+      <div className='glass-primary p-6'>
         <h2 className='text-lg font-bold text-strong'>Backlog board unavailable</h2>
         <p className='text-sm text-muted mt-2'>{store.reason}</p>
       </div>
@@ -260,18 +262,28 @@ export const BacklogBoardTab: React.FC = () => {
     // Todo tiles double as drop slots: dropping on one inserts the dragged
     // card before it (stopPropagation keeps the column's to-tail drop out).
     const isTodoDropSlot = card.state === 'todo' && dragCardId !== null && dragCardId !== card.id;
+    // Disable layout animation while any drag is in flight — the HTML5 drag
+    // ghost is positioned from the element's current bounding rect, so an
+    // in-progress layout spring would shift the ghost mid-drag.
+    const isDragging = dragCardId !== null;
     return (
-      <div
+      <motion.div
         key={card.id}
+        layout={isDragging ? false : 'position'}
+        variants={listItem}
         draggable={draggable}
         onDragStart={(e) => {
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', card.id);
+          (e as unknown as React.DragEvent).dataTransfer.effectAllowed = 'move';
+          (e as unknown as React.DragEvent).dataTransfer.setData('text/plain', card.id);
           setDragCardId(card.id);
         }}
         onDragEnd={() => setDragCardId(null)}
-        onDragOver={isTodoDropSlot ? (e) => e.preventDefault() : undefined}
-        onDrop={isTodoDropSlot ? (e) => { e.preventDefault(); e.stopPropagation(); void handleDropOnTodoCard(card); } : undefined}
+        onDragOver={isTodoDropSlot ? (e) => (e as unknown as React.DragEvent).preventDefault() : undefined}
+        onDrop={isTodoDropSlot ? (e) => {
+          (e as unknown as React.DragEvent).preventDefault();
+          (e as unknown as React.DragEvent).stopPropagation();
+          void handleDropOnTodoCard(card);
+        } : undefined}
         className={`${draggable ? 'cursor-grab active:cursor-grabbing' : ''} ${dragCardId === card.id ? 'opacity-40' : ''}`}
       >
         <CardTile
@@ -291,7 +303,7 @@ export const BacklogBoardTab: React.FC = () => {
           onViewDetail={() => setDetailCard(card)}
           onRestart={() => void handleRestart(card)}
         />
-      </div>
+      </motion.div>
     );
   };
 
@@ -304,7 +316,7 @@ export const BacklogBoardTab: React.FC = () => {
     // stretch instead of hugging the top of a maximized window.
     <div className='flex flex-col gap-5 min-h-[calc(100vh-16rem)]'>
       {/* Header: glance + project filter + actions */}
-      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-4 shadow-xl flex flex-col gap-3'>
+      <div className='glass-primary p-4 flex flex-col gap-3'>
         <div className='flex items-center gap-3 flex-wrap'>
           <div className='flex-1 min-w-48'>
             {glance && <p className='text-sm text-strong'>{glance}</p>}
@@ -317,20 +329,19 @@ export const BacklogBoardTab: React.FC = () => {
               </p>
             )}
           </div>
-          <button
-            onClick={handleAddProject}
-            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
-          >
+          <Button variant='secondary' size='sm' onClick={handleAddProject}>
             + Add project
-          </button>
-          <button
-            onClick={() => setEditor({ open: true, card: null })}
-            disabled={store.projects.length === 0}
-            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white cursor-pointer transition-colors'
-            title={store.projects.length === 0 ? 'Register a project folder first' : undefined}
-          >
-            + New card
-          </button>
+          </Button>
+          <Tooltip content={store.projects.length === 0 ? 'Register a project folder first' : undefined}>
+            <Button
+              variant='primary'
+              size='sm'
+              onClick={() => setEditor({ open: true, card: null })}
+              disabled={store.projects.length === 0}
+            >
+              + New card
+            </Button>
+          </Tooltip>
         </div>
 
         {store.projects.length > 0 && (
@@ -345,23 +356,25 @@ export const BacklogBoardTab: React.FC = () => {
             </button>
             {store.projects.map((p) => (
               <span key={p.id} className='flex items-center'>
-                <button
-                  onClick={() => setProjectFilter(p.id)}
-                  className={`px-3 py-1 rounded-l-lg text-xs font-medium cursor-pointer transition-colors ${
-                    projectFilter === p.id ? projectColor(p.id).filterActive : projectColor(p.id).filter
-                  }`}
-                  title={p.path}
-                >
-                  {p.name}
-                </button>
-                <button
-                  onClick={() => void handleRemoveProject(p.id)}
-                  className='px-1.5 py-1 rounded-r-lg text-xs text-faint hover:text-danger hover:bg-red-500/20 cursor-pointer transition-colors'
-                  title={`Remove ${p.name} from the board`}
-                  aria-label={`Remove ${p.name}`}
-                >
-                  ✕
-                </button>
+                <Tooltip content={p.path}>
+                  <button
+                    onClick={() => setProjectFilter(p.id)}
+                    className={`px-3 py-1 rounded-l-lg text-xs font-medium cursor-pointer transition-colors ${
+                      projectFilter === p.id ? projectColor(p.id).filterActive : projectColor(p.id).filter
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                </Tooltip>
+                <Tooltip content={`Remove ${p.name} from the board`}>
+                  <button
+                    onClick={() => void handleRemoveProject(p.id)}
+                    className='px-1.5 py-1 rounded-r-lg text-xs text-faint hover:text-danger hover:bg-red-500/20 cursor-pointer transition-colors'
+                    aria-label={`Remove ${p.name}`}
+                  >
+                    ✕
+                  </button>
+                </Tooltip>
               </span>
             ))}
           </div>
@@ -369,7 +382,7 @@ export const BacklogBoardTab: React.FC = () => {
       </div>
 
       {store.projects.length === 0 ? (
-        <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+        <div className='glass-primary p-6'>
           <h2 className='text-lg font-bold text-strong'>Add your first project</h2>
           <p className='text-sm text-muted mt-2 max-w-xl'>
             Cards belong to a project (a repo folder — the agent runs there). Register one, queue research
@@ -408,7 +421,7 @@ export const BacklogBoardTab: React.FC = () => {
                 </BoardColumn>
               )}
               {rework.length > 0 && (
-                <BoardColumn title='Rework' count={rework.length} accent='text-orange-300' hint='QA failed — retries once, then blocks'>
+                <BoardColumn title='Rework' count={rework.length} accent='text-orange-300 light:text-orange-700' hint='QA failed — retries once, then blocks'>
                   {rework.map(renderTile)}
                 </BoardColumn>
               )}

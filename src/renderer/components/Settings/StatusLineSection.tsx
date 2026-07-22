@@ -8,7 +8,7 @@ import {
   StatusLineDetectInfo,
 } from '../../../common/types';
 import { renderStatusLine, DEFAULT_SEGMENT_ICON } from '../../../common/statusline-render';
-import { Select } from '../Shared/Select';
+import { Select, GlassToggle, Tooltip, Button } from '../Shared';
 
 interface Props {
   config: StatusLineConfig;
@@ -74,19 +74,12 @@ const RUNTIME_LABEL: Record<string, string> = {
 // ── Small controls (match the toggle/select idioms used elsewhere) ────────────
 
 const Toggle: React.FC<{ checked: boolean; onChange: () => void; label?: string }> = ({ checked, onChange, label }) => (
-  <button
-    onClick={onChange}
-    aria-label={label ?? 'Toggle'}
-    className={`relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-      checked ? 'bg-blue-500' : 'bg-control-strong'
-    }`}
-  >
-    <span
-      className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-        checked ? 'translate-x-5' : 'translate-x-0'
-      }`}
-    />
-  </button>
+  <GlassToggle
+    checked={checked}
+    onChange={() => onChange()}
+    size='md'
+    label={label ?? 'Toggle'}
+  />
 );
 
 const ColorSelect: React.FC<{ value: StatusLineColor; onChange: (c: StatusLineColor) => void }> = ({ value, onChange }) => (
@@ -181,7 +174,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
         : <span className='px-2.5 py-0.5 rounded-full bg-control/60 border border-edge-strong/50 text-muted text-xs font-medium'>Not installed</span>;
 
   return (
-    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+    <section className='mt-6 glass-primary p-6'>
       {/* Header */}
       <div className='flex items-center gap-3'>
         <div className='flex-1 min-w-0'>
@@ -197,7 +190,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
       <div className='mt-5 flex flex-col gap-5'>
           {/* Live preview — each config line on its own row; long rows scroll
               horizontally so they never break the panel layout. */}
-          <div className='bg-glass/70 border border-edge/60 rounded-xl px-4 py-3'>
+          <div className='glass-secondary px-4 py-3'>
             <p className='text-[10px] uppercase tracking-widest text-faint mb-2'>Preview</p>
             <div className='font-mono text-sm leading-relaxed overflow-x-auto'>
               {preview.lines.map((pl, i) => (
@@ -218,37 +211,38 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
           </div>
 
           {/* Install / remove controls */}
-          <div className='bg-glass/40 border border-edge/50 rounded-xl p-4 flex flex-wrap items-center gap-3'>
+          <div className='glass-secondary p-4 flex flex-wrap items-center gap-3'>
             {detect.state === 'ours' ? (
               <>
                 <p className='text-sm text-body flex-1 min-w-0'>
                   Installed via {detect.runtime ? RUNTIME_LABEL[detect.runtime] : 'a script'}. Edits below apply live.
                 </p>
-                <button
+                <Button
+                  variant='secondary'
                   onClick={() => onInstall(true)}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-primary transition-colors cursor-pointer'
+                  className='text-primary'
                 >
                   Re-apply
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant='secondary'
                   onClick={onRemove}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-primary transition-colors cursor-pointer'
+                  className='text-primary'
                 >
                   Remove
-                </button>
+                </Button>
               </>
             ) : detect.state === 'foreign' ? (
               <>
                 <p className='text-sm text-warn/90 flex-1 min-w-0'>
                   A different status line is already configured. Replacing it backs up your <span className='font-mono'>settings.json</span> first.
                 </p>
-                <button
+                <Button
                   onClick={() => onInstall(true)}
                   disabled={!detect.runtime}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
                 >
                   Back up &amp; replace
-                </button>
+                </Button>
               </>
             ) : (
               <>
@@ -257,13 +251,12 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                     ? 'Install the status line into Claude Code.'
                     : 'No script runtime (Node, Python, or PowerShell) was found on PATH.'}
                 </p>
-                <button
+                <Button
                   onClick={() => onInstall(false)}
                   disabled={!detect.runtime}
-                  className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
                 >
                   Install
-                </button>
+                </Button>
               </>
             )}
           </div>
@@ -290,13 +283,13 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
 
             <div className='flex flex-col gap-4'>
               {lines.map((row, li) => (
-                <div key={li} className='rounded-xl border border-edge/50 bg-glass/30 p-3'>
+                <div key={li} className='glass-secondary p-3'>
                   <div className='flex items-center justify-between mb-2'>
                     <span className='text-[10px] uppercase tracking-widest text-faint'>Line {li + 1}</span>
                     {lines.length > 1 && (
                       <button
                         onClick={() => removeLine(li)}
-                        className='text-xs text-faint hover:text-red-400 transition-colors cursor-pointer'
+                        className='text-xs text-faint hover:text-danger transition-colors cursor-pointer'
                       >
                         Remove line
                       </button>
@@ -312,21 +305,22 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                       row.segments.map((seg, si) => (
                         <div
                           key={`${seg.type}-${si}`}
-                          className='bg-glass/40 border border-edge/50 rounded-xl p-3 flex flex-wrap items-center gap-3'
+                          className='glass-secondary p-3 flex flex-wrap items-center gap-3'
                         >
                           <Toggle checked={seg.enabled} onChange={() => patchSegment(li, si, { enabled: !seg.enabled })} label={`Toggle ${SEGMENT_LABEL[seg.type]}`} />
 
                           {/* Icon / emoji prefix */}
-                          <input
-                            type='text'
-                            value={seg.icon ?? ''}
-                            placeholder={DEFAULT_SEGMENT_ICON[seg.type] || '—'}
-                            maxLength={4}
-                            onChange={(e) => patchSegment(li, si, { icon: e.target.value })}
-                            aria-label={`Icon for ${SEGMENT_LABEL[seg.type]}`}
-                            title='Optional emoji or glyph shown before this segment'
-                            className='w-11 text-center bg-glass/60 border border-edge/70 rounded-lg px-1 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
-                          />
+                          <Tooltip content='Optional emoji or glyph shown before this segment'>
+                            <input
+                              type='text'
+                              value={seg.icon ?? ''}
+                              placeholder={DEFAULT_SEGMENT_ICON[seg.type] || '—'}
+                              maxLength={4}
+                              onChange={(e) => patchSegment(li, si, { icon: e.target.value })}
+                              aria-label={`Icon for ${SEGMENT_LABEL[seg.type]}`}
+                              className='w-11 text-center bg-glass/60 border border-edge/70 rounded-lg px-1 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
+                            />
+                          </Tooltip>
 
                           <span className={`text-sm font-medium w-32 ${seg.enabled ? 'text-strong' : 'text-faint'}`}>
                             {SEGMENT_LABEL[seg.type]}
@@ -418,35 +412,38 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                   className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong font-mono focus:outline-none focus:border-blue-500/60'
                 />
               </label>
-              <label
-                className='flex items-center gap-2 text-xs text-muted'
-                title='When a line has more than this many indicators, it wraps onto extra terminal rows. 0 = never wrap.'
-              >
-                Wrap after
-                <input
-                  type='number'
-                  min={0}
-                  max={20}
-                  value={config.maxItemsPerLine ?? 0}
-                  onChange={(e) => onChange({ maxItemsPerLine: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })}
-                  className='w-16 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong focus:outline-none focus:border-blue-500/60'
-                />
-                items
-              </label>
-              <button
-                onClick={() => window.electron.invoke('open-path', detect.settingsPath)}
-                className='text-xs text-faint hover:text-blue-400 transition-colors cursor-pointer font-mono'
-                title={detect.settingsPath}
-              >
-                Open settings.json
-              </button>
-              <button
-                onClick={onReset}
-                className='ml-auto text-xs text-faint hover:text-red-400 transition-colors cursor-pointer'
-                title='Replace the current layout with the default two-line layout with icons'
-              >
-                Reset to default
-              </button>
+              <Tooltip content='When a line has more than this many indicators, it wraps onto extra terminal rows. 0 = never wrap.'>
+                <label
+                  className='flex items-center gap-2 text-xs text-muted'
+                >
+                  Wrap after
+                  <input
+                    type='number'
+                    min={0}
+                    max={20}
+                    value={config.maxItemsPerLine ?? 0}
+                    onChange={(e) => onChange({ maxItemsPerLine: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })}
+                    className='w-16 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong focus:outline-none focus:border-blue-500/60'
+                  />
+                  items
+                </label>
+              </Tooltip>
+              <Tooltip content={detect.settingsPath}>
+                <button
+                  onClick={() => window.electron.invoke('open-path', detect.settingsPath)}
+                  className='text-xs text-faint hover:text-info transition-colors cursor-pointer font-mono'
+                >
+                  Open settings.json
+                </button>
+              </Tooltip>
+              <Tooltip content='Replace the current layout with the default two-line layout with icons'>
+                <button
+                  onClick={onReset}
+                  className='ml-auto text-xs text-faint hover:text-danger transition-colors cursor-pointer'
+                >
+                  Reset to default
+                </button>
+              </Tooltip>
             </div>
           </div>
         </div>

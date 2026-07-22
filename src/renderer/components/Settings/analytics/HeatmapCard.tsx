@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { HeatmapCell, HeatmapSeries } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
+import { Tooltip } from '../../Shared';
 import { useHeatmap } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, Segmented, SkeletonLine, formatDuration, useChartTip } from './shared';
@@ -157,11 +158,15 @@ const SeriesRow: React.FC<{
   maxMs: number;
   weekly: boolean;
   tipHandlers: (content: React.ReactNode) => object;
-}> = ({ series, cells, maxMs, weekly, tipHandlers }) => (
+}> = ({ series, cells, maxMs, weekly, tipHandlers }) => {
+  const isDark = useIsDark();
+  return (
   <div className='flex items-center gap-2 mb-1'>
-    <div className='w-24 text-[11px] text-muted truncate shrink-0' title={series.displayName}>
-      {seriesLabel(series.key, series.displayName)}
-    </div>
+    <Tooltip content={series.displayName}>
+      <div className='w-24 text-[11px] text-muted truncate shrink-0'>
+        {seriesLabel(series.key, series.displayName)}
+      </div>
+    </Tooltip>
     <div className='flex gap-px flex-1 min-w-0'>
       {cells.map((cell) => {
         const a = intensity(cell.activeMs, maxMs);
@@ -169,7 +174,7 @@ const SeriesRow: React.FC<{
           <div
             key={cell.date}
             className='flex-1 min-w-0 h-3 rounded-[1px] hover:ring-1 hover:ring-edge-strong/60'
-            style={{ backgroundColor: a === 0 ? EMPTY_BG : bgFor(a) }}
+            style={{ backgroundColor: a === 0 ? emptyBg(isDark) : bgFor(a) }}
             {...tipHandlers(
               <CellTip label={weekly ? `week of ${cell.date}` : cell.date} cell={cell} />,
             )}
@@ -178,7 +183,8 @@ const SeriesRow: React.FC<{
       })}
     </div>
   </div>
-);
+  );
+};
 
 export const HeatmapCard: React.FC = () => {
   const range = useGlobalRange();

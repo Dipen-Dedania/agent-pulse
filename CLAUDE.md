@@ -26,10 +26,26 @@ Ambient, glanceable awareness of AI coding agents.
     - Use the normalized event schema in `src/common/` for all tool communication.
     - Main $\leftrightarrow$ Renderer communication via Electron IPC.
 
+### 🧩 Component Library (reuse, don't hand-roll)
+Reusable renderer UI primitives live in **`src/renderer/components/Shared/`** and are
+exported from its barrel — import them as `from '../Shared'` (see `Shared/README.md`).
+**Always use these instead of hand-rolling an equivalent:**
+- `GlassToggle` — switches/toggles (never a hand-rolled `role="switch"` + knob).
+- `Select` — dropdowns (never a native `<select>`).
+- `appAlert` / `appConfirm` (+ `AppDialogHost`) — dialogs (never `window.alert`/`window.confirm`).
+- `TooltipOverlay` — the bubble tooltip overlay.
+- `Card` — titled glass section panels.
+- `Segmented` — compact mode switches.
+
+Glass surfaces use the `.glass-primary` / `.glass-secondary` / `.glass-modal` utility
+classes (in `index.css`) — do **not** copy-paste `bg-glass/… backdrop-blur-md …
+rounded-2xl` shells. `npm run lint:ui` enforces these rules and runs as part of `npm test`.
+
 ## 📂 Project Structure
 - `src/main/bridge/`: HTTP server (port 4242) and status state management.
 - `src/main/installer/`: Tool detection and hook configuration writing logic.
 - `src/main/windows/`: Electron window configurations (Bubbles, Settings).
+- `src/renderer/components/Shared/`: Reusable UI primitives (barrel-exported). Import from here; don't hand-roll.
 - `src/renderer/components/Bubble/`: Visual status indicators and animations.
 - `src/renderer/components/Settings/`: Configuration interface and hook management.
 - `src/common/`: Shared TypeScript types and event schemas.

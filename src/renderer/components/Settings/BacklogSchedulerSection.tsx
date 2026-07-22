@@ -3,6 +3,7 @@ import { BacklogSchedulerConfig, BacklogSchedulerStatus, BacklogSlot } from '../
 import { WebhookTarget } from '../../../common/types';
 import { formatUsd } from '../../../common/pricing';
 import { WebhookRow } from './WebhookRow';
+import { Button, GlassToggle, Tooltip } from '../Shared';
 
 // Backlog Scheduler — sits beside the Cowork Scheduler in Usage → Claude Code.
 // The Cowork slot is a fire INSTANT (opens a window); a backlog slot is a time
@@ -45,19 +46,12 @@ function wrapsMidnight(slot: BacklogSlot): boolean {
 const Toggle: React.FC<{ on: boolean; onClick: () => void; label: string; small?: boolean }> = ({
   on, onClick, label, small,
 }) => (
-  <button
-    onClick={onClick}
-    aria-label={label}
-    className={`relative ${small ? 'w-10 h-5' : 'w-11 h-6'} rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-      on ? 'bg-blue-500' : 'bg-control-strong'
-    }`}
-  >
-    <span
-      className={`absolute top-0.5 left-0.5 ${small ? 'w-4 h-4' : 'w-5 h-5'} bg-white rounded-full shadow transition-transform duration-200 ${
-        on ? 'translate-x-5' : 'translate-x-0'
-      }`}
-    />
-  </button>
+  <GlassToggle
+    checked={on}
+    onChange={() => onClick()}
+    size={small ? 'md' : 'lg'}
+    label={label}
+  />
 );
 
 const SlotRow: React.FC<{
@@ -70,7 +64,7 @@ const SlotRow: React.FC<{
     onChange({ ...slot, days });
   };
   return (
-    <div className={`bg-glass/40 border border-edge/50 rounded-xl p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
+    <div className={`glass-secondary p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
       <div className='flex items-center gap-1.5'>
         <input
           type='time'
@@ -86,25 +80,27 @@ const SlotRow: React.FC<{
           className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
         />
         {wrapsMidnight(slot) && (
-          <span className='px-1.5 py-0.5 rounded text-[10px] bg-control/60 text-body' title='Ends the next morning'>
-            +1d
-          </span>
+          <Tooltip content='Ends the next morning'>
+            <span className='px-1.5 py-0.5 rounded text-[10px] bg-control/60 text-body'>
+              +1d
+            </span>
+          </Tooltip>
         )}
       </div>
       <div className='flex gap-1'>
         {WEEKDAYS.map((label, d) => {
           const active = slot.days.includes(d);
           return (
-            <button
-              key={d}
-              onClick={() => toggleDay(d)}
-              className={`w-7 h-7 rounded-md text-[11px] font-medium cursor-pointer transition-colors ${
-                active ? 'bg-blue-500/80 text-white' : 'bg-control/50 text-muted hover:bg-control'
-              }`}
-              title={`${label} (window start day)`}
-            >
-              {label}
-            </button>
+            <Tooltip key={d} content={`${label} (window start day)`}>
+              <button
+                onClick={() => toggleDay(d)}
+                className={`w-7 h-7 rounded-md text-[11px] font-medium cursor-pointer transition-colors ${
+                  active ? 'bg-blue-500/80 text-white' : 'bg-control/50 text-muted hover:bg-control'
+                }`}
+              >
+                {label}
+              </button>
+            </Tooltip>
           );
         })}
       </div>
@@ -177,7 +173,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
   })();
 
   return (
-    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+    <section className='mt-6 glass-primary p-6'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
           <h2 className='text-lg font-bold text-strong'>Backlog Scheduler</h2>
@@ -191,7 +187,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       </div>
 
       {/* Status glance */}
-      <div className='mt-4 bg-glass/50 border border-edge/60 rounded-xl px-4 py-3'>
+      <div className='mt-4 glass-secondary px-4 py-3'>
         <p className='text-sm text-strong'>{glance}</p>
         {status?.usagePausedUntil != null && status.usagePausedUntil > Date.now() && (
           <p className='text-xs mt-1 text-warn/90'>
@@ -219,24 +215,27 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
         <div className='flex items-center justify-between mb-3 flex-wrap gap-2'>
           <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Windows</p>
           <div className='flex gap-2'>
-            <button
+            <Button
               onClick={() => addPreset(PRESET_NIGHTS)}
-              className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
+              variant='secondary'
+              size='sm'
             >
               Nights 23–07 Mon–Fri
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => addPreset(PRESET_WEEKENDS)}
-              className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
+              variant='secondary'
+              size='sm'
             >
               Weekends
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={addSlot}
-              className='px-3 py-1 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors'
+              variant='primary'
+              size='sm'
             >
               + Add window
-            </button>
+            </Button>
           </div>
         </div>
         {config.slots.length === 0 ? (
@@ -251,7 +250,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       </div>
 
       {/* requireIdle gate */}
-      <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4 flex items-start gap-3'>
+      <div className='mt-5 glass-secondary p-4 flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
           <p className='font-medium text-strong text-sm leading-tight'>Only run while idle</p>
           <p className='text-xs text-muted mt-1'>
@@ -270,7 +269,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       {/* Proactive usage gate — how full the Claude 5-hour window may get before
           the scheduler stops claiming NEW cards (a run started near the ceiling
           just dies mid-task). 100 = never gate proactively. */}
-      <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4 flex items-start gap-3'>
+      <div className='mt-5 glass-secondary p-4 flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
           <p className='font-medium text-strong text-sm leading-tight'>Pause new tasks near the usage limit</p>
           <p className='text-xs text-muted mt-1'>
@@ -302,7 +301,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
 
       {/* Completion notifications — collapsed behind a toggle so an empty list
           doesn't clutter the section; expands inline (no screen-covering modal). */}
-      <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4'>
+      <div className='mt-5 glass-secondary p-4'>
         <div className='flex items-start gap-3'>
           <div className='flex-1 min-w-0'>
             <p className='font-medium text-strong text-sm leading-tight'>Task notifications</p>
@@ -312,13 +311,15 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
               your phone the moment a queued task lands, without watching the board.
             </p>
           </div>
-          <button
+          <Button
             onClick={() => setNotificationsOpen((v) => !v)}
             aria-expanded={notificationsOpen}
-            className='shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
+            variant='secondary'
+            size='sm'
+            className='shrink-0'
           >
             {notificationsOpen ? 'Hide' : activeWebhooks > 0 ? `Configure · ${activeWebhooks} active` : 'Configure'}
-          </button>
+          </Button>
         </div>
 
         {notificationsOpen && (
@@ -339,12 +340,14 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
                 />
               ))
             )}
-            <button
+            <Button
               onClick={addWebhook}
-              className='self-start px-3 py-1.5 rounded-lg text-xs font-medium bg-control/60 hover:bg-control text-primary cursor-pointer transition-colors'
+              variant='secondary'
+              size='sm'
+              className='self-start'
             >
               + Add webhook
-            </button>
+            </Button>
           </div>
         )}
       </div>

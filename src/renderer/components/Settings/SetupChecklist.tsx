@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TourState } from '../../../common/types';
 import { logger } from '../../../common/logger';
+import { Tooltip } from '../Shared';
 
 // ── "Get set up" checklist ───────────────────────────────────────────────────
 // Lives at the top of the Hooks tab until dismissed. The three items check off
@@ -103,8 +104,8 @@ export const SetupChecklist: React.FC<SetupChecklistProps> = ({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className={`mb-6 bg-glass/60 backdrop-blur-md border rounded-2xl p-5 shadow-xl ${
-        allDone ? 'border-green-500/40' : 'border-edge/70'
+      className={`mb-6 glass-primary p-5 ${
+        allDone ? 'border-green-500/40' : ''
       }`}
       style={allDone ? { boxShadow: '0 0 24px rgba(34,197,94,0.15)' } : undefined}
     >
@@ -127,14 +128,15 @@ export const SetupChecklist: React.FC<SetupChecklistProps> = ({
             Done
           </button>
         ) : (
-          <button
-            onClick={dismiss}
-            className='w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-            aria-label='Dismiss setup checklist'
-            title='Dismiss — you can always set up from the tool cards below'
-          >
-            ✕
-          </button>
+          <Tooltip content='Dismiss — you can always set up from the tool cards below'>
+            <button
+              onClick={dismiss}
+              className='w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
+              aria-label='Dismiss setup checklist'
+            >
+              ✕
+            </button>
+          </Tooltip>
         )}
       </div>
 

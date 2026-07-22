@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { snappy, smooth, tabContent, tabContentTransition } from '../../motion';
 import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, ThemeMode, AppearanceConfig } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
@@ -13,6 +15,7 @@ import { SchedulerSection, SchedulerConfigUI } from './SchedulerSection';
 import { BubbleSection } from './BubbleSection';
 import { AttentionSection } from './AttentionSection';
 import { StatusLineSection } from './StatusLineSection';
+import { GlassToggle, Tooltip, Button } from '../Shared';
 import { GuardrailsTab } from './GuardrailsTab';
 import { SecretProtectionTab } from './SecretProtectionTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
@@ -20,7 +23,7 @@ import { BacklogBoardTab } from '../Backlog/BacklogBoardTab';
 import { BacklogSchedulerSection } from './BacklogSchedulerSection';
 import { BacklogSchedulerConfig } from '../../../common/backlog-types';
 import { useBacklogStore, useBacklogSync } from '../../store/useBacklogStore';
-import { AppDialogHost, appAlert } from '../Dialog/AppDialog';
+import { AppDialogHost, appAlert } from '../Shared';
 import { UpdatesTab } from './UpdatesTab';
 import { usePricingSync } from '../../pricing-sync';
 
@@ -65,7 +68,11 @@ const GeneralSection: React.FC = () => {
   const checked = state.enabled;
 
   return (
-    <div className='mb-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl flex items-center gap-4'>
+    <motion.div
+      whileHover={{ scale: 1.006 }}
+      transition={smooth}
+      className='glass-primary mb-6 p-5 flex items-center gap-4'
+    >
       <div className='flex-1'>
         <p className='font-semibold text-strong leading-tight'>Launch on startup</p>
         <p className='text-xs text-muted mt-1'>
@@ -74,20 +81,13 @@ const GeneralSection: React.FC = () => {
             : 'Auto-launch is only applied to packaged installs. Toggle is remembered for the next build.'}
         </p>
       </div>
-      <button
-        onClick={handleToggle}
-        className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-          checked ? 'bg-blue-500' : 'bg-control-strong'
-        }`}
-        aria-label='Toggle launch on startup'
-      >
-        <span
-          className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-            checked ? 'translate-x-5' : 'translate-x-0'
-          }`}
-        />
-      </button>
-    </div>
+      <GlassToggle
+        checked={checked}
+        onChange={handleToggle}
+        size='lg'
+        label='Toggle launch on startup'
+      />
+    </motion.div>
   );
 };
 
@@ -142,21 +142,21 @@ const ThemeIconToggle: React.FC = () => {
   };
 
   return (
-    <div className='inline-flex gap-0.5 p-1 rounded-xl bg-glass/60 backdrop-blur-md border border-edge/60 shrink-0'>
+    <div className='glass-secondary inline-flex gap-0.5 p-1 shrink-0'>
       {THEME_OPTIONS.map(({ value, Icon, label }) => (
-        <button
-          key={value}
-          onClick={() => handleTheme(value)}
-          title={label}
-          aria-label={`${label} theme`}
-          className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
-            theme === value
-              ? 'bg-blue-600 text-white shadow'
-              : 'text-muted hover:text-strong hover:bg-control/40'
-          }`}
-        >
-          <Icon className='w-4 h-4' />
-        </button>
+        <Tooltip key={value} content={label}>
+          <button
+            onClick={() => handleTheme(value)}
+            aria-label={`${label} theme`}
+            className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+              theme === value
+                ? 'bg-blue-600 text-white shadow'
+                : 'text-muted hover:text-strong hover:bg-control/40'
+            }`}
+          >
+            <Icon className='w-4 h-4' />
+          </button>
+        </Tooltip>
       ))}
     </div>
   );
@@ -176,7 +176,7 @@ const HookInfoModal: React.FC<{
       onClick={onClose}
     >
       <div
-        className='apple-scroll relative w-full max-w-lg mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-5 max-h-[85vh] overflow-y-auto'
+        className='glass-modal apple-scroll w-full max-w-lg mx-4 p-6 flex flex-col gap-5 max-h-[85vh] overflow-y-auto'
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close */}
@@ -197,7 +197,7 @@ const HookInfoModal: React.FC<{
         </div>
 
         {/* Tabs */}
-        <div className='flex gap-1 p-1 bg-glass/60 border border-edge/60 rounded-xl w-fit'>
+        <div className='glass-secondary flex gap-1 p-1 w-fit'>
           <button
             onClick={() => setTab('install')}
             className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
@@ -275,11 +275,11 @@ const GuardrailsParent: React.FC = () => {
   const [sub, setSub] = useState<'commands' | 'secrets'>('commands');
   return (
     <div className='mt-8'>
-      <div className='inline-flex gap-1 p-1 rounded-xl bg-glass/60 border border-edge/60 mb-6'>
-        <SubTabPill active={sub === 'commands'} onClick={() => setSub('commands')}>
+      <div className='glass-secondary inline-flex gap-1 p-1 mb-6'>
+        <SubTabPill group='guardrails' active={sub === 'commands'} onClick={() => setSub('commands')}>
           Command Guardrails
         </SubTabPill>
-        <SubTabPill active={sub === 'secrets'} onClick={() => setSub('secrets')}>
+        <SubTabPill group='guardrails' active={sub === 'secrets'} onClick={() => setSub('secrets')}>
           Secret Protection
         </SubTabPill>
       </div>
@@ -288,19 +288,31 @@ const GuardrailsParent: React.FC = () => {
   );
 };
 
-const SubTabPill: React.FC<{ active: boolean; onClick: () => void; children: React.ReactNode }> = ({
-  active,
-  onClick,
-  children,
-}) => (
-  <button
+// `group` scopes the sliding indicator so pills in different rows (usage vs.
+// guardrails) don't animate into one another.
+const SubTabPill: React.FC<{
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  group?: string;
+}> = ({ active, onClick, children, group = 'subtab' }) => (
+  <motion.button
     onClick={onClick}
-    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-      active ? 'bg-blue-600 text-white shadow' : 'text-muted hover:text-strong'
+    whileTap={{ scale: 0.97 }}
+    transition={snappy}
+    className={`relative px-4 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+      active ? 'text-white' : 'text-muted hover:text-strong'
     }`}
   >
-    {children}
-  </button>
+    {active && (
+      <motion.span
+        layoutId={`subTabPill-${group}`}
+        className='absolute inset-0 rounded-lg bg-blue-600 shadow'
+        transition={snappy}
+      />
+    )}
+    <span className='relative z-10'>{children}</span>
+  </motion.button>
 );
 
 // ── Settings Panel ────────────────────────────────────────────────────────────
@@ -716,7 +728,7 @@ export const SettingsPanel: React.FC = () => {
   };
 
   return (
-    <div className='h-screen overflow-y-auto apple-scroll bg-base text-strong p-8 font-sans'>
+    <div className='h-screen overflow-y-auto apple-scroll settings-liquid-bg text-strong p-8 font-sans'>
       {/* Header */}
       <div className='mb-10 flex items-start gap-3'>
         <button
@@ -753,7 +765,7 @@ export const SettingsPanel: React.FC = () => {
       <div
         role='tablist'
         aria-label='Settings sections'
-        className='mb-8 flex gap-1 p-1 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-xl w-fit shadow-lg'
+        className='glass-primary rounded-xl mb-8 flex gap-1 p-1 w-fit'
       >
         {TABS.map((tab) => {
           const isActive = tab.id === activeTab;
@@ -763,18 +775,34 @@ export const SettingsPanel: React.FC = () => {
               role='tab'
               aria-selected={isActive}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
-                isActive
-                  ? 'bg-control text-strong shadow-inner'
-                  : 'text-muted hover:text-strong hover:bg-control/40'
+              className={`relative px-4 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
+                isActive ? 'text-strong' : 'text-muted hover:text-strong'
               }`}
             >
-              {tab.label}
+              {isActive && (
+                <motion.span
+                  layoutId='activeTabPill'
+                  className='glass-tab-active absolute inset-0 rounded-lg'
+                  transition={snappy}
+                />
+              )}
+              <span className='relative z-10'>{tab.label}</span>
             </button>
           );
         })}
       </div>
 
+      {/* Tab body — cross-fades on tab switch (settle-in from below). Modals
+          below stay outside so they aren't torn down when the tab changes. */}
+      <AnimatePresence mode='wait'>
+        <motion.div
+          key={activeTab}
+          variants={tabContent}
+          initial='initial'
+          animate='animate'
+          exit='exit'
+          transition={tabContentTransition}
+        >
       {activeTab === 'hooks' && (loading ? (
         <div className='flex items-center gap-3 text-muted'>
           <div className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
@@ -796,9 +824,11 @@ export const SettingsPanel: React.FC = () => {
             const toolDetected = !!config.location || config.appInstalled;
 
             return (
-              <div
+              <motion.div
                 key={toolId}
-                className={`bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl flex flex-col gap-4 ${
+                whileHover={{ scale: 1.006 }}
+                transition={smooth}
+                className={`glass-primary p-5 flex flex-col gap-4 ${
                   !toolDetected ? 'opacity-60' : ''
                 }`}
               >
@@ -840,28 +870,29 @@ export const SettingsPanel: React.FC = () => {
                             : 'Hook not installed'}
                         </p>
                         {config.location && (
-                          <button
-                            onClick={() =>
-                              window.electron.invoke(
-                                'open-path',
-                                config.location,
-                              )
-                            }
-                            className='flex items-center gap-1 mt-0.5 max-w-full cursor-pointer group text-left'
-                            title={`Open: ${config.location}`}
-                          >
-                            <svg
-                              xmlns='http://www.w3.org/2000/svg'
-                              viewBox='0 0 16 16'
-                              fill='currentColor'
-                              className='w-2.5 h-2.5 text-ghost group-hover:text-blue-400 shrink-0 transition-colors'
+                          <Tooltip content={`Open: ${config.location}`}>
+                            <button
+                              onClick={() =>
+                                window.electron.invoke(
+                                  'open-path',
+                                  config.location,
+                                )
+                              }
+                              className='flex items-center gap-1 mt-0.5 max-w-full cursor-pointer group text-left'
                             >
-                              <path d='M2 3.5A1.5 1.5 0 0 1 3.5 2h2.879a1.5 1.5 0 0 1 1.06.44l1.122 1.12A1.5 1.5 0 0 0 9.62 4H12.5A1.5 1.5 0 0 1 14 5.5v1H2v-3ZM2 8.5A1.5 1.5 0 0 1 3.5 7h9A1.5 1.5 0 0 1 14 8.5v4A1.5 1.5 0 0 1 12.5 14h-9A1.5 1.5 0 0 1 2 12.5v-4Z' />
-                            </svg>
-                            <span className='text-[10px] text-faint group-hover:text-blue-400 font-mono truncate transition-colors'>
-                              {config.location}
-                            </span>
-                          </button>
+                              <svg
+                                xmlns='http://www.w3.org/2000/svg'
+                                viewBox='0 0 16 16'
+                                fill='currentColor'
+                                className='w-2.5 h-2.5 text-muted group-hover:text-info shrink-0 transition-colors'
+                              >
+                                <path d='M2 3.5A1.5 1.5 0 0 1 3.5 2h2.879a1.5 1.5 0 0 1 1.06.44l1.122 1.12A1.5 1.5 0 0 0 9.62 4H12.5A1.5 1.5 0 0 1 14 5.5v1H2v-3ZM2 8.5A1.5 1.5 0 0 1 3.5 7h9A1.5 1.5 0 0 1 14 8.5v4A1.5 1.5 0 0 1 12.5 14h-9A1.5 1.5 0 0 1 2 12.5v-4Z' />
+                              </svg>
+                              <span className='text-[10px] text-faint group-hover:text-info font-mono truncate transition-colors'>
+                                {config.location}
+                              </span>
+                            </button>
+                          </Tooltip>
                         )}
                       </>
                     ) : (
@@ -871,27 +902,13 @@ export const SettingsPanel: React.FC = () => {
                     )}
                   </div>
                   {/* Bubble toggle */}
-                  <button
-                    onClick={() =>
-                      toolDetected &&
-                      handleToggleBubble(toolId, !config.enabled)
-                    }
+                  <GlassToggle
+                    checked={config.enabled}
+                    onChange={() => handleToggleBubble(toolId, !config.enabled)}
                     disabled={!toolDetected}
-                    className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 ${
-                      config.enabled ? 'bg-blue-500' : 'bg-control-strong'
-                    } ${
-                      toolDetected
-                        ? 'cursor-pointer'
-                        : 'cursor-not-allowed opacity-50'
-                    }`}
-                    aria-label='Toggle bubble'
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-                        config.enabled ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
+                    size='lg'
+                    label='Toggle bubble'
+                  />
                 </div>
 
                 {/* Actions */}
@@ -909,15 +926,16 @@ export const SettingsPanel: React.FC = () => {
                   >
                     {config.hookInstalled ? 'Hook Active' : 'Install Hook'}
                   </button>
-                  <button
+                  <Button
+                    variant='secondary'
                     onClick={() => handleUninstallHook(toolId)}
                     disabled={!config.hookInstalled}
-                    className='flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong disabled:opacity-40 disabled:cursor-default text-body transition-all enabled:cursor-pointer'
+                    className='flex-1'
                   >
                     Uninstall
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </motion.div>
             );
           })}
         </div>
@@ -962,10 +980,11 @@ export const SettingsPanel: React.FC = () => {
 
         return (
           <div>
-            <div className='inline-flex flex-wrap gap-1 p-1 rounded-xl bg-glass/60 border border-edge/60 mb-2'>
+            <div className='glass-secondary inline-flex flex-wrap gap-1 p-1 mb-2'>
               {available.map((p) => (
                 <SubTabPill
                   key={p.toolId}
+                  group='usage'
                   active={active === p.toolId}
                   onClick={() => setUsageSubTab(p.toolId)}
                 >
@@ -1065,6 +1084,8 @@ export const SettingsPanel: React.FC = () => {
       {activeTab === 'guardrails' && <GuardrailsParent />}
 
       {activeTab === 'updates' && <UpdatesTab />}
+        </motion.div>
+      </AnimatePresence>
 
       {activeInfo && (
         <HookInfoModal

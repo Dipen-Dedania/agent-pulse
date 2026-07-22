@@ -340,8 +340,8 @@ describe.skipIf(!dbAvailable)('BacklogStore attachments', () => {
   });
 });
 
-describe.skipIf(!dbAvailable)('backlog schema migration v2 → v4', () => {
-  it('adds the Phase 2 columns and the attachments table to an existing v2 board', () => {
+describe.skipIf(!dbAvailable)('backlog schema migration v2 → v5', () => {
+  it('adds the Phase 2 columns, attachments table, and qa_url to an existing v2 board', () => {
     const fs = require('fs') as typeof import('fs');
     const os = require('os') as typeof import('os');
     const path = require('path') as typeof import('path');
@@ -383,15 +383,18 @@ describe.skipIf(!dbAvailable)('backlog schema migration v2 → v4', () => {
       expect(card.worktreePath).toBeNull();
       expect(card.baseSha).toBeNull();
       expect(card.qaCommand).toBeNull();
+      expect(card.qaUrl).toBeNull();   // v5 default
       const version = migrated.prepare('SELECT version FROM schema_version').get() as { version: number };
-      expect(version.version).toBe(4);
+      expect(version.version).toBe(5);
       // v4: the attachments table exists and is usable on a migrated board.
       expect(store.listAttachments('c1')).toEqual([]);
       store.setCardAttachments('c1', { keepIds: [], add: [{ filename: 'note.md', content: 'hi', bytes: 2 }] });
       expect(store.listAttachments('c1')).toHaveLength(1);
       migrated.close();
     } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      // Windows can hold the SQLite file handle briefly after close(), so retry
+      // the unlink to avoid a flaky EBUSY here.
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 });

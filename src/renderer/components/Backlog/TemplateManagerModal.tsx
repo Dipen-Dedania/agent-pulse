@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BacklogTemplate } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
+import { Button, Tooltip } from '../Shared';
 
 // Edit the quick-task template list (backlog.md: "Templates live in a simple
 // editable list so users can add their own"). Opens on top of the card editor,
@@ -69,7 +70,7 @@ export const TemplateManagerModal: React.FC<Props> = ({ onClose }) => {
         ) : (
           <div className='flex flex-col gap-3'>
             {rows.map((tpl) => (
-              <div key={tpl.id} className='bg-glass/40 border border-edge/50 rounded-xl p-3 flex flex-col gap-2'>
+              <div key={tpl.id} className='glass-secondary shrink-0 p-3 flex flex-col gap-2'>
                 <div className='flex gap-2'>
                   <input
                     value={tpl.name}
@@ -83,14 +84,15 @@ export const TemplateManagerModal: React.FC<Props> = ({ onClose }) => {
                     className={`${inputClass} flex-1 min-w-0`}
                     placeholder='Card title'
                   />
-                  <button
-                    onClick={() => removeRow(tpl.id)}
-                    className='w-8 shrink-0 flex items-center justify-center rounded-lg bg-control/50 hover:bg-red-500/30 text-muted hover:text-danger text-sm cursor-pointer transition-colors'
-                    title='Remove template'
-                    aria-label='Remove template'
-                  >
-                    ✕
-                  </button>
+                  <Tooltip content='Remove template'>
+                    <button
+                      onClick={() => removeRow(tpl.id)}
+                      className='w-8 shrink-0 flex items-center justify-center rounded-lg bg-control/50 hover:bg-red-500/30 text-muted hover:text-danger text-sm cursor-pointer transition-colors'
+                      aria-label='Remove template'
+                    >
+                      ✕
+                    </button>
+                  </Tooltip>
                 </div>
                 <textarea
                   value={tpl.description}
@@ -105,27 +107,30 @@ export const TemplateManagerModal: React.FC<Props> = ({ onClose }) => {
         )}
 
         <div className='flex items-center gap-2'>
-          <button
+          <Button
+            variant='secondary'
+            size='sm'
             onClick={addRow}
-            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
           >
             + Add template
-          </button>
+          </Button>
           {!valid && <span className='text-xs text-warn'>Every template needs a chip label and a card title.</span>}
           <div className='ml-auto flex items-center gap-2'>
-            <button
+            <Button
+              variant='secondary'
+              size='md'
               onClick={onClose}
-              className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant='primary'
+              size='md'
               onClick={() => void handleSave()}
               disabled={!valid || saving}
-              className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white transition-colors cursor-pointer'
             >
               {saving ? 'Saving…' : 'Save templates'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

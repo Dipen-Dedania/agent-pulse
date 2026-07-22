@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SchedulerStatus } from '../../../common/types';
 import { estimateCost, formatUsd } from '../../../common/pricing';
+import { Button, GlassToggle, Tooltip } from '../Shared';
 
 // Mirrors SchedulerConfig in src/main/user-config.ts (kept structural so the
 // renderer needn't import main-process modules).
@@ -53,19 +54,12 @@ function formatRelative(targetMs: number): string {
 const Toggle: React.FC<{ on: boolean; onClick: () => void; label: string; small?: boolean }> = ({
   on, onClick, label, small,
 }) => (
-  <button
-    onClick={onClick}
-    aria-label={label}
-    className={`relative ${small ? 'w-10 h-5' : 'w-11 h-6'} rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-      on ? 'bg-blue-500' : 'bg-control-strong'
-    }`}
-  >
-    <span
-      className={`absolute top-0.5 left-0.5 ${small ? 'w-4 h-4' : 'w-5 h-5'} bg-white rounded-full shadow transition-transform duration-200 ${
-        on ? (small ? 'translate-x-5' : 'translate-x-5') : 'translate-x-0'
-      }`}
-    />
-  </button>
+  <GlassToggle
+    checked={on}
+    onChange={() => onClick()}
+    size={small ? 'md' : 'lg'}
+    label={label}
+  />
 );
 
 // ── Fixed-mode slot editor ───────────────────────────────────────────────────
@@ -80,7 +74,7 @@ const SlotRow: React.FC<{
     onChange({ ...slot, days });
   };
   return (
-    <div className={`bg-glass/40 border border-edge/50 rounded-xl p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
+    <div className={`glass-secondary p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
       <input
         type='time'
         value={slot.time}
@@ -91,16 +85,16 @@ const SlotRow: React.FC<{
         {WEEKDAYS.map((label, d) => {
           const active = slot.days.includes(d);
           return (
-            <button
-              key={d}
-              onClick={() => toggleDay(d)}
-              className={`w-7 h-7 rounded-md text-[11px] font-medium cursor-pointer transition-colors ${
-                active ? 'bg-blue-500/80 text-white' : 'bg-control/50 text-muted hover:bg-control'
-              }`}
-              title={label}
-            >
-              {label}
-            </button>
+            <Tooltip key={d} content={label}>
+              <button
+                onClick={() => toggleDay(d)}
+                className={`w-7 h-7 rounded-md text-[11px] font-medium cursor-pointer transition-colors ${
+                  active ? 'bg-blue-500/80 text-white' : 'bg-control/50 text-muted hover:bg-control'
+                }`}
+              >
+                {label}
+              </button>
+            </Tooltip>
           );
         })}
       </div>
@@ -160,7 +154,7 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
   ];
 
   return (
-    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+    <section className='mt-6 glass-primary p-6'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
           <h2 className='text-lg font-bold text-strong'>Cowork Scheduler</h2>
@@ -187,7 +181,7 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
       </div>
 
       {/* Status glance */}
-      <div className='mt-4 bg-glass/50 border border-edge/60 rounded-xl px-4 py-3'>
+      <div className='mt-4 glass-secondary px-4 py-3'>
         <p className='text-sm text-strong'>{glance}</p>
         {status.lastRun && (
           <p className='text-xs mt-1 text-muted'>
@@ -210,18 +204,20 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
           <div className='flex items-center justify-between mb-3'>
             <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Slots</p>
             <div className='flex gap-2'>
-              <button
+              <Button
                 onClick={applyPreset}
-                className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
+                variant='secondary'
+                size='sm'
               >
                 Preset 6 · 11 · 4
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={addSlot}
-                className='px-3 py-1 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors'
+                variant='primary'
+                size='sm'
               >
                 + Add slot
-              </button>
+              </Button>
             </div>
           </div>
           {config.fixed.length === 0 ? (
@@ -278,7 +274,7 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
       )}
 
       {/* Token nudge */}
-      <div className='mt-5 bg-glass/40 border border-edge/50 rounded-xl p-4 flex items-start gap-3'>
+      <div className='mt-5 glass-secondary p-4 flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
           <p className='font-medium text-strong text-sm leading-tight'>Token-refresh nudge</p>
           <p className='text-xs text-muted mt-1'>
@@ -307,13 +303,14 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
             className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
           />
         </label>
-        <button
+        <Button
           onClick={handleTest}
           disabled={testing}
-          className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint text-white transition-colors cursor-pointer'
+          variant='primary'
+          size='md'
         >
           {testing ? 'Sending…' : 'Send test ping now'}
-        </button>
+        </Button>
         <p className='text-xs text-faint flex-1 min-w-[12rem]'>
           Each ping ≈ {formatUsd(OPENER_COST)} at Haiku API rates ({formatUsd(OPENER_COST * config.maxOpenersPerDay)}/day
           at the cap). A test ping counts toward today's cap.

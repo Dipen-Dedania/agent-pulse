@@ -70,7 +70,7 @@ const StateCard: React.FC<CardConfig> = ({
   const ring = colors.ring?.dark ?? null;
 
   return (
-    <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-4 flex flex-col gap-3 shadow-xl'>
+    <div className='glass-primary p-4 flex flex-col gap-3'>
       <div className='flex items-center gap-3'>
         <div className='relative w-9 h-9 shrink-0 flex items-center justify-center'>
           <div
@@ -132,7 +132,7 @@ const MascotStateCard: React.FC<{ card: CardConfig; mascot: MascotEntry }> = ({
   const Mascot = mascot.Component;
 
   return (
-    <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-4 flex flex-col gap-3 shadow-xl'>
+    <div className='glass-primary p-4 flex flex-col gap-3'>
       <div className='h-28 flex items-center justify-center overflow-hidden'>
         <Mascot state={card.state} width={mascot.width} />
       </div>

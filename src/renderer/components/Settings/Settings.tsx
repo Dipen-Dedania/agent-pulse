@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ToolId } from '../common/types';
+import { Button } from '../Shared';
 
 export const Settings: React.FC = () => {
   const [detectedTools, setDetectedTools] = useState<Record<string, boolean>>({});
@@ -34,18 +35,12 @@ export const Settings: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    <button
-                      className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded-md transition-colors"
-                      onClick={() => {}}
-                    >
+                    <Button variant="primary" size="sm" onClick={() => {}}>
                       Install Hook
-                    </button>
-                    <button
-                      className="px-3 py-1 text-xs bg-control hover:bg-control-strong rounded-md transition-colors"
-                      onClick={() => {}}
-                    >
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => {}}>
                       Toggle Bubble
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}

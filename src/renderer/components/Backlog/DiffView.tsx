@@ -18,6 +18,7 @@ import python from 'refractor/lang/python';
 import yaml from 'refractor/lang/yaml';
 import 'react-diff-view/style/index.css';
 import { logger } from '../../../common/logger';
+import { Tooltip } from '../Shared';
 
 for (const lang of [markup, clike, javascript, jsx, typescript, tsx, json, css, markdown, bash, python, yaml]) {
   refractor.register(lang);
@@ -190,18 +191,19 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
         <span className='text-danger font-medium'>−{totals.deletions}</span>
         <div className='flex-1' />
         <div className='flex rounded-lg overflow-hidden border border-edge/70'>
-          <button
-            onClick={() => setView('split')}
-            disabled={!wide}
-            title={wide ? 'Side-by-side' : 'Window too narrow for side-by-side'}
-            className={`px-2.5 py-1 font-medium transition-colors ${
-              effectiveView === 'split'
-                ? 'bg-control text-strong'
-                : 'bg-inset/60 text-muted hover:text-primary'
-            } disabled:opacity-40 disabled:cursor-not-allowed`}
-          >
-            Split
-          </button>
+          <Tooltip content={wide ? 'Side-by-side' : 'Window too narrow for side-by-side'}>
+            <button
+              onClick={() => setView('split')}
+              disabled={!wide}
+              className={`px-2.5 py-1 font-medium transition-colors ${
+                effectiveView === 'split'
+                  ? 'bg-control text-strong'
+                  : 'bg-inset/60 text-muted hover:text-primary'
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              Split
+            </button>
+          </Tooltip>
           <button
             onClick={() => setView('unified')}
             className={`px-2.5 py-1 font-medium transition-colors ${
@@ -227,12 +229,11 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
             const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '';
             const base = path.slice(path.lastIndexOf('/') + 1);
             return (
-              <button
-                key={`${path}-${i}`}
-                onClick={() => scrollToFile(i)}
-                title={file.type === 'rename' ? `${file.oldPath} → ${file.newPath}` : path}
-                className='group flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-control/40 transition-colors'
-              >
+              <Tooltip key={`${path}-${i}`} content={file.type === 'rename' ? `${file.oldPath} → ${file.newPath}` : path}>
+                <button
+                  onClick={() => scrollToFile(i)}
+                  className='group flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-control/40 transition-colors'
+                >
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${status.dot}`} aria-label={status.label} />
                 {/* Dir truncates first (shrinkable); filename stays visible, capped at rail width. */}
                 <span className='flex-1 min-w-0 flex text-xs leading-tight'>
@@ -243,7 +244,8 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
                   <span className='text-ok'>+{s.additions}</span>{' '}
                   <span className='text-danger'>−{s.deletions}</span>
                 </span>
-              </button>
+                </button>
+              </Tooltip>
             );
           })}
         </div>
@@ -290,7 +292,7 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
 };
 
 const TruncatedBanner: React.FC = () => (
-  <div className='rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs text-amber-200'>
+  <div className='rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs text-warn'>
     This diff is too large to load in full — showing a partial preview. Use <span className='font-semibold'>Open file</span> for the complete patch.
   </div>
 );

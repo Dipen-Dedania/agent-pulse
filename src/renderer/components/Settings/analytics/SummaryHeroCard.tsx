@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatUsd } from '../../../../common/pricing';
+import { AnimatedNumber, Tooltip } from '../../Shared';
 import { useSummary } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { EmptyState, SkeletonLine, formatDuration } from './shared';
@@ -26,13 +27,23 @@ const DeltaChip: React.FC<{ current: number; previous: number }> = ({ current, p
 
 const StatTile: React.FC<{
   label: string;
+  // Pass `rawValue` + `format` to animate a numeric value; `value` is still
+  // used as the static title attribute and fallback for non-numeric tiles.
   value: string;
+  rawValue?: number;
+  format?: (n: number) => string;
   delta?: React.ReactNode;
   sub?: string;
-}> = ({ label, value, delta, sub }) => (
-  <div className='flex-1 min-w-0 bg-glass/40 border border-edge/40 rounded-xl px-4 py-3'>
+}> = ({ label, value, rawValue, format: fmt, delta, sub }) => (
+  <div className='flex-1 min-w-0 glass-secondary px-4 py-3'>
     <p className='text-[10px] uppercase tracking-widest text-faint'>{label}</p>
-    <p className='text-xl font-semibold text-strong leading-tight mt-1 truncate' title={value}>{value}</p>
+    <Tooltip content={value}>
+      <p className='text-xl font-semibold text-strong leading-tight mt-1 truncate'>
+        {rawValue !== undefined && fmt !== undefined
+          ? <AnimatedNumber value={rawValue} format={fmt} />
+          : value}
+      </p>
+    </Tooltip>
     <div className='mt-1 flex items-center gap-1.5 min-h-[14px]'>
       {delta}
       {sub && <span className='text-[10px] text-faint truncate'>{sub}</span>}
@@ -56,7 +67,7 @@ export const SummaryHeroCard: React.FC = () => {
   const { current, previous } = data;
   if (current.sessions === 0 && previous.sessions === 0) {
     return (
-      <div className='mb-5 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5'>
+      <div className='mb-5 glass-primary p-5'>
         <EmptyState message='No agent activity in this window yet.' />
       </div>
     );
@@ -73,12 +84,16 @@ export const SummaryHeroCard: React.FC = () => {
       <StatTile
         label='Est. spend'
         value={formatUsd(current.costUsd)}
+        rawValue={current.costUsd}
+        format={formatUsd}
         delta={<DeltaChip current={current.costUsd} previous={previous.costUsd} />}
         sub={vsLabel}
       />
       <StatTile
         label='Sessions'
         value={current.sessions.toLocaleString()}
+        rawValue={current.sessions}
+        format={(n) => Math.round(n).toLocaleString()}
         delta={<DeltaChip current={current.sessions} previous={previous.sessions} />}
         sub={vsLabel}
       />

@@ -1,5 +1,6 @@
 import React from 'react';
 import { AntigravityUsageStatus, UsageState } from '../../../common/types';
+import { GlassToggle, Tooltip, Button } from '../Shared';
 
 export interface AntigravityUsageNotificationUI {
   enabled: boolean;
@@ -64,25 +65,18 @@ interface NotifyRowProps {
 const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, onChange }) => {
   const op = comparator === 'lte' ? '≤' : '≥';
   return (
-    <div className='bg-glass/40 border border-edge/50 rounded-xl p-4'>
+    <div className='glass-secondary p-4'>
       <div className='flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
           <p className='font-medium text-strong text-sm leading-tight'>{title}</p>
           <p className='text-xs text-muted mt-1'>{hint}</p>
         </div>
-        <button
-          onClick={() => onChange({ ...value, enabled: !value.enabled })}
-          className={`relative w-10 h-5 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            value.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label={`Toggle ${title}`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-              value.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={value.enabled}
+          onChange={() => onChange({ ...value, enabled: !value.enabled })}
+          size='md'
+          label={`Toggle ${title}`}
+        />
       </div>
 
       <div className={`flex items-center gap-3 mt-3 ${value.enabled ? '' : 'opacity-50'}`}>
@@ -115,7 +109,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
   const models = status.snapshot?.models ?? [];
 
   return (
-    <section className='mt-6 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl'>
+    <section className='glass-primary mt-6 p-6'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-3'>
@@ -132,19 +126,12 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
           </p>
         </div>
 
-        <button
-          onClick={() => onChange({ enabled: !config.enabled })}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label='Toggle Antigravity usage tracking'
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={config.enabled}
+          onChange={() => onChange({ enabled: !config.enabled })}
+          size='lg'
+          label='Toggle Antigravity usage tracking'
+        />
       </div>
 
       {config.enabled && models.length > 0 && (
@@ -152,7 +139,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
           <p className='text-xs uppercase tracking-widest text-faint font-semibold'>
             Models with active quotas
           </p>
-          <div className='bg-glass/40 border border-edge/60 rounded-xl divide-y divide-edge/40 overflow-hidden'>
+          <div className='glass-secondary divide-y divide-edge/40'>
             {models.map((m) => {
               const remaining = 100 - m.utilization;
               const fill = fillColorForRemaining(remaining);
@@ -162,13 +149,14 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                     <div className='flex items-center gap-2'>
                       <p className='text-sm font-medium text-strong truncate'>{m.displayName}</p>
                       {m.exhausted && (
-                        <span
-                          className='text-amber-400 shrink-0'
-                          title='Quota exhausted — waiting for reset'
-                          aria-label='Quota exhausted'
-                        >
-                          ⚠
-                        </span>
+                        <Tooltip content='Quota exhausted — waiting for reset'>
+                          <span
+                            className='text-amber-400 shrink-0'
+                            aria-label='Quota exhausted'
+                          >
+                            ⚠
+                          </span>
+                        </Tooltip>
                       )}
                       {m.recommended && (
                         <span className='text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/15 text-info border border-blue-500/30 shrink-0'>
@@ -178,8 +166,8 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                     </div>
                     <div className='flex items-center gap-3 mt-1.5'>
                       <div
-                        className='relative flex-1 rounded-full overflow-hidden'
-                        style={{ height: 4, background: 'rgba(255,255,255,0.10)' }}
+                        className='relative flex-1 rounded-full overflow-hidden bg-white/10 light:bg-black/10'
+                        style={{ height: 4 }}
                       >
                         <div
                           className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
@@ -264,13 +252,12 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
       )}
 
       <div className='mt-5 flex gap-2'>
-        <button
+        <Button
           onClick={onRefresh}
           disabled={!config.enabled}
-          className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/40 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
         >
           Refresh now
-        </button>
+        </Button>
       </div>
     </section>
   );

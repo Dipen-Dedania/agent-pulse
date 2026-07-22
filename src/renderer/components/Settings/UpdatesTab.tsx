@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { UpdaterState } from '../../../common/updater-types';
 import { logger } from '../../../common/logger';
+import { GlassToggle, Button } from '../Shared';
 
 function formatBytes(n: number): string {
   if (!n || n <= 0) return '0 B';
@@ -35,7 +36,7 @@ const STATUS_PILL: Record<UpdaterState['status'], { label: string; classes: stri
 };
 
 const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className }) => (
-  <div className={`mb-5 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl ${className ?? ''}`}>
+  <div className={`mb-5 glass-primary p-5 ${className ?? ''}`}>
     {children}
   </div>
 );
@@ -106,8 +107,8 @@ export const UpdatesTab: React.FC = () => {
     <div>
       {isMacUnsupported && (
         <Card className='border-amber-500/30 bg-amber-500/10'>
-          <p className='font-semibold text-amber-200'>Manual updates on macOS</p>
-          <p className='text-sm text-amber-100/80 mt-1'>
+          <p className='font-semibold text-warn'>Manual updates on macOS</p>
+          <p className='text-sm text-warn/90 mt-1'>
             Auto-update on macOS requires a signed and notarized build, which we haven't enabled yet.
             Until then, grab the latest installer from the Releases page.
           </p>
@@ -139,13 +140,12 @@ export const UpdatesTab: React.FC = () => {
           <p className='text-xs text-faint'>
             Last checked {formatRelative(state.lastCheckedAt)}
           </p>
-          <button
+          <Button
             onClick={handleCheck}
             disabled={isInProgress || isDev || isMacUnsupported}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-control/60 disabled:text-faint disabled:cursor-not-allowed text-white transition-colors cursor-pointer'
           >
             {state.status === 'checking' ? 'Checking…' : 'Check for updates'}
-          </button>
+          </Button>
         </div>
         {state.errorMessage && (
           <p className='mt-3 text-xs text-danger font-mono bg-red-500/10 border border-red-500/30 rounded-lg p-2'>
@@ -198,12 +198,12 @@ export const UpdatesTab: React.FC = () => {
           )}
 
           {state.status === 'available' && (
-            <button
+            <Button
               onClick={handleDownload}
-              className='w-full px-4 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer'
+              className='w-full'
             >
               Download update
-            </button>
+            </Button>
           )}
           {state.status === 'downloaded' && (
             <button
@@ -226,20 +226,13 @@ export const UpdatesTab: React.FC = () => {
               Runs a background check shortly after launch and every six hours after that.
             </p>
           </div>
-          <button
-            onClick={handleAutoCheckToggle}
+          <GlassToggle
+            checked={state.autoCheck}
+            onChange={handleAutoCheckToggle}
+            size="lg"
+            label="Toggle automatic update checks"
             disabled={isDev || isMacUnsupported}
-            className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 ${
-              state.autoCheck ? 'bg-blue-500' : 'bg-control-strong'
-            } ${(isDev || isMacUnsupported) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-            aria-label='Toggle automatic update checks'
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-                state.autoCheck ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
+          />
         </div>
       </Card>
     </div>

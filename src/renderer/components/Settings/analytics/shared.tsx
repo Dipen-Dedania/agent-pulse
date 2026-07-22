@@ -18,51 +18,16 @@ export function formatCompactNumber(n: number): string {
   return (n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0) + 'M';
 }
 
-export const Card: React.FC<{
-  title: string;
-  subtitle?: string;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ title, subtitle, right, children }) => (
-  <div className='mb-5 bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl'>
-    <div className='flex items-start justify-between gap-3 mb-4'>
-      <div>
-        <h3 className='text-base font-semibold text-strong leading-tight'>{title}</h3>
-        {subtitle && <p className='text-xs text-muted mt-1'>{subtitle}</p>}
-      </div>
-      {right && <div className='shrink-0'>{right}</div>}
-    </div>
-    {children}
-  </div>
-);
-
-export const Segmented: React.FC<{
-  options: { value: string; label: string }[];
-  value: string;
-  onChange: (next: string) => void;
-}> = ({ options, value, onChange }) => (
-  <div className='inline-flex gap-1 p-1 bg-glass/60 border border-edge/60 rounded-lg'>
-    {options.map((opt) => {
-      const active = opt.value === value;
-      return (
-        <button
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          className={`px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors ${
-            active ? 'bg-control text-strong' : 'text-muted hover:text-strong'
-          }`}
-        >
-          {opt.label}
-        </button>
-      );
-    })}
-  </div>
-);
+// Card and Segmented are app-wide primitives — their definitions now live in
+// components/Shared. Re-exported here so the analytics cards can keep importing
+// them from './shared' alongside the chart-only helpers below.
+export { Card } from '../../Shared/Card';
+export { Segmented } from '../../Shared/Segmented';
 
 export const InfoPill: React.FC<{ children: React.ReactNode; tone?: 'info' | 'warn' }> = ({ children, tone = 'info' }) => {
   const cls = tone === 'warn'
-    ? 'bg-amber-500/15 border-amber-500/30 text-amber-200'
-    : 'bg-blue-500/10 border-blue-500/30 text-blue-200';
+    ? 'bg-amber-500/15 border-amber-500/30 text-warn'
+    : 'bg-blue-500/10 border-blue-500/30 text-info';
   return (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border ${cls} text-[11px]`}>
       {children}
@@ -161,7 +126,7 @@ export const InfoTooltip: React.FC<{ children: React.ReactNode; label?: string }
           }}
           className='w-max max-w-[18rem]'
         >
-          <span className='block bg-overlay/95 backdrop-blur-md border border-edge-strong/60 rounded-lg shadow-2xl px-3 py-2.5 text-left font-normal normal-case tracking-normal'>
+          <span className='block glass-modal rounded-lg px-3 py-2.5 text-left font-normal normal-case tracking-normal'>
             {children}
           </span>
         </div>,
@@ -200,7 +165,7 @@ export function useChartTip() {
           style={{ position: 'fixed', left: tip.x, top: tip.y, zIndex: 9999, pointerEvents: 'none' }}
           className='w-max max-w-[18rem]'
         >
-          <span className='block bg-overlay/95 backdrop-blur-md border border-edge-strong/60 rounded-lg shadow-2xl px-2.5 py-1.5 text-left text-[11px] text-primary whitespace-nowrap'>
+          <span className='block glass-modal rounded-lg px-2.5 py-1.5 text-left text-[11px] text-primary whitespace-nowrap'>
             {tip.content}
           </span>
         </div>,

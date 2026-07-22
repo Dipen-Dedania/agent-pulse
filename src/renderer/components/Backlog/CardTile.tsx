@@ -1,6 +1,9 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import { BacklogCard, BacklogCardState } from '../../../common/backlog-types';
 import { projectColor } from './project-colors';
+import { hoverLift } from '../../motion';
+import { Tooltip } from '../Shared';
 
 export const TIER_META: Record<BacklogCard['riskTier'], { dot: string; label: string; hint: string }> = {
   green: { dot: 'bg-emerald-400', label: 'Green', hint: 'autoruns in scheduled windows' },
@@ -15,21 +18,22 @@ const ActionButton: React.FC<{
   disabled?: boolean;
   children: React.ReactNode;
 }> = ({ onClick, title, danger, disabled, children }) => (
-  <button
-    onClick={onClick}
-    title={title}
-    aria-label={title}
-    disabled={disabled}
-    className={`h-6 min-w-6 px-1 flex items-center justify-center rounded-md text-[11px] transition-colors ${
-      disabled
-        ? 'bg-control/30 text-ghost cursor-default'
-        : danger
-          ? 'bg-control/50 text-muted hover:bg-red-500/30 hover:text-danger cursor-pointer'
-          : 'bg-control/50 text-body hover:bg-control-strong cursor-pointer'
-    }`}
-  >
-    {children}
-  </button>
+  <Tooltip content={title}>
+    <button
+      onClick={onClick}
+      aria-label={title}
+      disabled={disabled}
+      className={`h-6 min-w-6 px-1 flex items-center justify-center rounded-md text-[11px] transition-colors ${
+        disabled
+          ? 'bg-control/30 text-ghost cursor-default'
+          : danger
+            ? 'bg-control/50 text-muted hover:bg-red-500/30 hover:text-danger cursor-pointer'
+            : 'bg-control/50 text-body hover:bg-control-strong cursor-pointer'
+      }`}
+    >
+      {children}
+    </button>
+  </Tooltip>
 );
 
 // Compact "time in this column" — surfaces stuck cards per the spec's
@@ -70,73 +74,88 @@ export const CardTile: React.FC<Props> = ({
   const age = isRunning ? null : formatAge(card.updatedAt);
 
   return (
-    <div className='bg-glass/40 border border-edge/50 rounded-xl p-3 flex flex-col gap-2'>
+    // hoverLift: subtle scale-up on hover, scale-down on press — springs back
+    // via the shared `smooth` spring so it feels weighted, not snappy.
+    <motion.div {...hoverLift} className='glass-secondary p-3 flex flex-col gap-2'>
       <div className='flex items-start gap-2'>
-        <span className={`mt-1 w-2 h-2 rounded-full shrink-0 ${tier.dot}`} title={`${tier.label} — ${tier.hint}`} />
+        <Tooltip content={`${tier.label} — ${tier.hint}`}>
+          <span className={`mt-1 w-2 h-2 rounded-full shrink-0 ${tier.dot}`} />
+        </Tooltip>
         <p className='flex-1 min-w-0 text-sm font-medium text-strong leading-snug break-words'>{card.title}</p>
         {isRunning && (
-          <span className='w-3.5 h-3.5 mt-0.5 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin shrink-0' title='Running' />
+          <Tooltip content='Running'>
+            <span className='w-3.5 h-3.5 mt-0.5 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin shrink-0' />
+          </Tooltip>
         )}
       </div>
 
       <div className='flex items-center gap-2 flex-wrap text-[11px] text-muted'>
         {/* Task type: quiet "R" for research, called-out chips for execution/qa */}
-        <span
-          className={`px-1.5 py-0.5 rounded font-mono ${
-            card.taskType === 'execution' ? 'bg-cyan-500/15 text-cyan-300'
-              : card.taskType === 'qa' ? 'bg-purple-500/15 text-purple-300'
-              : 'bg-control/40 text-faint'
-          }`}
-          title={
+        <Tooltip
+          content={
             card.taskType === 'execution' ? 'Execution — edits files in an isolated worktree'
               : card.taskType === 'qa' ? 'QA — read-only browser verification of the running app'
               : 'Research — read-only, produces a report'
           }
         >
-          {card.taskType === 'execution' ? '⚡ exec' : card.taskType === 'qa' ? '👁 qa' : 'R'}
-        </span>
+          <span
+            className={`px-1.5 py-0.5 rounded font-mono ${
+              card.taskType === 'execution' ? 'bg-cyan-500/15 text-cyan-300 light:text-cyan-700'
+                : card.taskType === 'qa' ? 'bg-purple-500/15 text-purple-300 light:text-purple-700'
+                : 'bg-control/40 text-faint'
+            }`}
+          >
+            {card.taskType === 'execution' ? '⚡ exec' : card.taskType === 'qa' ? '👁 qa' : 'R'}
+          </span>
+        </Tooltip>
         <span className={`px-1.5 py-0.5 rounded ${projectColor(card.projectId).chip}`}>{projectName}</span>
         {card.worktreePath && (
-          <span title={`Worktree: ${card.worktreePath}`}>📁</span>
+          <Tooltip content={`Worktree: ${card.worktreePath}`}>
+            <span>📁</span>
+          </Tooltip>
         )}
         {/* Effective model: card override stands out, inherited default stays quiet */}
         {(card.model ?? projectDefaultModel) && (
-          <span
-            className={`px-1.5 py-0.5 rounded ${
-              card.model ? 'bg-indigo-500/15 text-indigo-300' : 'bg-control/40 text-faint'
-            }`}
-            title={card.model ? 'Model override for this card' : 'Project default model'}
-          >
-            {card.model ?? projectDefaultModel}
-          </span>
+          <Tooltip content={card.model ? 'Model override for this card' : 'Project default model'}>
+            <span
+              className={`px-1.5 py-0.5 rounded ${
+                card.model ? 'bg-indigo-500/15 text-indigo-300 light:text-indigo-700' : 'bg-control/40 text-faint'
+              }`}
+            >
+              {card.model ?? projectDefaultModel}
+            </span>
+          </Tooltip>
         )}
         {card.estimatedMinutes != null && <span>~{card.estimatedMinutes}m</span>}
         {card.estimatedCostUsd != null && <span>~${card.estimatedCostUsd.toFixed(2)}</span>}
         {unmetPrereqs > 0 && (card.state === 'todo' || card.state === 'paused') && (
-          <span
-            className='px-1.5 py-0.5 rounded bg-amber-500/15 text-warn'
-            title={`Autorun skips this card until ${unmetPrereqs} prerequisite card${unmetPrereqs === 1 ? ' is' : 's are'} Done — "Run now" overrides`}
-          >
-            ⧗ {unmetPrereqs} prereq{unmetPrereqs === 1 ? '' : 's'}
-          </span>
+          <Tooltip content={`Autorun skips this card until ${unmetPrereqs} prerequisite card${unmetPrereqs === 1 ? ' is' : 's are'} Done — "Run now" overrides`}>
+            <span className='px-1.5 py-0.5 rounded bg-amber-500/15 text-warn'>
+              ⧗ {unmetPrereqs} prereq{unmetPrereqs === 1 ? '' : 's'}
+            </span>
+          </Tooltip>
         )}
         {age && (
-          <span className='ml-auto text-faint' title='Time in this column since last activity'>
-            {age}
-          </span>
+          <Tooltip content='Time in this column since last activity'>
+            <span className='ml-auto text-faint'>
+              {age}
+            </span>
+          </Tooltip>
         )}
       </div>
 
       {card.state === 'blocked' && card.blockedReason && (
-        <p className='text-[11px] text-danger/90 leading-snug break-words' title={card.blockedReason}>
-          {card.blockedReason}
-        </p>
+        <Tooltip content={card.blockedReason}>
+          <p className='text-[11px] text-danger/90 leading-snug break-words'>
+            {card.blockedReason}
+          </p>
+        </Tooltip>
       )}
       {card.state === 'paused' && (
         <p className='text-[11px] text-warn/80'>Interrupted — re-runs first in the next window.</p>
       )}
       {card.state === 'rework' && (
-        <p className='text-[11px] text-orange-300/80'>QA failed — retries once automatically, then blocks.</p>
+        <p className='text-[11px] text-orange-300/80 light:text-orange-700/90'>QA failed — retries once automatically, then blocks.</p>
       )}
 
       <div className='flex items-center gap-1 flex-wrap'>
@@ -216,6 +235,6 @@ export const CardTile: React.FC<Props> = ({
           </span>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 };

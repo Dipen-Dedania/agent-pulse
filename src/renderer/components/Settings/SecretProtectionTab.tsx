@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import { SecretProtectionConfig, SecretRule, SecretAccessEvent } from '../../../common/secretProtection';
+import { Button, GlassToggle, Tooltip } from '../Shared';
 import { ToolId } from '../../../common/types';
 import { TOOL_META } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
@@ -23,7 +25,7 @@ const COVERAGE: Record<ToolId, { ignoreFile: boolean; hookBlock: boolean; badge:
 const TONE_CLS: Record<BadgeTone, string> = {
   hard:   'bg-emerald-500/15 border-emerald-500/30 text-ok',
   soft:   'bg-amber-500/15 border-amber-500/30 text-warn',
-  bypass: 'bg-rose-500/15 border-rose-500/30 text-rose-300',
+  bypass: 'bg-rose-500/15 border-rose-500/30 text-danger',
   none:   'bg-control/40 border-edge-strong/40 text-muted',
 };
 
@@ -101,25 +103,17 @@ export const SecretProtectionTab: React.FC = () => {
             Stop agents from reading secret files (.env, keys, credentials). Blocking works for tools that honour PreToolUse responses; everything else gets an ignore-file plus a warning.
           </p>
         </div>
-        <button
-          onClick={() => update({ enabled: !config.enabled })}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label='Toggle secret protection'
-          title={config.enabled ? 'Secret Protection ON' : 'Secret Protection OFF'}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={config.enabled}
+          onChange={() => update({ enabled: !config.enabled })}
+          size='lg'
+          label='Toggle secret protection'
+        />
       </div>
 
       {/* "Not 100%" transparency notice (analysis §7.4) */}
       <div className='bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 mb-5'>
-        <p className='text-sm text-amber-200/90'>
+        <p className='text-sm text-warn/90'>
           <span className='font-semibold'>Not a 100% guarantee.</span> Ignore files are best-effort,
           and hooks can’t catch files read through shell commands (we make a conservative attempt).
           For true secrets, use a secret manager or an OS sandbox — this feature reduces exposure and
@@ -128,7 +122,11 @@ export const SecretProtectionTab: React.FC = () => {
       </div>
 
       {/* Supported agents coverage (analysis §2.1) */}
-      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl mb-5'>
+      <motion.div
+        whileHover={{ scale: 1.003 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
+        className='glass-primary p-5 mb-5'
+      >
         <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>Coverage by agent</p>
         <div className='flex flex-col gap-2'>
           {(Object.keys(COVERAGE) as ToolId[]).map((toolId) => {
@@ -138,30 +136,34 @@ export const SecretProtectionTab: React.FC = () => {
             const hooked = !!info?.hookInstalled;
             const label = TOOL_META[toolId]?.label ?? toolId;
             return (
-              <div
-                key={toolId}
-                className={`flex items-center gap-3 p-2.5 rounded-xl border ${
-                  installed ? 'bg-glass/60 border-edge/60' : 'bg-glass/30 border-edge/30 opacity-50'
-                }`}
-                title={installed ? (hooked ? 'Hook installed' : 'Detected — hook not installed') : 'Not installed'}
-              >
-                <span className='text-sm text-primary flex-1 truncate'>
-                  {label}
-                  {!installed && <span className='text-[10px] text-faint ml-2'>not installed</span>}
-                </span>
-                <Cov ok={cov.ignoreFile && installed} label='ignore-file' />
-                <Cov ok={cov.hookBlock && hooked} label='hook-block' />
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${TONE_CLS[cov.tone]}`}>
-                  {cov.badge}
-                </span>
-              </div>
+              <Tooltip key={toolId} content={installed ? (hooked ? 'Hook installed' : 'Detected — hook not installed') : 'Not installed'}>
+                <div
+                  className={`glass-secondary flex items-center gap-3 p-2.5 ${
+                    installed ? '' : 'opacity-50'
+                  }`}
+                >
+                  <span className='text-sm text-primary flex-1 truncate'>
+                    {label}
+                    {!installed && <span className='text-[10px] text-faint ml-2'>not installed</span>}
+                  </span>
+                  <Cov ok={cov.ignoreFile && installed} label='ignore-file' />
+                  <Cov ok={cov.hookBlock && hooked} label='hook-block' />
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${TONE_CLS[cov.tone]}`}>
+                    {cov.badge}
+                  </span>
+                </div>
+              </Tooltip>
             );
           })}
         </div>
-      </div>
+      </motion.div>
 
       {/* Layer toggles + scope */}
-      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl mb-5 flex flex-col gap-3'>
+      <motion.div
+        whileHover={{ scale: 1.003 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
+        className='glass-primary p-5 mb-5 flex flex-col gap-3'
+      >
         <LayerToggle
           label='Write ignore files'
           hint='Fan the glob list out to each agent’s ignore/deny file (Claude deny, .cursorignore, …).'
@@ -181,7 +183,7 @@ export const SecretProtectionTab: React.FC = () => {
               Global writes one ignore list per machine; Project writes into each recently-active project folder.
             </p>
           </div>
-          <div className='inline-flex gap-1 p-1 rounded-lg bg-glass/60 border border-edge/60 shrink-0'>
+          <div className='glass-secondary rounded-lg inline-flex gap-1 p-1 shrink-0'>
             {(['global', 'project'] as const).map((s) => (
               <button
                 key={s}
@@ -195,20 +197,25 @@ export const SecretProtectionTab: React.FC = () => {
             ))}
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Rule list */}
-      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl'>
+      <motion.div
+        whileHover={{ scale: 1.003 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
+        className='glass-primary p-5'
+      >
         <div className='flex items-center justify-between mb-4'>
           <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
             Protected globs ({allRules.length})
           </p>
-          <button
+          <Button
             onClick={() => setShowAdd(true)}
-            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors'
+            variant='primary'
+            size='sm'
           >
             + Add glob
-          </button>
+          </Button>
         </div>
 
         <div className='flex flex-col gap-2'>
@@ -218,10 +225,8 @@ export const SecretProtectionTab: React.FC = () => {
             return (
               <div
                 key={rule.id}
-                className={`flex items-start gap-3 p-3 rounded-xl border ${
-                  isDisabled
-                    ? 'bg-glass/40 border-edge/40 opacity-50'
-                    : 'bg-glass/60 border-edge/60'
+                className={`glass-secondary flex items-start gap-3 p-3 ${
+                  isDisabled ? 'opacity-50' : ''
                 }`}
               >
                 <div className='flex-1 min-w-0'>
@@ -237,23 +242,16 @@ export const SecretProtectionTab: React.FC = () => {
                   <code className='text-[10px] text-faint font-mono break-all'>{rule.id}</code>
                 </div>
                 <div className='flex flex-col items-end gap-1 shrink-0'>
-                  <button
-                    onClick={() => toggleRule(rule.id, !isDisabled)}
-                    className={`relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer ${
-                      !isDisabled ? 'bg-blue-500' : 'bg-control-strong'
-                    }`}
-                    aria-label={isDisabled ? 'Enable glob' : 'Disable glob'}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-                        !isDisabled ? 'translate-x-4' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
+                  <GlassToggle
+                    checked={!isDisabled}
+                    onChange={() => toggleRule(rule.id, !isDisabled)}
+                    size='sm'
+                    label={isDisabled ? 'Enable glob' : 'Disable glob'}
+                  />
                   {isCustom && (
                     <button
                       onClick={() => removeCustomRule(rule.id)}
-                      className='text-[10px] text-faint hover:text-red-400 cursor-pointer transition-colors'
+                      className='text-[10px] text-faint hover:text-danger cursor-pointer transition-colors'
                     >
                       delete
                     </button>
@@ -263,10 +261,14 @@ export const SecretProtectionTab: React.FC = () => {
             );
           })}
         </div>
-      </div>
+      </motion.div>
 
       {/* Recent events */}
-      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl mt-5'>
+      <motion.div
+        whileHover={{ scale: 1.003 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
+        className='glass-primary p-5 mt-5'
+      >
         <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
           Recent reads {events.length > 0 && `(${events.length})`}
         </p>
@@ -277,7 +279,7 @@ export const SecretProtectionTab: React.FC = () => {
             {events.map((evt, i) => (
               <div
                 key={`${evt.ts}-${i}`}
-                className='flex items-start gap-3 p-2.5 rounded-lg bg-glass/60 border border-edge/40'
+                className='glass-secondary rounded-lg flex items-start gap-3 p-2.5'
               >
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
@@ -307,7 +309,7 @@ export const SecretProtectionTab: React.FC = () => {
             ))}
           </div>
         )}
-      </div>
+      </motion.div>
 
       {showAdd && (
         <AddGlobModal
@@ -322,14 +324,15 @@ export const SecretProtectionTab: React.FC = () => {
 // ── Coverage pill (ignore-file / hook-block) ────────────────────────────────────
 
 const Cov: React.FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
-  <span
-    className={`hidden sm:inline-flex items-center gap-1 text-[10px] font-medium shrink-0 ${
-      ok ? 'text-ok' : 'text-ghost'
-    }`}
-    title={`${label}: ${ok ? 'yes' : 'no'}`}
-  >
-    {ok ? '✓' : '✗'} {label}
-  </span>
+  <Tooltip content={`${label}: ${ok ? 'yes' : 'no'}`}>
+    <span
+      className={`hidden sm:inline-flex items-center gap-1 text-[10px] font-medium shrink-0 ${
+        ok ? 'text-ok' : 'text-ghost'
+      }`}
+    >
+      {ok ? '✓' : '✗'} {label}
+    </span>
+  </Tooltip>
 );
 
 // ── Layer toggle row ──────────────────────────────────────────────────────────
@@ -345,19 +348,12 @@ const LayerToggle: React.FC<{
       <p className='text-sm font-medium text-primary'>{label}</p>
       <p className='text-xs text-muted mt-0.5'>{hint}</p>
     </div>
-    <button
-      onClick={() => onChange(!value)}
-      className={`relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer shrink-0 mt-0.5 ${
-        value ? 'bg-blue-500' : 'bg-control-strong'
-      }`}
-      aria-label={`Toggle ${label}`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-          value ? 'translate-x-4' : 'translate-x-0'
-        }`}
-      />
-    </button>
+    <GlassToggle
+      checked={value}
+      onChange={() => onChange(!value)}
+      size='sm'
+      label={`Toggle ${label}`}
+    />
   </div>
 );
 
@@ -414,7 +410,7 @@ const AddGlobModal: React.FC<AddGlobModalProps> = ({ onClose, onSaved }) => {
       onClick={onClose}
     >
       <div
-        className='apple-scroll relative w-full max-w-lg mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
+        className='glass-modal apple-scroll w-full max-w-lg mx-4 p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -460,19 +456,21 @@ const AddGlobModal: React.FC<AddGlobModalProps> = ({ onClose, onSaved }) => {
         )}
 
         <div className='flex justify-end gap-2 mt-2'>
-          <button
+          <Button
             onClick={onClose}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
+            variant='secondary'
+            size='md'
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={save}
             disabled={saving}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors disabled:opacity-50'
+            variant='primary'
+            size='md'
           >
             {saving ? 'Saving…' : 'Save glob'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -480,7 +478,7 @@ const AddGlobModal: React.FC<AddGlobModalProps> = ({ onClose, onSaved }) => {
 };
 
 const inputCls =
-  'w-full bg-glass/60 border border-edge/60 rounded-lg px-3 py-2 text-sm text-strong placeholder:text-faint focus:outline-none focus:border-blue-500/60';
+  'glass-secondary rounded-lg w-full px-3 py-2 text-sm text-strong placeholder:text-faint focus:outline-none focus:border-blue-500/60';
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div>

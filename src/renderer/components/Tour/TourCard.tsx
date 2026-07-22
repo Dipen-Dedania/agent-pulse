@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AgentState } from '../../../common/types';
 import { ClawdMascot } from '../Bubble/ClawdMascot';
 import { useIsDark } from '../../hooks/useTheme';
+import { Button } from '../Shared';
 
 // ── First-run tour coach card ────────────────────────────────────────────────
 // Rendered in its own transparent always-on-top window beside the demo bubble
@@ -180,12 +181,9 @@ export const TourCard: React.FC = () => {
                 Skip tour
               </button>
             )}
-            <button
-              onClick={next}
-              className='px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer'
-            >
+            <Button variant='primary' size='md' onClick={next}>
               {isLast ? 'Set up my tools' : 'Next'}
-            </button>
+            </Button>
           </div>
         </div>
       </motion.div>

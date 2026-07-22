@@ -1,6 +1,7 @@
 import React from 'react';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
+import { Tooltip } from '../../Shared';
 import { useSecretAccessAnalytics } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, SkeletonLine, formatCompactNumber } from './shared';
@@ -36,12 +37,16 @@ export const SecretProtectionCard: React.FC = () => {
                     <div key={t.toolId} className='flex items-center gap-3 text-xs'>
                       <span className='text-body flex-1 truncate'>{label}</span>
                       <span className='text-muted font-mono tabular-nums w-10 text-right'>{t.total}</span>
-                      <span className='text-warn/90 font-mono tabular-nums w-12 text-right' title='Observed (warn)'>
-                        {t.warn}w
-                      </span>
-                      <span className='text-rose-300/90 font-mono tabular-nums w-12 text-right' title='Blocked'>
-                        {t.block}b
-                      </span>
+                      <Tooltip content='Observed (warn)'>
+                        <span className='text-warn/90 font-mono tabular-nums w-12 text-right'>
+                          {t.warn}w
+                        </span>
+                      </Tooltip>
+                      <Tooltip content='Blocked'>
+                        <span className='text-danger/90 font-mono tabular-nums w-12 text-right'>
+                          {t.block}b
+                        </span>
+                      </Tooltip>
                     </div>
                   );
                 })}
@@ -55,9 +60,11 @@ export const SecretProtectionCard: React.FC = () => {
               <div className='space-y-1.5'>
                 {data.byFile.slice(0, 8).map((f) => (
                   <div key={f.filePath} className='flex items-center gap-3 text-xs'>
-                    <span className='text-body flex-1 font-mono truncate' title={f.filePath}>
-                      {f.filePath}
-                    </span>
+                    <Tooltip content={f.filePath}>
+                      <span className='text-body flex-1 font-mono truncate'>
+                        {f.filePath}
+                      </span>
+                    </Tooltip>
                     <span className='text-muted font-mono tabular-nums shrink-0'>
                       {formatCompactNumber(f.count)}
                     </span>
@@ -93,8 +100,8 @@ export const SecretProtectionCard: React.FC = () => {
 
 const Stat: React.FC<{ label: string; value: number; tone: 'neutral' | 'warn' | 'block' }> = ({ label, value, tone }) => {
   const toneCls =
-    tone === 'warn'  ? 'text-amber-200 border-amber-500/30 bg-amber-500/10' :
-    tone === 'block' ? 'text-rose-200  border-rose-500/30  bg-rose-500/10'  :
+    tone === 'warn'  ? 'text-warn border-amber-500/30 bg-amber-500/10' :
+    tone === 'block' ? 'text-danger border-rose-500/30 bg-rose-500/10'  :
                        'text-primary border-edge/60 bg-inset/40';
   return (
     <div className={`rounded-xl border px-3 py-2.5 ${toneCls}`}>

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, DisplayInfo } from '../../../common/types';
 import { BUBBLE_SOUNDS, playBubbleSound } from '../../sound';
+import { Button, GlassToggle, Tooltip } from '../Shared';
 
 interface Props {
   config: BubbleConfig;
@@ -44,7 +46,7 @@ const PositionPicker: React.FC<{
     'bottom-right': 'bottom-2 right-2',
   };
   return (
-    <div className='relative w-full max-w-[280px] aspect-[16/10] rounded-xl bg-inset/60 border border-edge/70 overflow-hidden'>
+    <div className='glass-secondary w-full max-w-[280px] aspect-[16/10]'>
       {/* faux taskbar */}
       <div className='absolute bottom-0 left-0 right-0 h-2 bg-control/50' />
       {hasCustomAnchor && (
@@ -55,17 +57,17 @@ const PositionPicker: React.FC<{
       {POSITION_OPTIONS.map((opt) => {
         const active = !hasCustomAnchor && value === opt.id;
         return (
-          <button
-            key={opt.id}
-            onClick={() => onChange(opt.id)}
-            aria-label={opt.label}
-            title={opt.label}
-            className={`absolute ${cornerClass[opt.id]} w-5 h-5 rounded-full cursor-pointer transition-all ${
-              active
-                ? 'bg-blue-500 ring-2 ring-blue-300/60 scale-110'
-                : 'bg-control-strong/70 hover:bg-control-strong'
-            }`}
-          />
+          <Tooltip key={opt.id} content={opt.label}>
+            <button
+              onClick={() => onChange(opt.id)}
+              aria-label={opt.label}
+              className={`absolute ${cornerClass[opt.id]} w-5 h-5 rounded-full cursor-pointer transition-all ${
+                active
+                  ? 'bg-blue-500 ring-2 ring-blue-300/60 scale-110'
+                  : 'bg-control-strong/70 hover:bg-control-strong'
+              }`}
+            />
+          </Tooltip>
         );
       })}
     </div>
@@ -106,29 +108,29 @@ const DisplayPicker: React.FC<{
       {displays.map((d, i) => {
         const active = !hasCustomAnchor && d.id === activeId;
         return (
-          <button
-            key={d.id}
-            onClick={() => onChange(d.id)}
-            title={`${displayName(d, i)} — ${d.bounds.width}×${d.bounds.height}${d.primary ? ' (primary)' : ''}`}
-            className={`absolute rounded-lg border flex items-center justify-center transition-colors cursor-pointer ${
-              active
-                ? 'bg-blue-500/25 border-blue-400/80 text-strong'
-                : 'bg-inset/60 border-edge-strong/80 text-muted hover:border-edge-strong hover:text-primary'
-            }`}
-            style={{
-              left: Math.round((d.bounds.x - minX) * scale),
-              top: Math.round((d.bounds.y - minY) * scale),
-              width: Math.round(d.bounds.width * scale) - 2,
-              height: Math.round(d.bounds.height * scale) - 2,
-            }}
-          >
-            <span className='text-sm font-semibold'>{i + 1}</span>
-            {d.primary && (
-              <span className='absolute bottom-1 text-[9px] uppercase tracking-wider text-faint'>
-                Primary
-              </span>
-            )}
-          </button>
+          <Tooltip key={d.id} content={`${displayName(d, i)} — ${d.bounds.width}×${d.bounds.height}${d.primary ? ' (primary)' : ''}`}>
+            <button
+              onClick={() => onChange(d.id)}
+              className={`absolute rounded-lg border flex items-center justify-center transition-colors cursor-pointer ${
+                active
+                  ? 'bg-blue-500/25 border-blue-400/80 text-strong'
+                  : 'bg-inset/60 border-edge-strong/80 text-muted hover:border-edge-strong hover:text-primary'
+              }`}
+              style={{
+                left: Math.round((d.bounds.x - minX) * scale),
+                top: Math.round((d.bounds.y - minY) * scale),
+                width: Math.round(d.bounds.width * scale) - 2,
+                height: Math.round(d.bounds.height * scale) - 2,
+              }}
+            >
+              <span className='text-sm font-semibold'>{i + 1}</span>
+              {d.primary && (
+                <span className='absolute bottom-1 text-[9px] uppercase tracking-wider text-faint'>
+                  Primary
+                </span>
+              )}
+            </button>
+          </Tooltip>
         );
       })}
     </div>
@@ -158,7 +160,11 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
   const selectedDisplay = displays[selectedDisplayIndex] ?? displays.find((d) => d.primary);
 
   return (
-    <section className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-6 shadow-xl flex flex-col gap-7'>
+    <motion.section
+      whileHover={{ scale: 1.003 }}
+      transition={{ duration: 0.15, ease: 'easeOut' }}
+      className='glass-primary p-6 flex flex-col gap-7'
+    >
       <div>
         <h2 className='text-lg font-bold text-strong'>Bubble appearance</h2>
         <p className='text-sm text-muted mt-1'>
@@ -167,7 +173,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       </div>
 
       {/* ── Show bubbles (master visibility) ─────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
+      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
         <div className='min-w-0'>
           <p className='text-sm font-medium text-strong'>Show bubbles</p>
           <p className='text-xs text-muted mt-0.5'>
@@ -179,7 +185,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           onClick={() => onChange({ hidden: !config.hidden })}
           aria-pressed={!config.hidden}
           className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.hidden ? 'bg-control-strong' : 'bg-blue-500'
+            config.hidden ? 'toggle-glass-off' : 'bg-blue-500'
           }`}
         >
           <span
@@ -191,7 +197,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       </div>
 
       {/* ── Clawd mascot (Claude Code) ───────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
+      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
         <div className='min-w-0'>
           <p className='text-sm font-medium text-strong'>Clawd mascot (Claude Code)</p>
           <p className='text-xs text-muted mt-0.5'>
@@ -200,23 +206,16 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             The Claude bubble grows a little to give Clawd room.
           </p>
         </div>
-        <button
-          onClick={() => onChange({ mascotClaudeCode: !config.mascotClaudeCode })}
-          aria-pressed={!!config.mascotClaudeCode}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotClaudeCode ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.mascotClaudeCode ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={!!config.mascotClaudeCode}
+          onChange={() => onChange({ mascotClaudeCode: !config.mascotClaudeCode })}
+          size="lg"
+          label="Clawd mascot (Claude Code)"
+        />
       </div>
 
       {/* ── Frog mascot (OpenAI Codex) ───────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
+      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
         <div className='min-w-0'>
           <p className='text-sm font-medium text-strong'>Frog mascot (OpenAI Codex)</p>
           <p className='text-xs text-muted mt-0.5'>
@@ -225,23 +224,16 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             The Codex bubble grows a little to give the frog room.
           </p>
         </div>
-        <button
-          onClick={() => onChange({ mascotOpenaiCodex: !config.mascotOpenaiCodex })}
-          aria-pressed={!!config.mascotOpenaiCodex}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotOpenaiCodex ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.mascotOpenaiCodex ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={!!config.mascotOpenaiCodex}
+          onChange={() => onChange({ mascotOpenaiCodex: !config.mascotOpenaiCodex })}
+          size="lg"
+          label="Frog mascot (OpenAI Codex)"
+        />
       </div>
 
       {/* ── GIGI mascot (Antigravity) ────────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
+      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
         <div className='min-w-0'>
           <p className='text-sm font-medium text-strong'>GIGI mascot (Antigravity)</p>
           <p className='text-xs text-muted mt-0.5'>
@@ -250,23 +242,16 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             The Antigravity bubble grows a little to give GIGI room.
           </p>
         </div>
-        <button
-          onClick={() => onChange({ mascotAntigravity: !config.mascotAntigravity })}
-          aria-pressed={!!config.mascotAntigravity}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotAntigravity ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.mascotAntigravity ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={!!config.mascotAntigravity}
+          onChange={() => onChange({ mascotAntigravity: !config.mascotAntigravity })}
+          size="lg"
+          label="GIGI mascot (Antigravity)"
+        />
       </div>
 
       {/* ── Ghost mascot (Kiro) ──────────────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
+      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
         <div className='min-w-0'>
           <p className='text-sm font-medium text-strong'>Ghost mascot (Kiro)</p>
           <p className='text-xs text-muted mt-0.5'>
@@ -275,23 +260,16 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             The Kiro bubble grows a little to give the ghost room.
           </p>
         </div>
-        <button
-          onClick={() => onChange({ mascotKiro: !config.mascotKiro })}
-          aria-pressed={!!config.mascotKiro}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotKiro ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.mascotKiro ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={!!config.mascotKiro}
+          onChange={() => onChange({ mascotKiro: !config.mascotKiro })}
+          size="lg"
+          label="Ghost mascot (Kiro)"
+        />
       </div>
 
       {/* ── Mico mascot (VS Code Copilot) ────────────────────────────────── */}
-      <div className='flex items-center justify-between gap-4 rounded-xl bg-glass/60 border border-edge/60 px-4 py-3'>
+      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
         <div className='min-w-0'>
           <p className='text-sm font-medium text-strong'>Mico mascot (VS Code Copilot)</p>
           <p className='text-xs text-muted mt-0.5'>
@@ -300,19 +278,12 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             The Copilot bubble grows a little to give Mico room.
           </p>
         </div>
-        <button
-          onClick={() => onChange({ mascotVscodeCopilot: !config.mascotVscodeCopilot })}
-          aria-pressed={!!config.mascotVscodeCopilot}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.mascotVscodeCopilot ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.mascotVscodeCopilot ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={!!config.mascotVscodeCopilot}
+          onChange={() => onChange({ mascotVscodeCopilot: !config.mascotVscodeCopilot })}
+          size="lg"
+          label="Mico mascot (VS Code Copilot)"
+        />
       </div>
 
       {/* ── Size ──────────────────────────────────────────────────────────── */}
@@ -396,16 +367,16 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             {FILL_SWATCHES.map((c) => {
               const active = (config.fillColor || '#ffffff').toLowerCase() === c.toLowerCase();
               return (
-                <button
-                  key={c}
-                  onClick={() => onChange({ fillColor: c })}
-                  aria-label={`Fill color ${c}`}
-                  title={c}
-                  className={`w-7 h-7 rounded-full cursor-pointer transition-transform ${
-                    active ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-glass scale-110' : 'hover:scale-105'
-                  }`}
-                  style={{ background: c, border: '1.5px solid rgba(255,255,255,0.25)' }}
-                />
+                <Tooltip key={c} content={c}>
+                  <button
+                    onClick={() => onChange({ fillColor: c })}
+                    aria-label={`Fill color ${c}`}
+                    className={`w-7 h-7 rounded-full cursor-pointer transition-transform border-[1.5px] border-white/25 light:border-black/20 ${
+                      active ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-glass scale-110' : 'hover:scale-105'
+                    }`}
+                    style={{ background: c }}
+                  />
+                </Tooltip>
               );
             })}
             <label className='flex items-center gap-2 ml-1 text-xs text-muted cursor-pointer'>
@@ -481,17 +452,14 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             {POSITION_OPTIONS.map((opt) => {
               const active = config.anchor == null && config.stackPosition === opt.id;
               return (
-                <button
+                <Button
                   key={opt.id}
+                  variant={active ? 'primary' : 'secondary'}
+                  size='md'
                   onClick={() => onChange({ stackPosition: opt.id, anchor: null })}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                    active
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-control/60 text-body hover:bg-control'
-                  }`}
                 >
                   {opt.label}
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -540,19 +508,21 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
                   </span>
                 </button>
                 {sound.id !== 'none' && (
-                  <button
+                  <Button
+                    variant='secondary'
+                    size='sm'
                     onClick={() => playBubbleSound(sound.id)}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control/70 hover:bg-control-strong text-primary cursor-pointer transition-colors shrink-0'
+                    className='shrink-0'
                     aria-label={`Preview ${sound.label}`}
                   >
                     ▶ Preview
-                  </button>
+                  </Button>
                 )}
               </div>
             );
           })}
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 };

@@ -2,15 +2,16 @@ import React from 'react';
 import { WindowValueSlice } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { formatUsd } from '../../../../common/pricing';
+import { AnimatedNumber } from '../../Shared';
 import { useWindowValue } from './useAnalytics';
 import { Card, CostBreakdownContent, EmptyState, InfoPill, InfoTooltip, SkeletonLine, formatCompactNumber } from './shared';
 
 const WindowBlock: React.FC<{ label: string; slice: WindowValueSlice }> = ({ label, slice }) => (
-  <div className='flex-1 min-w-0 bg-glass/40 border border-edge/40 rounded-xl p-4'>
+  <div className='flex-1 min-w-0 glass-secondary p-4'>
     <p className='text-[10px] uppercase tracking-widest text-faint mb-1'>{label}</p>
     <div className='flex items-center gap-1.5'>
       <p className='text-2xl font-bold text-ok leading-tight font-mono tabular-nums'>
-        {formatUsd(slice.costUsd)}
+        <AnimatedNumber value={slice.costUsd} format={formatUsd} />
       </p>
       <InfoTooltip label={`${label} cost breakdown`}>
         <CostBreakdownContent
@@ -24,11 +25,17 @@ const WindowBlock: React.FC<{ label: string; slice: WindowValueSlice }> = ({ lab
       </InfoTooltip>
     </div>
     <p className='text-[11px] text-faint mt-1 font-mono'>
-      in {formatCompactNumber(slice.tokensIn)} · out {formatCompactNumber(slice.tokensOut)}
-      {' · '}cache {formatCompactNumber(slice.cacheRead)}
+      in <AnimatedNumber value={slice.tokensIn} format={formatCompactNumber} /> · out <AnimatedNumber value={slice.tokensOut} format={formatCompactNumber} />
+      {' · '}cache <AnimatedNumber value={slice.cacheRead} format={formatCompactNumber} />
     </p>
     <p className='text-[10px] text-ghost mt-0.5'>
-      {slice.sessions} {slice.sessions === 1 ? 'session' : 'sessions'}
+      <AnimatedNumber
+        value={slice.sessions}
+        format={(n) => {
+          const r = Math.round(n);
+          return `${r.toLocaleString()} ${r === 1 ? 'session' : 'sessions'}`;
+        }}
+      />
     </p>
   </div>
 );
@@ -64,10 +71,16 @@ export const WindowValueCard: React.FC = () => {
           </div>
           <div className='mt-3 flex items-center justify-between text-[11px] text-muted font-mono tabular-nums'>
             <span>
-              Burn rate <span className='text-primary'>{formatUsd(data.burnRateUsdPerHour)}/hr</span>
+              Burn rate{' '}
+              <span className='text-primary'>
+                <AnimatedNumber value={data.burnRateUsdPerHour} format={(n) => `${formatUsd(n)}/hr`} />
+              </span>
             </span>
             <span>
-              Projected 5h at this pace <span className='text-warn'>{formatUsd(data.projected5hUsd)}</span>
+              Projected 5h at this pace{' '}
+              <span className='text-warn'>
+                <AnimatedNumber value={data.projected5hUsd} format={formatUsd} />
+              </span>
             </span>
           </div>
         </>

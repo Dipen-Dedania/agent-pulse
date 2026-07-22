@@ -139,7 +139,7 @@ export function Select<T extends string>({ value, options, onChange, className =
                   setOpen(false);
                 }}
                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs cursor-pointer transition-colors ${
-                  active ? 'bg-blue-500/20 text-white' : 'text-body hover:bg-control/60'
+                  active ? 'bg-blue-500/20 text-strong light:bg-blue-500/25' : 'text-body hover:bg-control/60'
                 }`}
               >
                 {opt.swatch && (
@@ -147,7 +147,7 @@ export function Select<T extends string>({ value, options, onChange, className =
                 )}
                 <span className='truncate'>{opt.label}</span>
                 {active && (
-                  <svg viewBox='0 0 20 20' fill='currentColor' className='w-3.5 h-3.5 ml-auto text-blue-400 shrink-0'>
+                  <svg viewBox='0 0 20 20' fill='currentColor' className='w-3.5 h-3.5 ml-auto text-info shrink-0'>
                     <path
                       fillRule='evenodd'
                       d='M16.704 5.29a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06 0l-3.5-3.5a.75.75 0 111.06-1.06l2.97 2.97 6.97-6.97a.75.75 0 011.06 0z'

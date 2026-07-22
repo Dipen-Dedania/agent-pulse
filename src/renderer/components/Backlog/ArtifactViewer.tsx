@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { BacklogArtifact, BacklogArtifactKind, BacklogAttempt, BacklogCard } from '../../../common/backlog-types';
 import { logger } from '../../../common/logger';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, appConfirm } from '../Dialog/AppDialog';
+import { appAlert, appConfirm, Button, Tooltip } from '../Shared';
 import { DiffView } from './DiffView';
 import { Markdown } from './Markdown';
 
@@ -32,9 +32,9 @@ const OUTCOME_COLOR: Record<string, string> = {
   failed: 'text-danger',
   paused: 'text-warn',
   killed: 'text-warn',
-  'qa-failed': 'text-orange-300',
+  'qa-failed': 'text-orange-300 light:text-orange-700',
   'no-changes': 'text-warn',
-  blocked: 'text-rose-300',
+  blocked: 'text-danger',
 };
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -316,24 +316,26 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
           /* Full report — one attempt's complete markdown, reached via "Show more" */
           <div className='flex flex-col gap-3 min-h-0'>
             <div className='flex items-center gap-2'>
-              <button
+              <Button
+                variant='secondary'
+                size='sm'
                 onClick={() => setFullReport(null)}
-                className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
               >
                 ← Back
-              </button>
+              </Button>
               <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>Full report</p>
-              <button
+              <Button
+                variant='secondary'
+                size='sm'
                 onClick={() => void window.electron.invoke('open-path', fullReport.path)}
-                className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
               >
                 Open file
-              </button>
+              </Button>
             </div>
             {fullContent == null ? (
               <p className='text-sm text-muted'>Loading…</p>
             ) : (
-              <div className='max-h-[70vh] overflow-y-auto apple-scroll bg-glass/40 border border-edge/50 rounded-xl p-4'>
+              <div className='max-h-[70vh] overflow-y-auto apple-scroll glass-secondary shrink-0 p-4'>
                 <Markdown content={fullContent} images={fullImages} />
                 {fullTruncated && (
                   <p className='mt-2 text-[11px] text-faint italic'>
@@ -346,7 +348,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
         ) : (
           <>
             {/* Attempt history */}
-            <div className='bg-glass/40 border border-edge/50 rounded-xl px-4 py-3'>
+            <div className='glass-secondary shrink-0 px-4 py-3'>
               <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-1.5'>Attempts</p>
               {attempts.length === 0 ? (
                 <p className='text-sm text-muted'>No runs yet.</p>
@@ -379,16 +381,17 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                           {/* reason only when there's no richer report summary (failed/killed
                               runs write no report) — avoids showing the same line twice. */}
                           {a.reason && !summary && (
-                            <span className='text-faint truncate max-w-64' title={a.reason}>{a.reason}</span>
+                            <Tooltip content={a.reason}>
+                              <span className='text-faint truncate max-w-64'>{a.reason}</span>
+                            </Tooltip>
                           )}
                         </div>
                         {summary && (
-                          <p
-                            className='text-muted leading-snug line-clamp-2 pl-[8.75rem] text-xs'
-                            title={report?.preview}
-                          >
-                            {summary}
-                          </p>
+                          <Tooltip content={report?.preview}>
+                            <p className='text-muted leading-snug line-clamp-2 pl-[8.75rem] text-xs'>
+                              {summary}
+                            </p>
+                          </Tooltip>
                         )}
                         {report && (
                           <button
@@ -407,7 +410,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
 
             {/* Artifact — grouped by kind: Summary / Diff / QA report */}
             {artifacts.length > 0 && (
-              <div className='bg-glass/40 border border-edge/50 rounded-xl p-4 flex flex-col gap-3'>
+              <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
                 <div className='flex items-center gap-2 flex-wrap'>
                   <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>
                     {selected ? KIND_LABEL[selected.kind] : 'Report'}
@@ -443,12 +446,13 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                       })}
                     </select>
                   )}
-                  <button
+                  <Button
+                    variant='secondary'
+                    size='sm'
                     onClick={openFile}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
                   >
                     Open file
-                  </button>
+                  </Button>
                 </div>
                 {selected?.kind === 'screenshot' ? (
                   dataUrl == null ? (
@@ -495,12 +499,14 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
 
             {/* Worktree — execution cards only, preserved until removed by hand */}
             {card.taskType === 'execution' && card.worktreePath && !worktreeGone && (
-              <div className='bg-glass/40 border border-edge/50 rounded-xl px-4 py-3 flex flex-col gap-2'>
+              <div className='glass-secondary shrink-0 px-4 py-3 flex flex-col gap-2'>
                 <div className='flex items-baseline gap-2 min-w-0'>
                   <p className='text-xs uppercase tracking-widest text-faint font-semibold shrink-0'>Worktree</p>
-                  <span className='text-xs text-body font-mono truncate flex-1 min-w-0' title={card.worktreePath}>
-                    {card.worktreePath}
-                  </span>
+                  <Tooltip content={card.worktreePath}>
+                    <span className='text-xs text-body font-mono truncate flex-1 min-w-0'>
+                      {card.worktreePath}
+                    </span>
+                  </Tooltip>
                   {card.baseSha && (
                     <span className='text-xs text-faint shrink-0'>
                       base <span className='font-mono text-muted'>{card.baseSha.slice(0, 7)}</span>
@@ -515,28 +521,33 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                   >
                     {applying ? 'Applying…' : 'Apply to project'}
                   </button>
-                  <button
+                  <Button
+                    variant='secondary'
+                    size='sm'
                     onClick={openWorktreeFolder}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors'
                   >
                     Open folder
-                  </button>
+                  </Button>
                   {resumeSessionId && (
-                    <button
-                      onClick={() => void handleResumeSession()}
-                      disabled={resuming}
-                      title='Open an interactive Claude Code session on this worktree, resumed from the last run'
-                      className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-control-strong text-primary cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-                    >
-                      {resuming ? 'Opening…' : 'Resume in Claude Code'}
-                    </button>
+                    <Tooltip content='Open an interactive Claude Code session on this worktree, resumed from the last run'>
+                      <Button
+                        variant='secondary'
+                        size='sm'
+                        onClick={() => void handleResumeSession()}
+                        disabled={resuming}
+                      >
+                        {resuming ? 'Opening…' : 'Resume in Claude Code'}
+                      </Button>
+                    </Tooltip>
                   )}
-                  <button
+                  <Button
+                    variant='ghost'
+                    size='sm'
                     onClick={() => void handleRemoveWorktree()}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-control hover:bg-red-500/30 text-body hover:text-danger cursor-pointer transition-colors'
+                    className='hover:bg-red-500/30 hover:text-danger'
                   >
                     Remove worktree
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}

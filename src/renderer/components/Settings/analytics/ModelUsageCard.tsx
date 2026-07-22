@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
+import { motion } from 'framer-motion';
 import { ModelUsageMode } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { estimateCostBreakdown, formatUsd } from '../../../../common/pricing';
+import { AnimatedNumber } from '../../Shared';
+import { smooth } from '../../../motion';
 import { useModelUsage } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, CostBreakdownContent, EmptyState, InfoPill, InfoTooltip, Segmented, SkeletonLine, formatCompactNumber } from './shared';
@@ -63,7 +66,7 @@ export const ModelUsageCard: React.FC = () => {
             const pct = total > 0 ? (value / total) * 100 : 0;
             const meta = row.toolId ? TOOL_META[row.toolId as ToolId] : null;
             return (
-              <div key={row.model} className='bg-glass/40 border border-edge/40 rounded-xl p-3'>
+              <div key={row.model} className='glass-secondary p-3'>
                 <div className='flex items-center gap-2.5 mb-2'>
                   {meta && (
                     <div className='w-6 h-6 rounded-md bg-control/60 flex items-center justify-center shrink-0'>
@@ -73,17 +76,24 @@ export const ModelUsageCard: React.FC = () => {
                   <p className='text-sm font-medium text-primary flex-1 truncate font-mono'>{row.model}</p>
                   {!row.priced && <InfoPill tone='warn'>unpriced</InfoPill>}
                   <p className='text-xs text-body font-mono tabular-nums shrink-0'>
-                    {mode === 'cost' ? formatUsd(row.costUsd) : `${pct.toFixed(1)}%`}
+                    {mode === 'cost'
+                      ? <AnimatedNumber value={row.costUsd} format={formatUsd} />
+                      : <AnimatedNumber value={pct} format={(n) => `${n.toFixed(1)}%`} />}
                   </p>
                 </div>
                 <div className='h-1.5 bg-glass/60 rounded-full overflow-hidden mb-2'>
-                  <div className='h-full bg-blue-500' style={{ width: `${pct}%` }} />
+                  <motion.div
+                    className='h-full bg-blue-500'
+                    animate={{ width: `${pct}%` }}
+                    transition={smooth}
+                    style={{ width: `${pct}%` }}
+                  />
                 </div>
                 <div className='flex items-center justify-between text-[11px] text-muted font-mono tabular-nums'>
                   <span className='inline-flex items-center gap-1.5'>
-                    in <span className='text-primary'>{formatCompactNumber(row.tokensIn)}</span> ·
-                    out <span className='text-primary'>{formatCompactNumber(row.tokensOut)}</span> ·
-                    <span className='text-primary'>{formatUsd(row.costUsd)}</span>
+                    in <AnimatedNumber value={row.tokensIn} format={formatCompactNumber} className='text-primary' /> ·
+                    out <AnimatedNumber value={row.tokensOut} format={formatCompactNumber} className='text-primary' /> ·
+                    <AnimatedNumber value={row.costUsd} format={formatUsd} className='text-primary' />
                     {row.priced && (
                       <InfoTooltip label={`${row.model} cost breakdown`}>
                         <CostBreakdownContent
@@ -103,7 +113,13 @@ export const ModelUsageCard: React.FC = () => {
                     )}
                   </span>
                   <span>
-                    {row.sessions} {row.sessions === 1 ? 'session' : 'sessions'}
+                    <AnimatedNumber
+                      value={row.sessions}
+                      format={(n) => {
+                        const r = Math.round(n);
+                        return `${r.toLocaleString()} ${r === 1 ? 'session' : 'sessions'}`;
+                      }}
+                    />
                   </span>
                 </div>
               </div>

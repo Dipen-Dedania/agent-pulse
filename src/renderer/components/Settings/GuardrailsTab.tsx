@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import { GuardrailConfig, GuardrailEvent, GuardrailRule, GuardrailTier, GuardrailOs } from '../../../common/guardrails';
+import { Button, GlassToggle } from '../Shared';
 import { logger } from '../../../common/logger';
 
 // Serialized form of a GuardrailRule as it crosses IPC — RegExp doesn't
@@ -99,34 +101,31 @@ export const GuardrailsTab: React.FC = () => {
             Inspect shell commands before tools run them. Blocking works for tools that honour PreToolUse responses; everything else gets a warning.
           </p>
         </div>
-        <button
-          onClick={() => update({ enabled: !config.enabled })}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.enabled ? 'bg-blue-500' : 'bg-control-strong'
-          }`}
-          aria-label='Toggle guardrails'
-          title={config.enabled ? 'Guardrails ON' : 'Guardrails OFF'}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.enabled ? 'translate-x-5' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <GlassToggle
+          checked={config.enabled}
+          onChange={() => update({ enabled: !config.enabled })}
+          size='lg'
+          label='Toggle guardrails'
+        />
       </div>
 
       {/* Rule list */}
-      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl'>
+      <motion.div
+        whileHover={{ scale: 1.003 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
+        className='glass-primary p-5'
+      >
         <div className='flex items-center justify-between mb-4'>
           <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
             Rules ({allRules.length})
           </p>
-          <button
+          <Button
+            variant='primary'
+            size='sm'
             onClick={() => setShowAdd(true)}
-            className='px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors'
           >
             + Add rule
-          </button>
+          </Button>
         </div>
 
         <div className='flex flex-col gap-2'>
@@ -136,10 +135,8 @@ export const GuardrailsTab: React.FC = () => {
             return (
               <div
                 key={rule.id}
-                className={`flex items-start gap-3 p-3 rounded-xl border ${
-                  isDisabled
-                    ? 'bg-glass/40 border-edge/40 opacity-50'
-                    : 'bg-glass/60 border-edge/60'
+                className={`glass-secondary flex items-start gap-3 p-3 ${
+                  isDisabled ? 'opacity-50' : ''
                 }`}
               >
                 <span
@@ -164,23 +161,16 @@ export const GuardrailsTab: React.FC = () => {
                   )}
                 </div>
                 <div className='flex flex-col items-end gap-1 shrink-0'>
-                  <button
-                    onClick={() => toggleRule(rule.id, !isDisabled)}
-                    className={`relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer ${
-                      !isDisabled ? 'bg-blue-500' : 'bg-control-strong'
-                    }`}
-                    aria-label={isDisabled ? 'Enable rule' : 'Disable rule'}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
-                        !isDisabled ? 'translate-x-4' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
+                  <GlassToggle
+                    checked={!isDisabled}
+                    onChange={() => toggleRule(rule.id, !isDisabled)}
+                    size='sm'
+                    label={isDisabled ? 'Enable rule' : 'Disable rule'}
+                  />
                   {isCustom && (
                     <button
                       onClick={() => removeCustomRule(rule.id)}
-                      className='text-[10px] text-faint hover:text-red-400 cursor-pointer transition-colors'
+                      className='text-[10px] text-faint hover:text-danger cursor-pointer transition-colors'
                     >
                       delete
                     </button>
@@ -190,10 +180,14 @@ export const GuardrailsTab: React.FC = () => {
             );
           })}
         </div>
-      </div>
+      </motion.div>
 
       {/* Recent events */}
-      <div className='bg-glass/60 backdrop-blur-md border border-edge/70 rounded-2xl p-5 shadow-xl mt-5'>
+      <motion.div
+        whileHover={{ scale: 1.003 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
+        className='glass-primary p-5 mt-5'
+      >
         <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
           Recent activity {events.length > 0 && `(${events.length})`}
         </p>
@@ -204,7 +198,7 @@ export const GuardrailsTab: React.FC = () => {
             {events.map((evt, i) => (
               <div
                 key={`${evt.ts}-${i}`}
-                className='flex items-start gap-3 p-2.5 rounded-lg bg-glass/60 border border-edge/40'
+                className='glass-secondary rounded-lg flex items-start gap-3 p-2.5'
               >
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
@@ -236,7 +230,7 @@ export const GuardrailsTab: React.FC = () => {
             ))}
           </div>
         )}
-      </div>
+      </motion.div>
 
       {showAdd && (
         <AddRuleModal
@@ -321,7 +315,7 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
       onClick={onClose}
     >
       <div
-        className='apple-scroll relative w-full max-w-lg mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
+        className='glass-modal apple-scroll w-full max-w-lg mx-4 p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -417,19 +411,21 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
         )}
 
         <div className='flex justify-end gap-2 mt-2'>
-          <button
+          <Button
+            variant='secondary'
+            size='md'
             onClick={onClose}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-control hover:bg-control-strong text-body cursor-pointer transition-colors'
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
+            variant='primary'
+            size='md'
             onClick={save}
             disabled={saving}
-            className='px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors disabled:opacity-50'
           >
             {saving ? 'Saving…' : 'Save rule'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -437,7 +433,7 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
 };
 
 const inputCls =
-  'w-full bg-glass/60 border border-edge/60 rounded-lg px-3 py-2 text-sm text-strong placeholder:text-faint focus:outline-none focus:border-blue-500/60';
+  'glass-secondary rounded-lg w-full px-3 py-2 text-sm text-strong placeholder:text-faint focus:outline-none focus:border-blue-500/60';
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div>

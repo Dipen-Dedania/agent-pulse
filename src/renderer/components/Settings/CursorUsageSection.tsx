@@ -1,17 +1,20 @@
 import React from 'react';
-import { CursorUsageStatus, UsageState } from '../../../common/types';
-import { GlassToggle, Button } from '../Shared';
-
-export interface CursorUsageNotificationUI {
-  enabled: boolean;
-  threshold: number;
-}
+import { CursorUsageStatus } from '../../../common/types';
+import {
+  UsageNotificationUI,
+  UsageProviderPanel,
+  QuotaBar,
+  UsageMessage,
+  NotificationsGroup,
+  PollIntervalInput,
+  formatRelativeReset,
+} from './usage/UsageShared';
 
 export interface CursorUsageConfigUI {
   enabled: boolean;
   intervalMs: number;
-  capWarning: CursorUsageNotificationUI;
-  nudge: CursorUsageNotificationUI;
+  capWarning: UsageNotificationUI;
+  nudge: UsageNotificationUI;
 }
 
 interface Props {
@@ -21,197 +24,60 @@ interface Props {
   onRefresh: () => void;
 }
 
-const STATE_LABEL: Record<UsageState, string> = {
-  ok: 'Live',
-  unknown: 'Waiting for first poll…',
-  unauthenticated: 'Sign in required',
-  unavailable: 'Endpoint unavailable',
-  'rate-limited': 'Rate-limited',
-  'network-error': 'Network error',
-};
-
-const STATE_PILL_CLASS: Record<UsageState, string> = {
-  ok: 'bg-emerald-500/15 text-ok border-emerald-500/30',
-  unknown: 'bg-control/40 text-body border-edge-strong/40',
-  unauthenticated: 'bg-amber-500/15 text-warn border-amber-500/30',
-  unavailable: 'bg-amber-500/15 text-warn border-amber-500/30',
-  'rate-limited': 'bg-amber-500/15 text-warn border-amber-500/30',
-  'network-error': 'bg-red-500/15 text-danger border-red-500/30',
-};
-
-function formatRelativeReset(targetMs: number | undefined): string {
-  if (!targetMs) return '—';
-  const diff = targetMs - Date.now();
-  if (diff <= 0) return 'now';
-  const mins = Math.round(diff / 60_000);
-  if (mins < 60) return `in ${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 48) {
-    const remMins = mins % 60;
-    return remMins > 0 ? `in ${hours}h ${remMins}m` : `in ${hours}h`;
-  }
-  const days = Math.round(hours / 24);
-  return `in ${days}d`;
-}
-
-interface NotifyRowProps {
-  title: string;
-  hint: string;
-  value: CursorUsageNotificationUI;
-  comparator: 'lte' | 'gte';
-  onChange: (next: CursorUsageNotificationUI) => void;
-}
-
-const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, onChange }) => {
-  const op = comparator === 'lte' ? '≤' : '≥';
-  return (
-    <div className='glass-secondary p-4'>
-      <div className='flex items-start gap-3'>
-        <div className='flex-1 min-w-0'>
-          <p className='font-medium text-strong text-sm leading-tight'>{title}</p>
-          <p className='text-xs text-muted mt-1'>{hint}</p>
-        </div>
-        <GlassToggle
-          checked={value.enabled}
-          onChange={() => onChange({ ...value, enabled: !value.enabled })}
-          size='md'
-          label={`Toggle ${title}`}
-        />
-      </div>
-
-      <div className={`flex items-center gap-3 mt-3 ${value.enabled ? '' : 'opacity-50'}`}>
-        <span className='text-xs text-faint font-mono whitespace-nowrap'>
-          remaining {op}
-        </span>
-        <input
-          type='range'
-          min={1}
-          max={99}
-          value={value.threshold}
-          disabled={!value.enabled}
-          onChange={(e) => onChange({ ...value, threshold: Number(e.target.value) })}
-          className='flex-1'
-        />
-        <span className='text-sm text-strong font-mono w-10 text-right'>{value.threshold}%</span>
-      </div>
-    </div>
-  );
-};
-
 export const CursorUsageSection: React.FC<Props> = ({ config, status, onChange, onRefresh }) => {
-  const intervalSec = Math.round(config.intervalMs / 1000);
   const snapshot = status.snapshot;
   const remaining = snapshot ? 100 - snapshot.plan.utilization : null;
+  const resetSub =
+    typeof snapshot?.limit === 'number' && snapshot.limit > 0 && typeof snapshot.remaining === 'number'
+      ? `${snapshot.remaining} of ${snapshot.limit} left · resets ${formatRelativeReset(snapshot.plan.resetsAt)}`
+      : `Resets ${formatRelativeReset(snapshot?.plan.resetsAt)}`;
 
   return (
-    <section className='glass-primary mt-6 p-6'>
-      <div className='flex items-start gap-4'>
-        <div className='flex-1 min-w-0'>
-          <div className='flex items-center gap-3'>
-            <h2 className='text-lg font-bold text-strong'>Cursor Subscription Usage</h2>
-            <span
-              className={`text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded-full border ${STATE_PILL_CLASS[status.state]}`}
-            >
-              {STATE_LABEL[status.state]}
-            </span>
-          </div>
-          <p className='text-sm text-muted mt-1'>
-            Read locally from Cursor's session DB — reflects your plan's billing-cycle quota. The
-            bar below the Cursor bubble fills as an "opportunity gauge": full means you've got
-            headroom.
-          </p>
-        </div>
-
-        <GlassToggle
-          checked={config.enabled}
-          onChange={() => onChange({ enabled: !config.enabled })}
-          size='lg'
-          label='Toggle Cursor usage tracking'
-        />
-      </div>
-
+    <UsageProviderPanel
+      title='Cursor Subscription Usage'
+      subtitle={
+        <>
+          Read locally from Cursor's session DB — reflects your plan's billing-cycle quota. The
+          bar below the Cursor bubble fills as an "opportunity gauge": full means you've got
+          headroom.
+        </>
+      }
+      state={status.state}
+      enabled={config.enabled}
+      onToggleEnabled={() => onChange({ enabled: !config.enabled })}
+      toggleLabel='Toggle Cursor usage tracking'
+      onRefresh={onRefresh}
+    >
       {config.enabled && (
         <div className='mt-5 grid gap-4 grid-cols-1'>
-          <div className='glass-secondary p-4'>
-            <p className='text-xs uppercase tracking-widest text-faint font-semibold'>
-              Billing cycle{snapshot?.membershipType ? ` · ${snapshot.membershipType}` : ''}
-            </p>
-            <p className='text-2xl font-bold text-strong mt-1'>
-              {remaining !== null ? `${remaining}%` : '—'}
-              <span className='text-xs font-normal text-muted ml-1'>available</span>
-            </p>
-            <p className='text-xs text-muted mt-1'>
-              {typeof snapshot?.limit === 'number' && snapshot.limit > 0 && typeof snapshot.remaining === 'number'
-                ? `${snapshot.remaining} of ${snapshot.limit} left · resets ${formatRelativeReset(snapshot.plan.resetsAt)}`
-                : `Resets ${formatRelativeReset(snapshot?.plan.resetsAt)}`}
-            </p>
-          </div>
+          <QuotaBar
+            label={`Billing cycle${snapshot?.membershipType ? ` · ${snapshot.membershipType}` : ''}`}
+            remaining={remaining}
+            sub={resetSub}
+          />
         </div>
       )}
 
-      {status.message && status.state !== 'ok' && (
-        <p className='mt-4 text-sm text-warn/90 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2'>
-          {status.message}
-        </p>
-      )}
+      <UsageMessage message={status.message} state={status.state} />
 
       {config.enabled && (
         <>
-          <div className='mt-6'>
-            <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-3'>
-              Notifications
-            </p>
-            <div className='grid grid-cols-1 gap-3'>
-              <NotifyRow
-                title='Cap warning'
-                hint='Notify when remaining Cursor credit drops to or below this level.'
-                value={config.capWarning}
-                comparator='lte'
-                onChange={(next) => onChange({ capWarning: next })}
-              />
-              <NotifyRow
-                title='Use-it-or-lose-it nudge'
-                hint='Notify when at least this much credit is unused and the cycle resets within 30 minutes.'
-                value={config.nudge}
-                comparator='gte'
-                onChange={(next) => onChange({ nudge: next })}
-              />
-            </div>
-          </div>
-
-          <div className='mt-5'>
-            <label className='flex flex-col gap-1.5'>
-              <span className='text-xs uppercase tracking-widest text-faint font-semibold'>
-                Poll interval
-              </span>
-              <div className='flex items-center gap-2'>
-                <input
-                  type='number'
-                  min={600}
-                  max={3600}
-                  step={60}
-                  value={intervalSec}
-                  onChange={(e) => {
-                    const next = Math.max(600, Math.min(3600, Number(e.target.value) || 1800));
-                    onChange({ intervalMs: next * 1000 });
-                  }}
-                  className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
-                />
-                <span className='text-xs text-faint'>seconds (min 600)</span>
-              </div>
-            </label>
-          </div>
+          <NotificationsGroup
+            capWarning={config.capWarning}
+            nudge={config.nudge}
+            capHint='Notify when remaining Cursor credit drops to or below this level.'
+            nudgeHint='Notify when at least this much credit is unused and the cycle resets within 30 minutes.'
+            onCapChange={(next) => onChange({ capWarning: next })}
+            onNudgeChange={(next) => onChange({ nudge: next })}
+          />
+          <PollIntervalInput
+            intervalMs={config.intervalMs}
+            minSec={600}
+            fallbackSec={1800}
+            onChange={(intervalMs) => onChange({ intervalMs })}
+          />
         </>
       )}
-
-      <div className='mt-5 flex gap-2'>
-        <Button
-          onClick={onRefresh}
-          disabled={!config.enabled}
-        >
-          Refresh now
-        </Button>
-      </div>
-    </section>
+    </UsageProviderPanel>
   );
 };

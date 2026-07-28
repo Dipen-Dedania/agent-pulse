@@ -5,6 +5,7 @@ import { GuardrailEvent } from '../../../common/guardrails';
 import { SecretAccessEvent } from '../../../common/secretProtection';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
+import { ParticleOrb } from './ParticleOrb';
 import { ClawdMascot } from './ClawdMascot';
 import { CodexMascot } from './CodexMascot';
 import { AntigravityMascot } from './AntigravityMascot';
@@ -944,6 +945,10 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
   const kiroMascotMode = toolId === 'kiro' && mascotKiroEnabled;
   const copilotMascotMode = toolId === 'vscode-copilot' && mascotCopilotEnabled;
   const mascotMode = claudeMascotMode || codexMascotMode || antigravityMascotMode || kiroMascotMode || copilotMascotMode;
+  // "3D orb" fill: a rotating dotted point-cloud around the tool logo, state-
+  // driven. Mutually exclusive with mascot mode (mascot wins), matching how
+  // glass/solid already yield to a mascot.
+  const particleMode = !mascotMode && fillMode === 'particle';
   const mascotWidth = codexMascotMode
     ? (MASCOT_WIDTH_CODEX[renderSize] ?? MASCOT_WIDTH_CODEX.medium)
     : antigravityMascotMode
@@ -1107,19 +1112,21 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
           width: mascotMode ? mascotWidth : dims.orb,
           height: mascotMode ? undefined : dims.orb,
           marginTop: '5px',
-          // Mascot mode is a transparent stage — the character carries the look.
-          // Solid fill paints an opaque backdrop so logos stay legible over busy
-          // desktops; glass keeps the frosted, state-tinted gradient. The
-          // state-color glow (boxShadow animation) still reads in both modes.
-          background: mascotMode
+          // Mascot and particle ("3D orb") modes are transparent stages — the
+          // character / dot-cloud carries the look, so no disc, border, blur or
+          // drop-shadow. Solid fill paints an opaque backdrop so logos stay
+          // legible over busy desktops; glass keeps the frosted, state-tinted
+          // gradient. The state-color glow (boxShadow animation) still reads in
+          // every mode.
+          background: mascotMode || particleMode
             ? 'transparent'
             : fillMode === 'solid'
               ? fillColor
               : `radial-gradient(circle, ${fill} 0%, rgba(128,128,128,0.06) 100%)`,
-          backdropFilter: mascotMode || fillMode === 'solid' ? undefined : 'blur(14px)',
-          WebkitBackdropFilter: mascotMode || fillMode === 'solid' ? undefined : 'blur(14px)',
-          border: mascotMode ? 'none' : `1.5px solid ${borderColor}`,
-          boxShadow: mascotMode
+          backdropFilter: mascotMode || particleMode || fillMode === 'solid' ? undefined : 'blur(14px)',
+          WebkitBackdropFilter: mascotMode || particleMode || fillMode === 'solid' ? undefined : 'blur(14px)',
+          border: mascotMode || particleMode ? 'none' : `1.5px solid ${borderColor}`,
+          boxShadow: mascotMode || particleMode
             ? 'none'
             : isDark
               ? '0 8px 8px 0 rgba(0,0,0,0.4)'
@@ -1138,6 +1145,14 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
           ) : (
             <ClawdMascot state={state} width={mascotWidth} />
           )
+        ) : particleMode ? (
+          <ParticleOrb
+            state={state}
+            iconSrc={meta.icon}
+            iconAlt={meta.label}
+            size={dims.orb}
+            isDark={isDark}
+          />
         ) : (
           <img
             src={meta.icon}
@@ -1153,7 +1168,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
         )}
 
         {/* Orbiting ring – waiting state (slow dots) */}
-        {!mascotMode && state === 'waiting' && ring && (
+        {!mascotMode && !particleMode && state === 'waiting' && ring && (
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
@@ -1163,7 +1178,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
         )}
 
         {/* Orbiting ring – working state (fast dashes) */}
-        {!mascotMode && state === 'working' && ring && (
+        {!mascotMode && !particleMode && state === 'working' && ring && (
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 2.5, repeat: Infinity, ease: 'linear' }}
@@ -1210,7 +1225,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
         )}
 
         {/* Error dot */}
-        {!mascotMode && state === 'error' && (
+        {!mascotMode && !particleMode && state === 'error' && (
           <div
             className='absolute -top-1 -right-1 w-3 h-3 rounded-full'
             style={{

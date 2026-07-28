@@ -1,17 +1,21 @@
 import React from 'react';
 import { AntigravityUsageStatus, UsageState } from '../../../common/types';
-import { GlassToggle, Tooltip, Button } from '../Shared';
-
-export interface AntigravityUsageNotificationUI {
-  enabled: boolean;
-  threshold: number;
-}
+import { Tooltip } from '../Shared';
+import {
+  UsageNotificationUI,
+  UsageProviderPanel,
+  UsageMessage,
+  NotificationsGroup,
+  PollIntervalInput,
+  formatRelativeReset,
+  quotaFillClass,
+} from './usage/UsageShared';
 
 export interface AntigravityUsageConfigUI {
   enabled: boolean;
   intervalMs: number;
-  capWarning: AntigravityUsageNotificationUI;
-  nudge: AntigravityUsageNotificationUI;
+  capWarning: UsageNotificationUI;
+  nudge: UsageNotificationUI;
 }
 
 interface Props {
@@ -21,119 +25,32 @@ interface Props {
   onRefresh: () => void;
 }
 
-const STATE_LABEL: Record<UsageState, string> = {
-  ok: 'Live',
-  unknown: 'Waiting for first poll…',
+// Antigravity's endpoint is local to the IDE, so a couple of states read
+// differently from the network-backed providers.
+const STATE_LABELS: Partial<Record<UsageState, string>> = {
   unauthenticated: 'CSRF token required',
   unavailable: 'IDE unavailable',
-  'rate-limited': 'Rate-limited',
-  'network-error': 'Network error',
 };
-
-const STATE_PILL_CLASS: Record<UsageState, string> = {
-  ok: 'bg-emerald-500/15 text-ok border-emerald-500/30',
-  unknown: 'bg-control/40 text-body border-edge-strong/40',
-  unauthenticated: 'bg-amber-500/15 text-warn border-amber-500/30',
-  unavailable: 'bg-control/40 text-body border-edge-strong/40',
-  'rate-limited': 'bg-amber-500/15 text-warn border-amber-500/30',
-  'network-error': 'bg-red-500/15 text-danger border-red-500/30',
-};
-
-function formatRelativeReset(targetMs: number | undefined): string {
-  if (!targetMs) return '—';
-  const diff = targetMs - Date.now();
-  if (diff <= 0) return 'now';
-  const mins = Math.round(diff / 60_000);
-  if (mins < 60) return `in ${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 48) {
-    const remMins = mins % 60;
-    return remMins > 0 ? `in ${hours}h ${remMins}m` : `in ${hours}h`;
-  }
-  const days = Math.round(hours / 24);
-  return `in ${days}d`;
-}
-
-interface NotifyRowProps {
-  title: string;
-  hint: string;
-  value: AntigravityUsageNotificationUI;
-  comparator: 'lte' | 'gte';
-  onChange: (next: AntigravityUsageNotificationUI) => void;
-}
-
-const NotifyRow: React.FC<NotifyRowProps> = ({ title, hint, value, comparator, onChange }) => {
-  const op = comparator === 'lte' ? '≤' : '≥';
-  return (
-    <div className='glass-secondary p-4'>
-      <div className='flex items-start gap-3'>
-        <div className='flex-1 min-w-0'>
-          <p className='font-medium text-strong text-sm leading-tight'>{title}</p>
-          <p className='text-xs text-muted mt-1'>{hint}</p>
-        </div>
-        <GlassToggle
-          checked={value.enabled}
-          onChange={() => onChange({ ...value, enabled: !value.enabled })}
-          size='md'
-          label={`Toggle ${title}`}
-        />
-      </div>
-
-      <div className={`flex items-center gap-3 mt-3 ${value.enabled ? '' : 'opacity-50'}`}>
-        <span className='text-xs text-faint font-mono whitespace-nowrap'>
-          remaining {op}
-        </span>
-        <input
-          type='range'
-          min={1}
-          max={99}
-          value={value.threshold}
-          disabled={!value.enabled}
-          onChange={(e) => onChange({ ...value, threshold: Number(e.target.value) })}
-          className='flex-1'
-        />
-        <span className='text-sm text-strong font-mono w-10 text-right'>{value.threshold}%</span>
-      </div>
-    </div>
-  );
-};
-
-function fillColorForRemaining(remaining: number): string {
-  if (remaining > 50) return 'rgba(34,197,94,0.7)';
-  if (remaining > 20) return 'rgba(245,158,11,0.75)';
-  return 'rgba(239,68,68,0.8)';
-}
 
 export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onChange, onRefresh }) => {
-  const intervalSec = Math.round(config.intervalMs / 1000);
   const models = status.snapshot?.models ?? [];
 
   return (
-    <section className='glass-primary mt-6 p-6'>
-      <div className='flex items-start gap-4'>
-        <div className='flex-1 min-w-0'>
-          <div className='flex items-center gap-3'>
-            <h2 className='text-lg font-bold text-strong'>Antigravity IDE Usage</h2>
-            <span
-              className={`text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded-full border ${STATE_PILL_CLASS[status.state]}`}
-            >
-              {STATE_LABEL[status.state]}
-            </span>
-          </div>
-          <p className='text-sm text-muted mt-1'>
-            Tracks per-model quota in the Antigravity IDE. The endpoint is local — readings
-            only refresh while the IDE is running.
-          </p>
-        </div>
-
-        <GlassToggle
-          checked={config.enabled}
-          onChange={() => onChange({ enabled: !config.enabled })}
-          size='lg'
-          label='Toggle Antigravity usage tracking'
-        />
-      </div>
-
+    <UsageProviderPanel
+      title='Antigravity IDE Usage'
+      subtitle={
+        <>
+          Tracks per-model quota in the Antigravity IDE. The endpoint is local — readings only
+          refresh while the IDE is running.
+        </>
+      }
+      state={status.state}
+      stateLabels={STATE_LABELS}
+      enabled={config.enabled}
+      onToggleEnabled={() => onChange({ enabled: !config.enabled })}
+      toggleLabel='Toggle Antigravity usage tracking'
+      onRefresh={onRefresh}
+    >
       {config.enabled && models.length > 0 && (
         <div className='mt-5 flex flex-col gap-2'>
           <p className='text-xs uppercase tracking-widest text-faint font-semibold'>
@@ -142,7 +59,6 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
           <div className='glass-secondary divide-y divide-edge/40'>
             {models.map((m) => {
               const remaining = 100 - m.utilization;
-              const fill = fillColorForRemaining(remaining);
               return (
                 <div key={m.modelKey} className='flex items-center gap-3 px-3 py-2.5'>
                   <div className='flex-1 min-w-0'>
@@ -150,10 +66,7 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                       <p className='text-sm font-medium text-strong truncate'>{m.displayName}</p>
                       {m.exhausted && (
                         <Tooltip content='Quota exhausted — waiting for reset'>
-                          <span
-                            className='text-amber-400 shrink-0'
-                            aria-label='Quota exhausted'
-                          >
+                          <span className='text-amber-400 shrink-0' aria-label='Quota exhausted'>
                             ⚠
                           </span>
                         </Tooltip>
@@ -170,8 +83,8 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                         style={{ height: 4 }}
                       >
                         <div
-                          className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
-                          style={{ width: `${Math.max(2, Math.min(100, remaining))}%`, background: fill }}
+                          className={`absolute left-0 top-0 h-full rounded-full transition-all duration-500 motion-reduce:transition-none ${quotaFillClass(remaining)}`}
+                          style={{ width: `${Math.max(2, Math.min(100, remaining))}%` }}
                         />
                       </div>
                       <span className='text-xs text-muted shrink-0 tabular-nums'>
@@ -192,73 +105,30 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
         </p>
       )}
 
-      {status.message && status.state !== 'ok' && (
-        <p className='mt-4 text-sm text-warn/90 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2'>
-          {status.message}
-        </p>
-      )}
+      <UsageMessage message={status.message} state={status.state} />
 
       {config.enabled && (
         <>
-          <div className='mt-6'>
-            <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-3'>
-              Notifications
-            </p>
-            <div className='grid grid-cols-1 gap-3'>
-              <NotifyRow
-                title='Cap warning'
-                hint='Notify when remaining quota on any tracked model drops to or below this level.'
-                value={config.capWarning}
-                comparator='lte'
-                onChange={(next) => onChange({ capWarning: next })}
-              />
-              <NotifyRow
-                title='Use-it-or-lose-it nudge'
-                hint='Notify when at least this much credit is unused on a model and its window resets within 30 minutes.'
-                value={config.nudge}
-                comparator='gte'
-                onChange={(next) => onChange({ nudge: next })}
-              />
-            </div>
-          </div>
-
-          <div className='mt-5'>
-            <label className='flex flex-col gap-1.5'>
-              <span className='text-xs uppercase tracking-widest text-faint font-semibold'>
-                Poll interval
-              </span>
-              <div className='flex items-center gap-2'>
-                <input
-                  type='number'
-                  min={60}
-                  max={3600}
-                  step={30}
-                  value={intervalSec}
-                  onChange={(e) => {
-                    const next = Math.max(60, Math.min(3600, Number(e.target.value) || 300));
-                    onChange({ intervalMs: next * 1000 });
-                  }}
-                  className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
-                />
-                <span className='text-xs text-faint'>seconds (min 60)</span>
-              </div>
-            </label>
-            <p className='mt-3 text-xs text-faint'>
-              The bubble surfaces just two models — Claude Opus 4.6 and Gemini 3.5 Flash (High).
-              All other models stay visible in the list above.
-            </p>
-          </div>
+          <NotificationsGroup
+            capWarning={config.capWarning}
+            nudge={config.nudge}
+            capHint='Notify when remaining quota on any tracked model drops to or below this level.'
+            nudgeHint='Notify when at least this much credit is unused on a model and its window resets within 30 minutes.'
+            onCapChange={(next) => onChange({ capWarning: next })}
+            onNudgeChange={(next) => onChange({ nudge: next })}
+          />
+          <PollIntervalInput
+            intervalMs={config.intervalMs}
+            minSec={60}
+            fallbackSec={300}
+            onChange={(intervalMs) => onChange({ intervalMs })}
+          />
+          <p className='mt-3 text-xs text-faint'>
+            The bubble surfaces just two models — Claude Opus 4.6 and Gemini 3.5 Flash (High). All
+            other models stay visible in the list above.
+          </p>
         </>
       )}
-
-      <div className='mt-5 flex gap-2'>
-        <Button
-          onClick={onRefresh}
-          disabled={!config.enabled}
-        >
-          Refresh now
-        </Button>
-      </div>
-    </section>
+    </UsageProviderPanel>
   );
 };

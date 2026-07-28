@@ -322,7 +322,7 @@ type TabId = 'hooks' | 'bubble' | 'usage' | 'backlog' | 'analytics' | 'guardrail
 const TABS: { id: TabId; label: string; description: string }[] = [
   { id: 'hooks',      label: 'Hooks',      description: 'Manage which AI tools show a status bubble.' },
   { id: 'bubble',     label: 'Bubble',     description: 'Size, screen position, and inactivity sound for the bubbles.' },
-  { id: 'usage',      label: 'Usage',      description: 'Monitor plan usage and configure Claude Code’s scheduler & status line.' },
+  { id: 'usage',      label: 'Plans & Limits', description: 'Monitor plan usage and configure Claude Code’s scheduler & status line.' },
   { id: 'backlog',    label: 'Backlog',    description: 'Queue research tasks that run themselves during your idle windows.' },
   { id: 'analytics',  label: 'Analytics',  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
   { id: 'guardrails', label: 'Guardrails', description: 'Block risky shell commands and protect secret files from agents.' },

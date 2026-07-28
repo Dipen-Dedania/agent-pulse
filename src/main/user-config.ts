@@ -514,7 +514,7 @@ function migrateBubble(raw: unknown): BubbleConfig {
   const SIZES: BubbleSize[] = ['small', 'medium', 'large'];
   const POSITIONS: BubbleStackPosition[] = ['bottom-right', 'bottom-left', 'top-right', 'top-left'];
   const SOUNDS: BubbleSoundId[] = ['pop', 'chime', 'ding', 'marimba', 'none'];
-  const FILL_MODES: BubbleFillMode[] = ['glass', 'solid'];
+  const FILL_MODES: BubbleFillMode[] = ['glass', 'solid', 'particle'];
   // Accept #rgb/#rrggbb or rgb()/rgba() so a hand-edited config can't feed an
   // arbitrary string into the orb's inline style. Anything else → default.
   const isColor = (v: unknown): v is string =>

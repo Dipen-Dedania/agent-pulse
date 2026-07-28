@@ -35,7 +35,9 @@ export type BubbleSoundId = 'pop' | 'chime' | 'ding' | 'marimba' | 'none';
 // Backdrop behind the orb. 'glass' keeps the frosted, state-tinted gradient
 // (default). 'solid' paints `fillColor` opaquely so logos stay legible against
 // busy/dark desktops (e.g. Cursor's black icon over a dark VS Code window).
-export type BubbleFillMode = 'glass' | 'solid';
+// 'particle' renders a rotating dotted "3D orb" (canvas point-cloud) around the
+// tool logo, with the formation/motion/colour driven by the agent state.
+export type BubbleFillMode = 'glass' | 'solid' | 'particle';
 
 // Durable identity for the chosen monitor. Electron display ids are NOT
 // stable across reboots (macOS regenerates CGDirectDisplayIDs), so the id

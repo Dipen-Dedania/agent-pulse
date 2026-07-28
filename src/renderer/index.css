@@ -115,6 +115,72 @@ body {
   overflow: hidden;
 }
 
+/* ── Global keyboard focus ring ──────────────────────────────────────────────
+   A single visible focus indicator for keyboard users across every interactive
+   control. Unlayered so it wins the cascade over Tailwind's `focus:outline-none`
+   utility (which lives in the utilities layer); `:focus-visible` keeps the ring
+   off plain mouse clicks. Chromium rounds the outline to follow each element's
+   own border-radius, so glass pills/inputs stay on-brand. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='switch']:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--ap-info);
+  outline-offset: 2px;
+}
+
+/* ── Themed range slider ──────────────────────────────────────────────────────
+   The native OS slider clashes with the glass aesthetic. Restyle to a slim
+   frosted track with a floating white thumb (iOS-style), themed per light/dark.
+   Chromium-only pseudo-elements (Electron) — no Firefox `::-moz-*` needed. */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 1.25rem;
+  background: transparent;
+  cursor: pointer;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+[data-theme='light'] input[type='range']::-webkit-slider-runnable-track {
+  background: rgba(15, 23, 42, 0.14);
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px; /* center the 18px thumb on the 6px track */
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.12s ease;
+}
+input[type='range']:hover::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+input[type='range']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+input[type='range']:disabled::-webkit-slider-thumb {
+  background: #cbd5e1;
+  box-shadow: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  input[type='range']::-webkit-slider-thumb {
+    transition: none;
+  }
+}
+
 /* ── Liquid Glass background wallpaper (Settings panel root) ──────────────
    A rich radial gradient gives the frosted surfaces something to blur
    against; the fixed ::before lays an SVG noise grain over the viewport so

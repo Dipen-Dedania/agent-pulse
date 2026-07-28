@@ -1,8 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, DisplayInfo } from '../../../common/types';
+import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, DisplayInfo, ToolId } from '../../../common/types';
 import { BUBBLE_SOUNDS, playBubbleSound } from '../../sound';
+import { TOOL_META } from '../../../common/toolMeta';
 import { Button, GlassToggle, Tooltip } from '../Shared';
+
+// The agents that ship an animated mascot. Each maps a BubbleConfig flag to the
+// tool it belongs to (for the logo + label via TOOL_META) and the mascot's name.
+// Agents without a mascot (Cursor, Grok) are intentionally absent.
+type MascotKey =
+  | 'mascotClaudeCode'
+  | 'mascotOpenaiCodex'
+  | 'mascotAntigravity'
+  | 'mascotKiro'
+  | 'mascotVscodeCopilot';
+
+const MASCOTS: { key: MascotKey; toolId: ToolId; name: string }[] = [
+  { key: 'mascotClaudeCode',   toolId: 'claude-code',    name: 'Clawd' },
+  { key: 'mascotOpenaiCodex',  toolId: 'openai-codex',   name: 'Frog' },
+  { key: 'mascotAntigravity',  toolId: 'antigravity-cli', name: 'GIGI' },
+  { key: 'mascotKiro',         toolId: 'kiro',           name: 'Ghost' },
+  { key: 'mascotVscodeCopilot', toolId: 'vscode-copilot', name: 'Mico' },
+];
 
 interface Props {
   config: BubbleConfig;
@@ -18,6 +37,7 @@ const SIZE_OPTIONS: { id: BubbleSize; label: string; orb: number }[] = [
 const FILL_OPTIONS: { id: BubbleFillMode; label: string }[] = [
   { id: 'glass', label: 'Glass' },
   { id: 'solid', label: 'Solid' },
+  { id: 'particle', label: '3D Orb' },
 ];
 
 // Quick-pick fill colors. White covers the common "dark logo, dark desktop"
@@ -141,6 +161,17 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
   const selectedPositionLabel =
     POSITION_OPTIONS.find((p) => p.id === config.stackPosition)?.label ?? config.stackPosition;
 
+  const [mascotModalOpen, setMascotModalOpen] = useState(false);
+
+  // Mascot master state — derived from the five per-agent flags.
+  const mascotOnCount = MASCOTS.filter((m) => !!config[m.key]).length;
+  const allMascotsOn = mascotOnCount === MASCOTS.length;
+  // Clicking the master toggle: if any are off, turn all on; else turn all off.
+  const toggleAllMascots = () => {
+    const next = !allMascotsOn;
+    onChange(Object.fromEntries(MASCOTS.map((m) => [m.key, next])) as Partial<BubbleConfig>);
+  };
+
   // Connected monitors, kept live across hotplug while Settings is open.
   // Sorted left-to-right so the "Display N" ordinals stay stable on re-push.
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
@@ -160,6 +191,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
   const selectedDisplay = displays[selectedDisplayIndex] ?? displays.find((d) => d.primary);
 
   return (
+    <>
     <motion.section
       whileHover={{ scale: 1.003 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
@@ -196,94 +228,31 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
         </button>
       </div>
 
-      {/* ── Clawd mascot (Claude Code) ───────────────────────────────────── */}
+      {/* ── Mascots (opens modal) ────────────────────────────────────────── */}
       <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
-        <div className='min-w-0'>
-          <p className='text-sm font-medium text-strong'>Clawd mascot (Claude Code)</p>
-          <p className='text-xs text-muted mt-0.5'>
-            Swap the Claude Code orb for an animated Clawd whose pose tracks the agent — sleeping when idle,
-            waving a flag when it needs you, working out while it runs. Other tools keep the orb.
-            The Claude bubble grows a little to give Clawd room.
-          </p>
+        <div className='min-w-0 flex items-center gap-3'>
+          {/* Overlapped agent logos as a visual anchor. */}
+          <div className='flex shrink-0'>
+            {MASCOTS.map((m, i) => (
+              <img
+                key={m.key}
+                src={TOOL_META[m.toolId].icon}
+                alt=''
+                aria-hidden
+                className={`w-6 h-6 rounded-full ring-2 ring-black/20 object-contain bg-control/40 ${i > 0 ? '-ml-2' : ''} ${config[m.key] ? '' : 'opacity-40 grayscale'}`}
+              />
+            ))}
+          </div>
+          <div className='min-w-0'>
+            <p className='text-sm font-medium text-strong'>Mascots</p>
+            <p className='text-xs text-muted mt-0.5'>
+              Choose which agents show an animated mascot
+            </p>
+          </div>
         </div>
-        <GlassToggle
-          checked={!!config.mascotClaudeCode}
-          onChange={() => onChange({ mascotClaudeCode: !config.mascotClaudeCode })}
-          size="lg"
-          label="Clawd mascot (Claude Code)"
-        />
-      </div>
-
-      {/* ── Frog mascot (OpenAI Codex) ───────────────────────────────────── */}
-      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
-        <div className='min-w-0'>
-          <p className='text-sm font-medium text-strong'>Frog mascot (OpenAI Codex)</p>
-          <p className='text-xs text-muted mt-0.5'>
-            Swap the OpenAI Codex orb for an animated frog whose pose tracks the agent — sleeping when idle,
-            raising a sign when it needs you, hopping and working out while it runs. Other tools keep the orb.
-            The Codex bubble grows a little to give the frog room.
-          </p>
-        </div>
-        <GlassToggle
-          checked={!!config.mascotOpenaiCodex}
-          onChange={() => onChange({ mascotOpenaiCodex: !config.mascotOpenaiCodex })}
-          size="lg"
-          label="Frog mascot (OpenAI Codex)"
-        />
-      </div>
-
-      {/* ── GIGI mascot (Antigravity) ────────────────────────────────────── */}
-      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
-        <div className='min-w-0'>
-          <p className='text-sm font-medium text-strong'>GIGI mascot (Antigravity)</p>
-          <p className='text-xs text-muted mt-0.5'>
-            Swap the Antigravity orb for an animated GIGI droplet whose pose tracks the agent — sleeping when idle,
-            raising a flag when it needs you, bouncing and working out while it runs. Other tools keep the orb.
-            The Antigravity bubble grows a little to give GIGI room.
-          </p>
-        </div>
-        <GlassToggle
-          checked={!!config.mascotAntigravity}
-          onChange={() => onChange({ mascotAntigravity: !config.mascotAntigravity })}
-          size="lg"
-          label="GIGI mascot (Antigravity)"
-        />
-      </div>
-
-      {/* ── Ghost mascot (Kiro) ──────────────────────────────────────────── */}
-      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
-        <div className='min-w-0'>
-          <p className='text-sm font-medium text-strong'>Ghost mascot (Kiro)</p>
-          <p className='text-xs text-muted mt-0.5'>
-            Swap the Kiro orb for an animated ghost whose pose tracks the agent — sleeping when idle,
-            raising a sign when it needs you, hopping and spinning while it runs. Other tools keep the orb.
-            The Kiro bubble grows a little to give the ghost room.
-          </p>
-        </div>
-        <GlassToggle
-          checked={!!config.mascotKiro}
-          onChange={() => onChange({ mascotKiro: !config.mascotKiro })}
-          size="lg"
-          label="Ghost mascot (Kiro)"
-        />
-      </div>
-
-      {/* ── Mico mascot (VS Code Copilot) ────────────────────────────────── */}
-      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
-        <div className='min-w-0'>
-          <p className='text-sm font-medium text-strong'>Mico mascot (VS Code Copilot)</p>
-          <p className='text-xs text-muted mt-0.5'>
-            Swap the Copilot orb for an animated Mico blob whose pose tracks the agent — sleeping when idle,
-            raising a sign when it needs you, bouncing and lifting weights while it runs. Other tools keep the orb.
-            The Copilot bubble grows a little to give Mico room.
-          </p>
-        </div>
-        <GlassToggle
-          checked={!!config.mascotVscodeCopilot}
-          onChange={() => onChange({ mascotVscodeCopilot: !config.mascotVscodeCopilot })}
-          size="lg"
-          label="Mico mascot (VS Code Copilot)"
-        />
+        <Button variant='secondary' size='sm' onClick={() => setMascotModalOpen(true)}>
+          Customize ›
+        </Button>
       </div>
 
       {/* ── Size ──────────────────────────────────────────────────────────── */}
@@ -351,9 +320,15 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
                     background:
                       opt.id === 'solid'
                         ? config.fillColor || '#ffffff'
-                        : 'radial-gradient(circle, rgba(148,163,184,0.55) 0%, rgba(128,128,128,0.06) 100%)',
+                        : opt.id === 'particle'
+                          ? 'transparent'
+                          : 'radial-gradient(circle, rgba(148,163,184,0.55) 0%, rgba(128,128,128,0.06) 100%)',
                     backdropFilter: opt.id === 'glass' ? 'blur(6px)' : undefined,
-                    border: '1.5px solid rgba(255,255,255,0.25)',
+                    // 3D Orb previews itself as a dotted ring; glass/solid use a solid rim.
+                    border:
+                      opt.id === 'particle'
+                        ? '2px dotted rgba(255,255,255,0.55)'
+                        : '1.5px solid rgba(255,255,255,0.25)',
                   }}
                 />
                 <span className='text-sm font-medium'>{opt.label}</span>
@@ -524,5 +499,95 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
         </div>
       </div>
     </motion.section>
+
+    {mascotModalOpen && (
+      <MascotModal
+        config={config}
+        onChange={onChange}
+        allOn={allMascotsOn}
+        onToggleAll={toggleAllMascots}
+        onClose={() => setMascotModalOpen(false)}
+      />
+    )}
+    </>
+  );
+};
+
+// ── Mascots modal ────────────────────────────────────────────────────────────
+// Master "Animated mascots" switch + one slim row per agent. Shares BubbleConfig
+// via onChange; no local persistence. Matches the AddRuleModal backdrop idiom.
+const MascotModal: React.FC<{
+  config: BubbleConfig;
+  onChange: (partial: Partial<BubbleConfig>) => void;
+  allOn: boolean;
+  onToggleAll: () => void;
+  onClose: () => void;
+}> = ({ config, onChange, allOn, onToggleAll, onClose }) => {
+  return (
+    <div
+      className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm'
+      onClick={onClose}
+    >
+      <div
+        className='glass-modal apple-scroll relative w-full max-w-lg mx-4 p-6 flex flex-col gap-5 max-h-[85vh] overflow-y-auto'
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
+          aria-label='Close'
+        >
+          ✕
+        </button>
+
+        <div>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>Bubble appearance</p>
+          <h3 className='text-lg font-bold text-strong'>Mascots</h3>
+        </div>
+
+        {/* Master switch */}
+        <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
+          <div className='min-w-0'>
+            <p className='text-sm font-medium text-strong'>Animated mascots</p>
+            <p className='text-xs text-muted mt-0.5'>
+              Swap an agent's orb for an animated mascot whose pose tracks its state — sleeping when idle,
+              flagging when it needs you, working out while it runs. Other agents keep their orb; the bubble
+              grows a little to give the mascot room.
+            </p>
+          </div>
+          <GlassToggle
+            checked={allOn}
+            onChange={onToggleAll}
+            size='lg'
+            label='Animated mascots (all agents)'
+          />
+        </div>
+
+        {/* Per-agent rows */}
+        <div className='flex flex-col gap-2'>
+          {MASCOTS.map((m) => (
+            <div key={m.key} className='glass-secondary flex items-center justify-between gap-3 px-4 py-2.5'>
+              <div className='min-w-0 flex items-center gap-3'>
+                <img
+                  src={TOOL_META[m.toolId].icon}
+                  alt=''
+                  aria-hidden
+                  className='w-6 h-6 rounded-full object-contain bg-control/40 shrink-0'
+                />
+                <p className='text-sm font-medium text-strong truncate'>
+                  {m.name} <span className='text-muted font-normal'>({TOOL_META[m.toolId].label})</span>
+                </p>
+              </div>
+              <GlassToggle
+                checked={!!config[m.key]}
+                onChange={() => onChange({ [m.key]: !config[m.key] })}
+                size='sm'
+                label={`${m.name} mascot (${TOOL_META[m.toolId].label})`}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 };

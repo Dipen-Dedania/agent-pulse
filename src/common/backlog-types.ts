@@ -20,6 +20,12 @@ export type BacklogCardState =
 // Only green autoruns; amber/red are manual "Run now" only in Phase 1.
 export type RiskTier = 'green' | 'amber' | 'red';
 
+// How an execution card's worktree diff landed on the project when the user
+// applied it. 'already-present' means the reverse-apply check found every hunk
+// already in the tree — nothing new was delivered, so it's counted apart from a
+// real ship. Mirrors the flags returned by worktree.ts → ApplyResult.
+export type ApplyMethod = 'clean' | 'three-way' | 'stashed' | 'already-present';
+
 // 'browser' stays disabled until the browser-QA phase; the rest are live in
 // Phase 2 for execution cards (QA runs as an engine-driven command, not agent
 // Bash — see qa.ts).
@@ -57,6 +63,18 @@ export interface BacklogCard {
   acceptanceCriteria: string[];    // execution: prompt checklist; qa: agent-checked per criterion
   worktreePath: string | null;     // execution: detached worktree dir (userData/backlog-worktrees/<id>)
   baseSha: string | null;          // execution: HEAD the worktree was created at
+  refinementSessionId: string | null; // interactive plan-mode session id (claude --session-id)
+  refinementStartedAt: number | null; // when "Refine Now" launched the plan session
+  // Apply tracking (execution cards): set the first time the user lands this
+  // card's worktree onto the project. Drives the board's "Shipped" ribbon and
+  // the Overnight Backlog analytics. All null until applied; captured from
+  // values the apply flow already produces (see worktree.ts).
+  appliedAt: number | null;            // when the diff was applied to the project
+  applyMethod: ApplyMethod | null;     // how it landed (clean / 3-way / stashed / already-present)
+  appliedAutorun: boolean;             // true = the diff came from an unattended autorun (the "overnight" signal)
+  appliedAdditions: number | null;     // LOC snapshot: inserted lines, frozen at apply time
+  appliedDeletions: number | null;     // LOC snapshot: deleted lines
+  appliedFiles: number | null;         // files the applied patch touched
   sortOrder: number;               // position within Todo
   blockedReason: string | null;
   createdAt: number;
@@ -226,6 +244,50 @@ export interface BacklogSchedulerStatus {
   } | null;
   // "Queue will burn ~$X in the next window (N cards fit)."
   forecast: { windowStartAt: number; cardCount: number; totalCostUsd: number } | null;
+}
+
+// ─── Overnight Backlog analytics (backlog:get-stats) ─────────────────────────
+// Aggregates over applied execution cards, served from the backlog DB (NOT the
+// timeline DB) so a corrupt analytics store never affects it. All costs are
+// estimated API list prices, never real plan billing — same posture as the
+// timeline analytics.
+
+// Range union kept identical to the timeline's TimelineRange literals so the
+// shared Analytics range filter drives this card too, without backlog-types
+// importing from timeline-types.
+export type BacklogStatsRange = '7d' | '30d' | '90d' | '1y';
+
+// One local day of shipped cards, split by how the diff was produced.
+export interface BacklogShippedDayBucket {
+  date: string;      // 'YYYY-MM-DD' local
+  autorun: number;   // shipped diffs produced by an unattended autorun
+  manual: number;    // shipped diffs produced by a "Run now"
+}
+
+export interface BacklogShippedProjectBucket {
+  projectId: string;
+  name: string;
+  shipped: number;
+}
+
+export interface BacklogStatsPayload {
+  range: BacklogStatsRange;
+  shipped: number;            // applied execution cards in range (excludes already-present)
+  fromAutorun: number;        // subset produced by autorun — "shipped overnight by the planner"
+  fromManual: number;         // subset produced by "Run now"
+  alreadyPresent: number;     // applies that were no-ops (diff already in the tree)
+  doneWithDiff: number;       // range denominator: execution cards that produced a reviewable diff
+  awaitingReview: number;     // current: done execution cards with a diff, not yet applied
+  shipRatePct: number;        // shipped / doneWithDiff × 100 (0 when denominator is 0)
+  minutesLanded: number;      // Σ estimatedMinutes of shipped cards
+  costUsdLanded: number;      // Σ attempt cost of shipped cards (ESTIMATED list price)
+  additions: number;          // Σ applied additions across shipped cards
+  deletions: number;          // Σ applied deletions
+  filesTouched: number;       // Σ applied file counts
+  methodBreakdown: { clean: number; threeWay: number; stashed: number; alreadyPresent: number };
+  perDay: BacklogShippedDayBucket[];       // ascending by date, gap-filled
+  perProject: BacklogShippedProjectBucket[]; // descending by shipped
+  queriedAt: number;
 }
 
 // Single hydration payload for the board tab (backlog:get-state).

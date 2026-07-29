@@ -5,23 +5,54 @@
 
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { logger } from '../../common/logger';
 import {
+  ApplyMethod,
   ATTACHMENT_MAX_FILE_BYTES,
   AttachmentIntent,
   BacklogCardState,
   BacklogState,
+  BacklogStatsRange,
   BacklogTemplate,
   PendingAttachment,
 } from '../../common/backlog-types';
 import { BacklogStore, CreateCardInput, UpdateCardPatch } from './store';
 import { BacklogEngine } from './engine';
 import { resolveProjectDefaultModel, ProjectDefaultModel } from './claude-settings';
-import { applyWorktree, applyWorktreeStashed, removeWorktree } from './worktree';
+import { ApplyResult, applyWorktree, applyWorktreeStashed, removeWorktree } from './worktree';
 import { isSafeSessionId } from './runner';
 import { resolveClaudeBin, resetClaudeBinCache } from '../scheduler/opener';
 import { launchResumeTerminal } from './resume-terminal';
+import { launchPlanTerminal } from './refine-terminal';
+import { readPlanFromTranscript } from './plan-transcript';
+import { startPlanWatch, stopPlanWatch } from './refine-watch';
+
+// The refinement plan lands as a single well-known attachment; re-imports and
+// live auto-updates overwrite it while leaving the user's other attachments.
+const PLAN_ATTACHMENT_FILENAME = 'refinement-plan.md';
+
+/**
+ * Save (or overwrite) the refinement plan as a card attachment. Attachments are
+ * already inlined into the execution/QA prompt, so this is the whole hand-off
+ * to the executor. Capped to the per-file attachment limit — an oversized plan
+ * is truncated with a marker rather than silently dropped by the store.
+ */
+function savePlanAttachment(store: BacklogStore, cardId: string, plan: string): void {
+  let content = plan;
+  if (Buffer.byteLength(content, 'utf8') > ATTACHMENT_MAX_FILE_BYTES) {
+    // Char-slice with headroom below the byte cap, then note the truncation.
+    content = content.slice(0, Math.floor(ATTACHMENT_MAX_FILE_BYTES / 2)) +
+      '\n\n<!-- plan truncated to fit the attachment size limit — see the planning session for the full text -->';
+  }
+  const existing = store.listAttachments(cardId);
+  const keepIds = existing.filter((a) => a.filename !== PLAN_ATTACHMENT_FILENAME).map((a) => a.id);
+  store.setCardAttachments(cardId, {
+    keepIds,
+    add: [{ filename: PLAN_ATTACHMENT_FILENAME, content, bytes: Buffer.byteLength(content, 'utf8') }],
+  });
+}
 
 export interface BacklogIpcDeps {
   store: BacklogStore | null;
@@ -34,6 +65,37 @@ function broadcastChanged() {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('backlog:changed', {});
   }
+}
+
+const VALID_STATS_RANGES: BacklogStatsRange[] = ['7d', '30d', '90d', '1y'];
+
+/** Map the worktree apply result's flags to the persisted ApplyMethod. */
+function methodFromResult(res: ApplyResult & { ok: true }): ApplyMethod {
+  if (res.alreadyApplied) return 'already-present';
+  if (res.stashed) return 'stashed';
+  if (res.threeWay) return 'three-way';
+  return 'clean';
+}
+
+/**
+ * Freeze the apply onto the card after a successful, non-empty apply — the
+ * board's "Shipped" ribbon and the Overnight Backlog analytics read from here.
+ * `autorun` is derived from the card's most recent attempt (attempts come back
+ * newest-first): a diff produced by an unattended autorun is the "shipped
+ * overnight by the planner" signal; a "Run now" attempt is manual. An empty
+ * apply delivered nothing, so it records nothing.
+ */
+function recordApplyOnSuccess(store: BacklogStore, cardId: string, res: ApplyResult): void {
+  if (!res.ok || res.empty) return;
+  const latest = store.listAttempts(cardId)[0];
+  store.recordApply(cardId, {
+    method: methodFromResult(res),
+    autorun: latest ? !latest.manual : false,
+    additions: res.additions ?? null,
+    deletions: res.deletions ?? null,
+    files: res.changedFiles?.length ?? null,
+  });
+  broadcastChanged();
 }
 
 export function registerBacklogIpc(deps: BacklogIpcDeps): void {
@@ -117,6 +179,7 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
 
   ipcMain.handle('backlog:delete-card', (_e, args: { id: string }) => {
     if (!store) return;
+    stopPlanWatch(args.id);
     store.deleteCard(args.id);
     broadcastChanged();
   });
@@ -125,6 +188,9 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     if (!store) return { ok: false, reason: 'backlog storage unavailable' };
     const res = store.moveCard(args.id, args.state);
     if (res.ok) {
+      // Left the refinement column → the planning session is done with; stop
+      // auto-attaching. Re-refining later restarts a fresh watch.
+      if (args.state !== 'refinement') stopPlanWatch(args.id);
       broadcastChanged();
       engine?.onQueueChanged();
     }
@@ -182,7 +248,9 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     }
     const project = store.listProjects().find((p) => p.id === card.projectId);
     if (!project) return { ok: false, reason: 'project not found for this card' };
-    return applyWorktree(project.path, card.worktreePath);
+    const res = await applyWorktree(project.path, card.worktreePath);
+    recordApplyOnSuccess(store, card.id, res);
+    return res;
   });
 
   // Follow-up action when apply reported an overlapping dirty target: stash the
@@ -197,7 +265,9 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     }
     const project = store.listProjects().find((p) => p.id === card.projectId);
     if (!project) return { ok: false, reason: 'project not found for this card' };
-    return applyWorktreeStashed(project.path, card.worktreePath);
+    const res = await applyWorktreeStashed(project.path, card.worktreePath);
+    recordApplyOnSuccess(store, card.id, res);
+    return res;
   });
 
   // "Resume in Claude Code": open an interactive terminal on the worktree that
@@ -221,12 +291,72 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     return launchResumeTerminal(bin, card.worktreePath, sessionId);
   });
 
+  // "Refine Now": open an interactive plan-mode session for a refinement card
+  // and start watching its transcript so the plan auto-attaches when presented.
+  // The session id (a generated UUID) is stored on the card so a later import /
+  // the watcher can find the transcript. Read-only plan mode runs in the
+  // project repo — no worktree.
+  ipcMain.handle('backlog:refine-start', (_e, args: { cardId: string }) => {
+    if (!store) return { ok: false, reason: 'backlog storage unavailable' };
+    const card = store.getCard(args?.cardId);
+    if (!card) return { ok: false, reason: 'card not found' };
+    if (card.state !== 'refinement') return { ok: false, reason: 'only refinement cards can be planned — move it back to Refinement first' };
+    const project = store.listProjects().find((p) => p.id === card.projectId);
+    if (!project) return { ok: false, reason: 'project not found for this card' };
+    const bin = resolveClaudeBin();
+    if (!bin) {
+      resetClaudeBinCache();
+      return { ok: false, reason: 'claude CLI not found on PATH' };
+    }
+    const sessionId = randomUUID();
+    store.setRefinementSession(card.id, sessionId);
+    const launch = launchPlanTerminal(bin, project.path, sessionId);
+    if (!launch.ok) return launch;
+    startPlanWatch(card.id, {
+      readPlan: () => readPlanFromTranscript(project.path, sessionId),
+      onPlan: (plan) => {
+        savePlanAttachment(store, card.id, plan);
+        broadcastChanged();
+      },
+    });
+    broadcastChanged();
+    return { ok: true };
+  });
+
+  // Manual fallback for the auto-attach watcher (covers an app restart
+  // mid-session or a missed poll): pull the plan from the session transcript
+  // now and attach it.
+  ipcMain.handle('backlog:refine-import', (_e, args: { cardId: string }) => {
+    if (!store) return { ok: false, reason: 'backlog storage unavailable' };
+    const card = store.getCard(args?.cardId);
+    if (!card) return { ok: false, reason: 'card not found' };
+    if (!card.refinementSessionId) return { ok: false, reason: 'no planning session yet — click Refine first' };
+    const project = store.listProjects().find((p) => p.id === card.projectId);
+    if (!project) return { ok: false, reason: 'project not found for this card' };
+    const plan = readPlanFromTranscript(project.path, card.refinementSessionId);
+    if (!plan) return { ok: false, reason: 'no plan found yet — present a plan in the terminal, then import' };
+    savePlanAttachment(store, card.id, plan);
+    broadcastChanged();
+    return { ok: true, imported: true, chars: plan.length };
+  });
+
   ipcMain.handle('backlog:get-attempts', (_e, args: { cardId: string }) => {
     if (!store) return { attempts: [], artifacts: [] };
     return {
       attempts: store.listAttempts(args.cardId),
       artifacts: store.listArtifacts(args.cardId),
     };
+  });
+
+  // Overnight Backlog analytics — aggregates of applied execution cards, served
+  // from the backlog DB (never the timeline DB). Returns null when the store is
+  // unavailable so the analytics card renders its own empty/unavailable state.
+  ipcMain.handle('backlog:get-stats', (_e, args: { range?: string }) => {
+    if (!store) return null;
+    const range = VALID_STATS_RANGES.includes(args?.range as BacklogStatsRange)
+      ? (args!.range as BacklogStatsRange)
+      : '30d';
+    return store.getShippedStats(range, Date.now());
   });
 
   ipcMain.handle('backlog:read-artifact', (_e, args: { artifactId: string }) => {

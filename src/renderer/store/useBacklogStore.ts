@@ -57,6 +57,8 @@ interface BacklogStore {
   applyWorktree: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; conflicted?: boolean; dirtyTarget?: boolean; changedFiles?: string[] }>;
   applyWorktreeStashed: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; stashed?: boolean; stashConflicted?: boolean; changedFiles?: string[] }>;
   resumeSession: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
+  refineStart: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
+  importPlan: (cardId: string) => Promise<{ ok: boolean; reason?: string; imported?: boolean; chars?: number }>;
   updateTemplates: (templates: BacklogTemplate[]) => Promise<BacklogTemplate[] | null>;
 
   listAttachments: (cardId: string) => Promise<BacklogAttachment[]>;
@@ -230,6 +232,33 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
       return res ?? { ok: false, reason: 'unavailable' };
     } catch (e) {
       logger.error('[useBacklogStore] resumeSession failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  // Opens an interactive plan-mode session for a refinement card. The plan
+  // auto-attaches as it's presented (main watches the transcript); hydrate so
+  // the card reflects that a session is now open.
+  refineStart: async (cardId) => {
+    try {
+      const res = await window.electron.invoke('backlog:refine-start', { cardId });
+      if (res?.ok) await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] refineStart failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  // Manual pull of the plan from the session transcript (fallback for the
+  // auto-attach watcher). Hydrate so the new attachment shows on the card.
+  importPlan: async (cardId) => {
+    try {
+      const res = await window.electron.invoke('backlog:refine-import', { cardId });
+      if (res?.ok) await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] importPlan failed', e);
       return { ok: false, reason: String(e) };
     }
   },

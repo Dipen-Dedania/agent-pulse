@@ -57,6 +57,20 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(store.getCard(a.id)!.model).toBeNull();
   });
 
+  it('records a refinement plan-mode session id without changing card state', () => {
+    const card = store.createCard({ title: 'plan me', projectId });
+    expect(card.refinementSessionId).toBeNull();
+    expect(card.refinementStartedAt).toBeNull();
+
+    const sessionId = '0e40aad9-6cf6-4014-8ab5-b48f79dd0b7c';
+    store.setRefinementSession(card.id, sessionId);
+    const after = store.getCard(card.id)!;
+    expect(after.refinementSessionId).toBe(sessionId);
+    expect(after.refinementStartedAt).toBeGreaterThan(0);
+    // State is untouched — the card stays in Refinement until the human queues it.
+    expect(after.state).toBe('refinement');
+  });
+
   it('claimCard is atomic: second claim on the same card fails', () => {
     const card = store.createCard({ title: 'x', projectId, state: 'todo' });
     expect(store.claimCard(card.id)).toBe(true);
@@ -280,6 +294,90 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     finishAt('success', 2_000);
     expect(store.countConsecutiveQaFails(card.id)).toBe(0);
   });
+
+  // ── Apply tracking + Overnight Backlog stats ──────────────────────────────
+
+  it('recordApply freezes the apply snapshot onto the card', () => {
+    const card = store.createCard({ title: 'x', projectId, taskType: 'execution' });
+    expect(store.getCard(card.id)!.appliedAt).toBeNull();
+    store.recordApply(card.id, { method: 'three-way', autorun: true, additions: 42, deletions: 7, files: 3 });
+    const got = store.getCard(card.id)!;
+    expect(got.appliedAt).toBeGreaterThan(0);
+    expect(got.applyMethod).toBe('three-way');
+    expect(got.appliedAutorun).toBe(true);
+    expect(got.appliedAdditions).toBe(42);
+    expect(got.appliedDeletions).toBe(7);
+    expect(got.appliedFiles).toBe(3);
+  });
+
+  it('getShippedStats aggregates ship count, rate, autonomous split, method, LOC, cost, and projects', () => {
+    const now = Date.now();
+    const day = 86_400_000;
+    // Seed an applied execution card, then pin applied_at deterministically.
+    const seed = (o: {
+      method: 'clean' | 'three-way' | 'stashed' | 'already-present';
+      manual?: boolean; add?: number; del?: number; files?: number;
+      minutes?: number; cost?: number; appliedAt: number; projId?: string;
+    }) => {
+      const card = store.createCard({
+        title: 'ship', projectId: o.projId ?? projectId, taskType: 'execution',
+        estimatedMinutes: o.minutes ?? null,
+      });
+      store.setWorktree(card.id, `E:/wt/${card.id}`, 'sha');
+      store.setCardState(card.id, 'done');
+      const attempt = store.insertAttempt(card.id, o.manual ?? false);
+      store.finishAttempt(attempt.id, { outcome: 'success', costUsd: o.cost ?? 0 });
+      store.recordApply(card.id, {
+        method: o.method, autorun: !(o.manual ?? false),
+        additions: o.add ?? 0, deletions: o.del ?? 0, files: o.files ?? 0,
+      });
+      db.prepare('UPDATE cards SET applied_at = ? WHERE id = ?').run([o.appliedAt, card.id]);
+      return card;
+    };
+
+    // Two autorun ships + one manual ship, all within 7d.
+    seed({ method: 'clean', add: 100, del: 10, files: 5, minutes: 30, cost: 0.5, appliedAt: now - 1 * day });
+    seed({ method: 'three-way', add: 20, del: 5, files: 2, minutes: 15, cost: 0.25, appliedAt: now - 2 * day });
+    seed({ method: 'stashed', manual: true, add: 8, del: 1, files: 1, minutes: 10, cost: 0.1, appliedAt: now - 3 * day });
+    // An already-present apply delivered nothing new — counted apart from a ship.
+    seed({ method: 'already-present', add: 0, del: 0, files: 0, appliedAt: now - 1 * day });
+    // Out of the 7d window — excluded from a 7d query.
+    seed({ method: 'clean', add: 999, del: 999, files: 9, appliedAt: now - 20 * day });
+
+    // A done execution card with a diff that was never applied → denominator + awaiting review.
+    const pending = store.createCard({ title: 'pending', projectId, taskType: 'execution' });
+    store.setWorktree(pending.id, 'E:/wt/pending', 'sha');
+    store.setCardState(pending.id, 'done');
+
+    const s = store.getShippedStats('7d', now);
+    expect(s.shipped).toBe(3);              // clean + three-way + stashed
+    expect(s.fromAutorun).toBe(2);
+    expect(s.fromManual).toBe(1);
+    expect(s.alreadyPresent).toBe(1);
+    expect(s.methodBreakdown).toEqual({ clean: 1, threeWay: 1, stashed: 1, alreadyPresent: 1 });
+    expect(s.additions).toBe(128);          // 100 + 20 + 8 (already-present/out-of-range excluded)
+    expect(s.deletions).toBe(16);
+    expect(s.filesTouched).toBe(8);
+    expect(s.minutesLanded).toBe(55);
+    expect(s.costUsdLanded).toBeCloseTo(0.85);
+    expect(s.awaitingReview).toBe(1);
+    expect(s.doneWithDiff).toBe(4);         // 3 shipped + 1 pending
+    expect(s.shipRatePct).toBe(75);
+    expect(s.perProject).toEqual([{ projectId, name: 'demo', shipped: 3 }]);
+    // Per-day buckets are gap-filled across the range; their ship totals sum to shipped.
+    expect(s.perDay.reduce((n, d) => n + d.autorun + d.manual, 0)).toBe(3);
+  });
+
+  it('getShippedStats ignores research/qa cards and returns a clean zero payload', () => {
+    const now = Date.now();
+    const r = store.createCard({ title: 'r', projectId, taskType: 'research' });
+    store.recordApply(r.id, { method: 'clean', autorun: true, additions: 5, deletions: 5, files: 1 });
+    const s = store.getShippedStats('30d', now);
+    expect(s.shipped).toBe(0);
+    expect(s.shipRatePct).toBe(0);
+    expect(s.perProject).toEqual([]);
+    expect(s.costUsdLanded).toBe(0);
+  });
 });
 
 describe.skipIf(!dbAvailable)('BacklogStore attachments', () => {
@@ -340,8 +438,8 @@ describe.skipIf(!dbAvailable)('BacklogStore attachments', () => {
   });
 });
 
-describe.skipIf(!dbAvailable)('backlog schema migration v2 → v5', () => {
-  it('adds the Phase 2 columns, attachments table, and qa_url to an existing v2 board', () => {
+describe.skipIf(!dbAvailable)('backlog schema migration v2 → v7', () => {
+  it('adds the Phase 2 columns, attachments table, qa_url, and apply-tracking columns to an existing v2 board', () => {
     const fs = require('fs') as typeof import('fs');
     const os = require('os') as typeof import('os');
     const path = require('path') as typeof import('path');
@@ -384,8 +482,13 @@ describe.skipIf(!dbAvailable)('backlog schema migration v2 → v5', () => {
       expect(card.baseSha).toBeNull();
       expect(card.qaCommand).toBeNull();
       expect(card.qaUrl).toBeNull();   // v5 default
+      // v7 apply-tracking defaults: unapplied until the user lands the worktree.
+      expect(card.appliedAt).toBeNull();
+      expect(card.applyMethod).toBeNull();
+      expect(card.appliedAutorun).toBe(false);
+      expect(card.appliedAdditions).toBeNull();
       const version = migrated.prepare('SELECT version FROM schema_version').get() as { version: number };
-      expect(version.version).toBe(5);
+      expect(version.version).toBe(7);
       // v4: the attachments table exists and is usable on a migrated board.
       expect(store.listAttachments('c1')).toEqual([]);
       store.setCardAttachments('c1', { keepIds: [], add: [{ filename: 'note.md', content: 'hi', bytes: 2 }] });

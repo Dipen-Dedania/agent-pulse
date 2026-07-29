@@ -21,6 +21,7 @@ import {
   AnalyticsSummaryPayload,
   TimelineRange,
 } from '../../../../common/timeline-types';
+import { BacklogStatsPayload } from '../../../../common/backlog-types';
 
 const TTL_MS = 30_000;
 
@@ -158,4 +159,11 @@ export function useGuardrailsAnalytics(range: GuardrailsAnalyticsRange) {
 
 export function useSecretAccessAnalytics(range: GuardrailsAnalyticsRange) {
   return useAnalyticsQuery<SecretAccessAnalyticsPayload>('analytics:get-secret-access', { range }, range);
+}
+
+// Overnight Backlog — served from the backlog DB via backlog:get-stats (not the
+// timeline channels), but shares the same query/caching/refresh machinery so it
+// participates in the tab's freshness + manual-refresh like every other card.
+export function useBacklogStats(range: TimelineRange) {
+  return useAnalyticsQuery<BacklogStatsPayload>('backlog:get-stats', { range }, range);
 }

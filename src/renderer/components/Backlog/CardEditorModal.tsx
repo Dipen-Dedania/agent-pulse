@@ -108,10 +108,24 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   // newly-picked files not yet persisted. The final set is sent on save.
   const listAttachments = useBacklogStore((s) => s.listAttachments);
   const pickAttachments = useBacklogStore((s) => s.pickAttachments);
+  const refineStart = useBacklogStore((s) => s.refineStart);
+  const importPlan = useBacklogStore((s) => s.importPlan);
   const [existingAttachments, setExistingAttachments] = useState<BacklogAttachment[]>([]);
   const [removedIds, setRemovedIds] = useState<string[]>([]);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [picking, setPicking] = useState(false);
+  // Refinement planning — mirrors CardTile's Refine/Import actions. `card` is a
+  // snapshot from when the editor opened, so track whether a session is live
+  // locally (flipped optimistically on a successful Refine).
+  const [refineSessionActive, setRefineSessionActive] = useState(!!card?.refinementSessionId);
+  const [refining, setRefining] = useState(false);
+  const [importingPlan, setImportingPlan] = useState(false);
+
+  const reloadAttachments = async () => {
+    if (!card?.id) return;
+    const rows = await listAttachments(card.id);
+    setExistingAttachments(rows);
+  };
 
   useEffect(() => {
     if (!card?.id) return;
@@ -121,6 +135,38 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
     });
     return () => { cancelled = true; };
   }, [card?.id, listAttachments]);
+
+  // Open the interactive plan-mode session; the plan auto-attaches as it's
+  // presented (main watches the transcript), so no reload is needed here.
+  const handleRefine = async () => {
+    if (!card?.id) return;
+    setRefining(true);
+    try {
+      const res = await refineStart(card.id);
+      if (res.ok) setRefineSessionActive(true);
+      else if (res.reason) void appAlert(res.reason, 'Backlog');
+    } finally {
+      setRefining(false);
+    }
+  };
+
+  // Manual pull of the plan (fallback for the auto-attach watcher); reload the
+  // attachment list so the imported refinement-plan.md shows immediately.
+  const handleImportPlan = async () => {
+    if (!card?.id) return;
+    setImportingPlan(true);
+    try {
+      const res = await importPlan(card.id);
+      if (res.ok) {
+        await reloadAttachments();
+        void appAlert('Plan imported and attached to the card.', 'Backlog');
+      } else if (res.reason) {
+        void appAlert(res.reason, 'Backlog');
+      }
+    } finally {
+      setImportingPlan(false);
+    }
+  };
 
   const keptExisting = existingAttachments.filter((a) => !removedIds.includes(a.id));
 
@@ -273,6 +319,37 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             placeholder='The prompt the executor runs. Be specific — the output is a markdown report.'
           />
         </label>
+
+        {/* Interactive refinement — mirrors the board tile's Refine/Import
+            actions. Opens a plan-mode session; the plan auto-attaches below. */}
+        {card && card.state === 'refinement' && (
+          <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
+            <div>
+              <p className='text-sm font-medium text-strong'>Interactive refinement</p>
+              <p className='text-xs text-muted mt-1'>
+                Opens a Claude Code plan-mode session in a terminal. Discuss the task and present a
+                plan — it auto-attaches as <code>refinement-plan.md</code> below and is carried into
+                execution.
+              </p>
+            </div>
+            <div className='flex items-center gap-2 flex-wrap'>
+              <Button variant='secondary' size='sm' type='button' onClick={() => void handleRefine()} disabled={refining}>
+                {refining ? 'Opening…' : `✨ ${refineSessionActive ? 'Re-plan' : 'Refine'}`}
+              </Button>
+              {refineSessionActive && (
+                <Button variant='secondary' size='sm' type='button' onClick={() => void handleImportPlan()} disabled={importingPlan}>
+                  {importingPlan ? 'Importing…' : '⬇ Import plan'}
+                </Button>
+              )}
+            </div>
+            {refineSessionActive && (
+              <p className='text-[11px] text-muted leading-snug'>
+                Planning session open in a terminal — the plan attaches automatically when you present
+                one. Use "Import plan" if it didn’t catch.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Attachments — text files inlined verbatim into the prompt, so a card
             can carry context that isn't committed to the repo (an isolated

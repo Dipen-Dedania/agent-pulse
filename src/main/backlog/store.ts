@@ -1,6 +1,7 @@
 ﻿import { randomUUID } from 'crypto';
 import path from 'path';
 import {
+  ApplyMethod,
   ATTACHMENT_MAX_COUNT,
   ATTACHMENT_MAX_FILE_BYTES,
   ATTACHMENT_MAX_TOTAL_BYTES,
@@ -13,6 +14,8 @@ import {
   BacklogCard,
   BacklogCardState,
   BacklogProject,
+  BacklogStatsPayload,
+  BacklogStatsRange,
   BacklogTaskType,
   QaProvider,
   RiskTier,
@@ -44,6 +47,9 @@ interface CardRow {
   qa_url: string | null;
   acceptance_criteria: string;
   worktree_path: string | null; base_sha: string | null;
+  refinement_session_id: string | null; refinement_started_at: number | null;
+  applied_at: number | null; apply_method: string | null; applied_autorun: number;
+  applied_additions: number | null; applied_deletions: number | null; applied_files: number | null;
   sort_order: number; blocked_reason: string | null; model: string | null;
   created_at: number; updated_at: number;
 }
@@ -96,6 +102,51 @@ function normalizeCriteria(value: unknown): string[] {
     .filter((x) => x.length > 0);
 }
 
+// ─── Overnight Backlog stats: local-time date bucketing ──────────────────────
+// The shipped-per-period bar chart adapts its granularity to the range so the
+// x-axis never blows past ~31 bars: day for 7d/30d, week (Mon-start) for 90d,
+// month for 1y. All bucketing is in LOCAL time — "shipped overnight" is a
+// wall-clock notion, so a UTC bucket would smear runs across the wrong day.
+type StatsGranularity = 'day' | 'week' | 'month';
+
+function granularityFor(range: BacklogStatsRange): StatsGranularity {
+  if (range === '7d' || range === '30d') return 'day';
+  if (range === '90d') return 'week';
+  return 'month';
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+const dayStr = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+/** Start-of-bucket Date (local) for the period `ms` falls in. */
+function bucketStart(ms: number, g: StatsGranularity): Date {
+  const d = new Date(ms);
+  if (g === 'month') return new Date(d.getFullYear(), d.getMonth(), 1);
+  if (g === 'week') {
+    const mondayOffset = (d.getDay() + 6) % 7; // 0 = Monday
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - mondayOffset);
+  }
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** Stable bucket key: 'YYYY-MM' for months, else the day/week-start 'YYYY-MM-DD'. */
+function bucketKey(ms: number, g: StatsGranularity): string {
+  const start = bucketStart(ms, g);
+  return g === 'month' ? `${start.getFullYear()}-${pad2(start.getMonth() + 1)}` : dayStr(start);
+}
+
+/** Ordered, gap-filled bucket keys spanning [cutoff, now] at granularity `g`. */
+function bucketKeysInRange(cutoff: number, now: number, g: StatsGranularity): string[] {
+  const keys: string[] = [];
+  let cursor = bucketStart(cutoff, g);
+  while (cursor.getTime() <= now) {
+    keys.push(bucketKey(cursor.getTime(), g));
+    if (g === 'month') cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    else cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + (g === 'week' ? 7 : 1));
+  }
+  return keys;
+}
+
 function rowToCard(row: CardRow): BacklogCard {
   return {
     id: row.id,
@@ -115,6 +166,14 @@ function rowToCard(row: CardRow): BacklogCard {
     acceptanceCriteria: parseJsonStringArray(row.acceptance_criteria),
     worktreePath: row.worktree_path,
     baseSha: row.base_sha,
+    refinementSessionId: row.refinement_session_id,
+    refinementStartedAt: row.refinement_started_at,
+    appliedAt: row.applied_at,
+    applyMethod: (row.apply_method as ApplyMethod | null) ?? null,
+    appliedAutorun: row.applied_autorun === 1,
+    appliedAdditions: row.applied_additions,
+    appliedDeletions: row.applied_deletions,
+    appliedFiles: row.applied_files,
     sortOrder: row.sort_order,
     blockedReason: row.blocked_reason,
     createdAt: row.created_at,
@@ -225,6 +284,14 @@ export class BacklogStore {
       acceptanceCriteria: normalizeCriteria(input.acceptanceCriteria),
       worktreePath: null,
       baseSha: null,
+      refinementSessionId: null,
+      refinementStartedAt: null,
+      appliedAt: null,
+      applyMethod: null,
+      appliedAutorun: false,
+      appliedAdditions: null,
+      appliedDeletions: null,
+      appliedFiles: null,
       sortOrder: state === 'todo' ? this.nextSortOrder() : 0,
       blockedReason: null,
       createdAt: now,
@@ -354,10 +421,145 @@ export class BacklogStore {
       .run([worktreePath, baseSha, Date.now(), id]);
   }
 
+  /**
+   * Record the interactive plan-mode session started for a refinement card
+   * ("Refine Now"). The session id (a generated UUID) locates the transcript
+   * the plan is later extracted from; state is untouched — the card stays in
+   * `refinement` until the human queues it.
+   */
+  setRefinementSession(id: string, sessionId: string): void {
+    const now = Date.now();
+    this.db.prepare('UPDATE cards SET refinement_session_id = ?, refinement_started_at = ?, updated_at = ? WHERE id = ?')
+      .run([sessionId, now, now, id]);
+  }
+
   /** The user removed the worktree from the card — clear the pointer. */
   clearWorktree(id: string): void {
     this.db.prepare('UPDATE cards SET worktree_path = NULL, base_sha = NULL, updated_at = ? WHERE id = ?')
       .run([Date.now(), id]);
+  }
+
+  /**
+   * Record that the user landed this card's worktree onto the project ("Apply
+   * to project"). Captured from values the apply flow already produces (method
+   * flags + patch LOC) and frozen here — after the worktree is removed the diff
+   * is unrecoverable, so this snapshot is the only durable record. Latest apply
+   * wins (a re-apply overwrites). Drives the board's Shipped ribbon and the
+   * Overnight Backlog analytics.
+   */
+  recordApply(
+    id: string,
+    apply: { method: ApplyMethod; autorun: boolean; additions: number | null; deletions: number | null; files: number | null },
+  ): void {
+    const now = Date.now();
+    this.db.prepare(
+      `UPDATE cards SET applied_at = ?, apply_method = ?, applied_autorun = ?,
+        applied_additions = ?, applied_deletions = ?, applied_files = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run([now, apply.method, apply.autorun ? 1 : 0, apply.additions, apply.deletions, apply.files, now, id]);
+  }
+
+  /**
+   * Aggregate applied execution cards for the Overnight Backlog analytics card.
+   * `nowMs` is injected (not read from the clock) so the range cutoff and the
+   * per-period buckets are deterministic under test. Served entirely from the
+   * backlog DB — no timeline dependency. Costs are ESTIMATED (attempt cost_usd
+   * from `claude -p`), never real plan billing.
+   */
+  getShippedStats(range: BacklogStatsRange, nowMs: number): BacklogStatsPayload {
+    const days = range === '7d' ? 7 : range === '30d' ? 30 : range === '90d' ? 90 : 365;
+    const cutoff = nowMs - days * 86_400_000;
+    const g = granularityFor(range);
+
+    const applied = this.db.prepare(
+      `SELECT id, project_id, applied_at, apply_method, applied_autorun,
+              applied_additions, applied_deletions, applied_files, estimated_minutes
+         FROM cards
+        WHERE task_type = 'execution' AND applied_at IS NOT NULL AND applied_at >= ?`,
+    ).all(cutoff) as {
+      id: string; project_id: string; applied_at: number; apply_method: string | null;
+      applied_autorun: number; applied_additions: number | null; applied_deletions: number | null;
+      applied_files: number | null; estimated_minutes: number | null;
+    }[];
+
+    const projectNames = new Map(this.listProjects().map((p) => [p.id, p.name]));
+
+    let shipped = 0, fromAutorun = 0, fromManual = 0, alreadyPresent = 0;
+    let minutesLanded = 0, additions = 0, deletions = 0, filesTouched = 0;
+    const methodBreakdown = { clean: 0, threeWay: 0, stashed: 0, alreadyPresent: 0 };
+    const perDayMap = new Map<string, { autorun: number; manual: number }>();
+    const perProjectMap = new Map<string, number>();
+    const shippedIds: string[] = [];
+
+    for (const r of applied) {
+      switch (r.apply_method) {
+        case 'clean': methodBreakdown.clean += 1; break;
+        case 'three-way': methodBreakdown.threeWay += 1; break;
+        case 'stashed': methodBreakdown.stashed += 1; break;
+        case 'already-present': methodBreakdown.alreadyPresent += 1; break;
+      }
+      // 'already-present' delivered nothing new — count it apart from a real ship.
+      if (r.apply_method === 'already-present') { alreadyPresent += 1; continue; }
+
+      shipped += 1;
+      shippedIds.push(r.id);
+      const auto = r.applied_autorun === 1;
+      if (auto) fromAutorun += 1; else fromManual += 1;
+      minutesLanded += r.estimated_minutes ?? 0;
+      additions += r.applied_additions ?? 0;
+      deletions += r.applied_deletions ?? 0;
+      filesTouched += r.applied_files ?? 0;
+
+      const key = bucketKey(r.applied_at, g);
+      const bucket = perDayMap.get(key) ?? { autorun: 0, manual: 0 };
+      if (auto) bucket.autorun += 1; else bucket.manual += 1;
+      perDayMap.set(key, bucket);
+
+      perProjectMap.set(r.project_id, (perProjectMap.get(r.project_id) ?? 0) + 1);
+    }
+
+    // Estimated cost of shipped work: total attempt spend across the shipped cards.
+    let costUsdLanded = 0;
+    if (shippedIds.length > 0) {
+      const placeholders = shippedIds.map(() => '?').join(',');
+      const row = this.db.prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) AS c FROM attempts WHERE card_id IN (${placeholders})`,
+      ).get(...shippedIds) as { c: number };
+      costUsdLanded = row.c ?? 0;
+    }
+
+    // Denominator (range-bound by updated_at) + a current, all-time backlog of
+    // done-but-unapplied diffs the user still needs to review.
+    const doneUnappliedInRange = (this.db.prepare(
+      `SELECT COUNT(*) AS n FROM cards
+        WHERE task_type = 'execution' AND state = 'done'
+          AND worktree_path IS NOT NULL AND applied_at IS NULL AND updated_at >= ?`,
+    ).get(cutoff) as { n: number }).n;
+    const awaitingReview = (this.db.prepare(
+      `SELECT COUNT(*) AS n FROM cards
+        WHERE task_type = 'execution' AND state = 'done'
+          AND worktree_path IS NOT NULL AND applied_at IS NULL`,
+    ).get() as { n: number }).n;
+
+    const doneWithDiff = shipped + doneUnappliedInRange;
+    const shipRatePct = doneWithDiff > 0 ? Math.round((shipped / doneWithDiff) * 100) : 0;
+
+    const perDay = bucketKeysInRange(cutoff, nowMs, g).map((date) => ({
+      date,
+      autorun: perDayMap.get(date)?.autorun ?? 0,
+      manual: perDayMap.get(date)?.manual ?? 0,
+    }));
+
+    const perProject = [...perProjectMap.entries()]
+      .map(([projectId, s]) => ({ projectId, name: projectNames.get(projectId) ?? 'Unknown project', shipped: s }))
+      .sort((a, b) => b.shipped - a.shipped);
+
+    return {
+      range, shipped, fromAutorun, fromManual, alreadyPresent,
+      doneWithDiff, awaitingReview, shipRatePct,
+      minutesLanded, costUsdLanded, additions, deletions, filesTouched,
+      methodBreakdown, perDay, perProject, queriedAt: nowMs,
+    };
   }
 
   private nextSortOrder(): number {

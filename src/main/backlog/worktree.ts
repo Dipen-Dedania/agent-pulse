@@ -132,8 +132,23 @@ export async function captureDiff(worktreePath: string): Promise<
 }
 
 export type ApplyResult =
-  | { ok: true; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; stashed?: boolean; stashConflicted?: boolean; statusSummary?: string; changedFiles?: string[] }
+  | { ok: true; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; stashed?: boolean; stashConflicted?: boolean; statusSummary?: string; changedFiles?: string[]; additions?: number; deletions?: number }
   | { ok: false; reason: string; conflicted?: boolean; dirtyTarget?: boolean };
+
+/**
+ * Count inserted/deleted lines in a unified diff, skipping the `+++`/`---` file
+ * headers (which start with the same character). Binary hunks carry no +/- body
+ * lines, so they contribute 0 — an honest LOC snapshot for the apply record.
+ */
+export function patchLineStats(patch: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of patch.split(/\r?\n/)) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions += 1;
+    else if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
+  }
+  return { additions, deletions };
+}
 
 /** Post-image (`b/…`) paths a patch touches — for diagnostics and UI. */
 function changedPathsFromPatch(patch: string): string[] {
@@ -192,6 +207,10 @@ async function applyPatchToRepo(repoPath: string, patch: string, statusSummary: 
   // string.
   const patchFile = path.join(os.tmpdir(), `agent-pulse-apply-${Date.now()}.patch`);
   const changedFiles = changedPathsFromPatch(patch);
+  // LOC snapshot: computed once from the patch and returned on every success
+  // branch so the apply IPC can freeze it onto the card (the worktree — and its
+  // diff — may be removed right after, making this unrecoverable later).
+  const { additions, deletions } = patchLineStats(patch);
   logger.info(`[Backlog/worktree] applying patch → ${repoPath} (${Buffer.byteLength(patch, 'utf8')} bytes)`);
   logger.info(
     `[Backlog/worktree] patch touches ${changedFiles.length} file(s): ` +
@@ -206,7 +225,7 @@ async function applyPatchToRepo(repoPath: string, patch: string, statusSummary: 
       const applied = await runGit(repoPath, ['apply', patchFile]);
       if (applied.ok) {
         logger.info(`[Backlog/worktree] applied cleanly → ${repoPath}`);
-        return { ok: true, statusSummary, changedFiles };
+        return { ok: true, statusSummary, changedFiles, additions, deletions };
       }
       logger.warn(`[Backlog/worktree] clean apply failed (code ${applied.code}) → ${repoPath}\n${applied.stderr.trim()}`);
       return { ok: false, reason: `Nothing was applied. ${meaningfulGitError(applied.stderr, applied.reason)}` };
@@ -233,7 +252,7 @@ async function applyPatchToRepo(repoPath: string, patch: string, statusSummary: 
           `[Backlog/worktree] patch reverse-applies cleanly — already present in ${repoPath} ` +
             `(${changedFiles.length} file(s): ${changedFiles.slice(0, 30).join(', ')})`,
         );
-        return { ok: true, alreadyApplied: true, statusSummary, changedFiles };
+        return { ok: true, alreadyApplied: true, statusSummary, changedFiles, additions, deletions };
       }
       logger.warn(
         `[Backlog/worktree] reverse-check passed but ${missing.length} created file(s) are absent in ${repoPath}: ` +
@@ -245,7 +264,7 @@ async function applyPatchToRepo(repoPath: string, patch: string, statusSummary: 
     const threeWay = await runGit(repoPath, ['apply', '--3way', patchFile]);
     if (threeWay.ok) {
       logger.info(`[Backlog/worktree] applied (3-way) → ${repoPath}`);
-      return { ok: true, threeWay: true, statusSummary, changedFiles };
+      return { ok: true, threeWay: true, statusSummary, changedFiles, additions, deletions };
     }
 
     // --3way exited non-zero. Log the FULL output — git prints "Falling back to
@@ -367,14 +386,17 @@ export async function applyWorktreeStashed(repoPath: string, worktreePath: strin
   // tree), so this stages exactly what we applied.
   await runGit(repoPath, ['add', '-A']);
   const pop = await runGit(repoPath, ['stash', 'pop']);
+  // Carry the LOC/file snapshot captured by the inner apply through the stash
+  // wrapper so the apply record is identical however the patch landed.
+  const applied_stats = { changedFiles: applied.changedFiles, additions: applied.additions, deletions: applied.deletions };
   if (pop.ok) {
     logger.info(`[Backlog/worktree] applied (stash+pop) ${worktreePath} → ${repoPath}`);
-    return { ok: true, threeWay: applied.threeWay, stashed: true, statusSummary };
+    return { ok: true, threeWay: applied.threeWay, stashed: true, statusSummary, ...applied_stats };
   }
   // Pop couldn't cleanly restore — git keeps the stash entry, so the user's
   // work is recoverable (`git stash list`) and any conflicts are marked.
   logger.warn(`[Backlog/worktree] stash pop after apply needs manual resolution in ${repoPath}`);
-  return { ok: true, stashed: true, stashConflicted: true, statusSummary };
+  return { ok: true, stashed: true, stashConflicted: true, statusSummary, ...applied_stats };
 }
 
 /**

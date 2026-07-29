@@ -46,6 +46,60 @@ function formatAge(sinceMs: number): string | null {
   return `${Math.floor(hours / 24)}d`;
 }
 
+// Always-present relative time for the "Shipped" ribbon tooltip (formatAge goes
+// quiet under an hour, which would read as "never shipped" on a fresh apply).
+function formatSince(sinceMs: number): string {
+  const mins = Math.floor((Date.now() - sinceMs) / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+// Human label for how the diff landed — the '3-way'/'stashed' paths merged onto
+// a drifted/dirty tree, so they carry a "review" nudge.
+const APPLY_METHOD_META: Record<NonNullable<BacklogCard['applyMethod']>, { note: string; review: boolean }> = {
+  'clean':          { note: 'clean apply',            review: false },
+  'three-way':      { note: '3-way merge — review',   review: true },
+  'stashed':        { note: 'stash + apply — review', review: true },
+  'already-present':{ note: 'already present',         review: false },
+};
+
+// The board already differentiates by column; this ribbon makes "shipped to the
+// project" legible at a glance without adding a card state. Kept subtle: emerald
+// for a clean ship, amber when the apply merged and wants a review, muted when
+// the diff was already in the tree (nothing new landed).
+const ShippedRibbon: React.FC<{ card: BacklogCard }> = ({ card }) => {
+  if (card.appliedAt == null) return null;
+  const method = card.applyMethod ?? 'clean';
+  const meta = APPLY_METHOD_META[method];
+  const alreadyPresent = method === 'already-present';
+  const adds = card.appliedAdditions;
+  const dels = card.appliedDeletions;
+  const tone = alreadyPresent
+    ? 'bg-control/40 text-faint'
+    : meta.review
+      ? 'bg-amber-500/15 text-warn'
+      : 'bg-emerald-500/15 text-ok';
+  const tip =
+    `${alreadyPresent ? 'Already present in the project' : 'Shipped to the project'} ` +
+    `${formatSince(card.appliedAt)} · ${meta.note} · ` +
+    `${card.appliedAutorun ? 'from an overnight autorun' : 'from a manual run'}`;
+  return (
+    <Tooltip content={tip}>
+      <span className={`px-1.5 py-0.5 rounded font-medium ${tone}`}>
+        {alreadyPresent ? '✓ Applied' : '✓ Shipped'}
+        {!alreadyPresent && adds != null && dels != null && (
+          <span className='ml-1 font-mono tabular-nums'>
+            <span className='text-ok'>+{adds}</span> <span className='text-danger'>−{dels}</span>
+          </span>
+        )}
+      </span>
+    </Tooltip>
+  );
+};
+
 interface Props {
   card: BacklogCard;
   projectName: string;
@@ -64,11 +118,16 @@ interface Props {
   onViewDetail: () => void;
   /** Blocked execution cards: discard the worktree, then re-run from a clean checkout. */
   onRestart: () => void;
+  /** Refinement cards: open an interactive plan-mode session (plan auto-attaches). */
+  onRefine: () => void;
+  /** Refinement cards: pull the plan from the session transcript now (fallback). */
+  onImportPlan: () => void;
 }
 
 export const CardTile: React.FC<Props> = ({
   card, projectName, projectDefaultModel, isRunning, unmetPrereqs, canMoveUp, canMoveDown,
   onEdit, onDelete, onMove, onRunNow, onStop, onReorder, onViewDetail, onRestart,
+  onRefine, onImportPlan,
 }) => {
   const tier = TIER_META[card.riskTier];
   const age = isRunning ? null : formatAge(card.updatedAt);
@@ -114,6 +173,7 @@ export const CardTile: React.FC<Props> = ({
             <span>📁</span>
           </Tooltip>
         )}
+        <ShippedRibbon card={card} />
         {/* Effective model: card override stands out, inherited default stays quiet */}
         {(card.model ?? projectDefaultModel) && (
           <Tooltip content={card.model ? 'Model override for this card' : 'Project default model'}>
@@ -157,6 +217,11 @@ export const CardTile: React.FC<Props> = ({
       {card.state === 'rework' && (
         <p className='text-[11px] text-orange-300/80 light:text-orange-700/90'>QA failed — retries once automatically, then blocks.</p>
       )}
+      {card.state === 'refinement' && card.refinementSessionId && (
+        <p className='text-[11px] text-muted leading-snug'>
+          Planning session open in a terminal — the plan attaches automatically when you present one.
+        </p>
+      )}
 
       <div className='flex items-center gap-1 flex-wrap'>
         {card.state === 'todo' && (
@@ -172,7 +237,24 @@ export const CardTile: React.FC<Props> = ({
           </>
         )}
         {card.state === 'refinement' && (
-          <ActionButton onClick={() => onMove('todo')} title='Queue for execution'>→ Todo</ActionButton>
+          <>
+            <ActionButton
+              onClick={onRefine}
+              title={
+                card.refinementSessionId
+                  ? 'Re-open the interactive plan-mode session'
+                  : 'Refine — open an interactive plan-mode session; the plan auto-attaches to this card when you present one'
+              }
+            >
+              ✨ {card.refinementSessionId ? 'Re-plan' : 'Refine'}
+            </ActionButton>
+            {card.refinementSessionId && (
+              <ActionButton onClick={onImportPlan} title='Import the plan from the session now (it also attaches automatically)'>
+                ⬇ Plan
+              </ActionButton>
+            )}
+            <ActionButton onClick={() => onMove('todo')} title='Queue for execution'>→ Todo</ActionButton>
+          </>
         )}
         {card.state === 'paused' && (
           <>

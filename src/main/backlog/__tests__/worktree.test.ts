@@ -3,7 +3,31 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { createWorktree, captureDiff, applyWorktree, applyWorktreeStashed, removeWorktree, reconcileWorktrees } from '../worktree';
+import { createWorktree, captureDiff, applyWorktree, applyWorktreeStashed, removeWorktree, reconcileWorktrees, patchLineStats } from '../worktree';
+
+// Pure helper — no git needed, so it runs even on git-less CI images.
+describe('patchLineStats', () => {
+  it('counts +/- body lines and ignores the +++/--- file headers', () => {
+    const patch = [
+      'diff --git a/foo.ts b/foo.ts',
+      'index 111..222 100644',
+      '--- a/foo.ts',
+      '+++ b/foo.ts',
+      '@@ -1,2 +1,3 @@',
+      ' unchanged',
+      '-removed line',
+      '+added line one',
+      '+added line two',
+    ].join('\n');
+    expect(patchLineStats(patch)).toEqual({ additions: 2, deletions: 1 });
+  });
+
+  it('is zero for an empty patch and for a header-only (binary) patch', () => {
+    expect(patchLineStats('')).toEqual({ additions: 0, deletions: 0 });
+    const binary = 'diff --git a/img.png b/img.png\nGIT binary patch\nliteral 0\n';
+    expect(patchLineStats(binary)).toEqual({ additions: 0, deletions: 0 });
+  });
+});
 
 // Real temp git repos, no mocks — the module's whole job is driving git
 // correctly. Skips cleanly when git isn't on PATH (CI images without git).

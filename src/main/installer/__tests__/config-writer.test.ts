@@ -632,6 +632,68 @@ describe('ConfigWriter — grok', () => {
   });
 });
 
+// ── Grok ──────────────────────────────────────────────────────────────────────
+
+describe('ConfigWriter — grok', () => {
+  it('creates ~/.grok/hooks/agent-pulse.json with http hooks', async () => {
+    await withFakeHome(async (writer) => {
+      const result = await writer.installHook('grok');
+      expect(result.success).toBe(true);
+      expect(writer.isHookInstalled('grok')).toBe(true);
+
+      const hookPath = path.join(tmpDir, '.grok', 'hooks', 'agent-pulse.json');
+      expect(fs.existsSync(hookPath)).toBe(true);
+
+      const config = JSON.parse(fs.readFileSync(hookPath, 'utf8'));
+      const hook = config.hooks.PreToolUse[0].hooks[0];
+      expect(hook.type).toBe('http');
+      expect(hook.url).toBe('http://localhost:4242/event');
+      expect(config.hooks.SessionStart).toBeDefined();
+      expect(config.hooks.StopFailure).toBeDefined();
+      // Grok's matcher is a regex, so PreToolUse uses '.*', not Claude's '*'.
+      expect(config.hooks.PreToolUse[0].matcher).toBe('.*');
+    });
+  });
+
+  it('is idempotent on re-install', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('grok');
+      await writer.installHook('grok');
+      expect(writer.isHookInstalled('grok')).toBe(true);
+    });
+  });
+
+  it('uninstall removes only the Agent Pulse hook file', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('grok');
+      // Drop a sibling hook file to prove we don't touch other Grok hooks.
+      const siblingPath = path.join(tmpDir, '.grok', 'hooks', 'other-plugin.json');
+      fs.writeFileSync(siblingPath, '{"hooks":{}}');
+
+      writer.uninstallHook('grok');
+      expect(writer.isHookInstalled('grok')).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, '.grok', 'hooks', 'agent-pulse.json'))).toBe(false);
+      expect(fs.existsSync(siblingPath)).toBe(true);
+    });
+  });
+
+  it('honors GROK_HOME for the hook location', async () => {
+    await withFakeHome(async (writer) => {
+      const grokHome = path.join(tmpDir, 'custom-grok');
+      const prev = process.env['GROK_HOME'];
+      process.env['GROK_HOME'] = grokHome;
+      try {
+        await writer.installHook('grok');
+        expect(fs.existsSync(path.join(grokHome, 'hooks', 'agent-pulse.json'))).toBe(true);
+        expect(writer.isHookInstalled('grok')).toBe(true);
+      } finally {
+        if (prev === undefined) delete process.env['GROK_HOME'];
+        else process.env['GROK_HOME'] = prev;
+      }
+    });
+  });
+});
+
 // ── Unknown tool throws ───────────────────────────────────────────────────────
 
 describe('ConfigWriter — unknown tool', () => {

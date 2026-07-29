@@ -34,7 +34,13 @@ type DatabaseConstructor = new (path: string) => Database;
 //     that isn't in the repo yet, invisible to the detached worktree).
 // v5: cards.qa_url — QA task type (browser-verification cards, see
 //     backlog-qa-tasktype-plan.md).
-const SCHEMA_VERSION = 5;
+// v6: cards.refinement_session_id / refinement_started_at — interactive
+//     plan-mode refinement session; the plan auto-attaches to the card (see
+//     backlog-refinement-agent-plan.md).
+// v7: cards.applied_at / apply_method / applied_autorun / applied_additions /
+//     applied_deletions / applied_files — apply tracking for the "Shipped"
+//     ribbon and the Overnight Backlog analytics (see analytics-improvement-plan).
+const SCHEMA_VERSION = 7;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -68,6 +74,14 @@ CREATE TABLE IF NOT EXISTS cards (
   base_sha            TEXT,
   qa_command          TEXT,
   qa_url              TEXT,
+  refinement_session_id TEXT,
+  refinement_started_at INTEGER,
+  applied_at          INTEGER,
+  apply_method        TEXT,
+  applied_autorun     INTEGER NOT NULL DEFAULT 0,
+  applied_additions   INTEGER,
+  applied_deletions   INTEGER,
+  applied_files       INTEGER,
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
 );
@@ -158,6 +172,18 @@ export function openBacklogDb(dbPath: string): Database | null {
         // pre-existing boards. Kept explicit for parity with other versions.
       }
       if (current < 5) db.exec('ALTER TABLE cards ADD COLUMN qa_url TEXT');
+      if (current < 6) {
+        db.exec('ALTER TABLE cards ADD COLUMN refinement_session_id TEXT');
+        db.exec('ALTER TABLE cards ADD COLUMN refinement_started_at INTEGER');
+      }
+      if (current < 7) {
+        db.exec('ALTER TABLE cards ADD COLUMN applied_at INTEGER');
+        db.exec('ALTER TABLE cards ADD COLUMN apply_method TEXT');
+        db.exec('ALTER TABLE cards ADD COLUMN applied_autorun INTEGER NOT NULL DEFAULT 0');
+        db.exec('ALTER TABLE cards ADD COLUMN applied_additions INTEGER');
+        db.exec('ALTER TABLE cards ADD COLUMN applied_deletions INTEGER');
+        db.exec('ALTER TABLE cards ADD COLUMN applied_files INTEGER');
+      }
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }
 

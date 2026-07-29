@@ -16,6 +16,7 @@ import { initBacklogDb, closeBacklogDb } from './backlog/db';
 import { BacklogStore } from './backlog/store';
 import { BacklogEngine } from './backlog/engine';
 import { registerBacklogIpc } from './backlog/ipc';
+import { stopAllPlanWatches } from './backlog/refine-watch';
 import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, DisplayInfo, TourState, AppearanceConfig } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
@@ -351,6 +352,9 @@ class AgentPulseApp {
       // Engine stop kills any running claude process tree and finalizes the
       // card as Paused before the DB closes.
       this.backlogEngine?.stop();
+      // Tear down any open refinement plan-mode transcript watchers (the poll
+      // timers are unref'd, but stop them explicitly so nothing runs post-quit).
+      stopAllPlanWatches();
       closeBacklogDb();
       this.tooltipManager.destroy();
       this.tourManager.destroy();

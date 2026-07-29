@@ -156,6 +156,20 @@ export const BacklogBoardTab: React.FC = () => {
     if (!res.ok && res.reason) void appAlert(res.reason, 'Backlog');
   };
 
+  // Opens an interactive plan-mode session; the plan auto-attaches as it's
+  // presented (main watches the transcript).
+  const handleRefine = async (card: BacklogCard) => {
+    const res = await store.refineStart(card.id);
+    if (!res.ok && res.reason) void appAlert(res.reason, 'Backlog');
+  };
+
+  // Manual pull of the plan (fallback for the auto-attach watcher).
+  const handleImportPlan = async (card: BacklogCard) => {
+    const res = await store.importPlan(card.id);
+    if (res.ok) void appAlert('Plan imported and attached to the card.', 'Backlog');
+    else if (res.reason) void appAlert(res.reason, 'Backlog');
+  };
+
   const handleDelete = async (card: BacklogCard) => {
     const ok = await appConfirm({
       title: `Delete "${card.title}"?`,
@@ -302,6 +316,8 @@ export const BacklogBoardTab: React.FC = () => {
           onReorder={(dir) => handleReorder(card, dir)}
           onViewDetail={() => setDetailCard(card)}
           onRestart={() => void handleRestart(card)}
+          onRefine={() => void handleRefine(card)}
+          onImportPlan={() => void handleImportPlan(card)}
         />
       </motion.div>
     );

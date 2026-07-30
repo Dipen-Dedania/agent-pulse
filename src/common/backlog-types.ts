@@ -23,8 +23,11 @@ export type RiskTier = 'green' | 'amber' | 'red';
 // How an execution card's worktree diff landed on the project when the user
 // applied it. 'already-present' means the reverse-apply check found every hunk
 // already in the tree — nothing new was delivered, so it's counted apart from a
-// real ship. Mirrors the flags returned by worktree.ts → ApplyResult.
-export type ApplyMethod = 'clean' | 'three-way' | 'stashed' | 'already-present';
+// real ship. 'manual' means the user marked the card applied by hand (the diff
+// landed outside Agent Pulse, e.g. their own git merge/commit) — a real ship,
+// but with no LOC snapshot since the worktree is typically already gone. The
+// git-driven variants mirror the flags returned by worktree.ts → ApplyResult.
+export type ApplyMethod = 'clean' | 'three-way' | 'stashed' | 'already-present' | 'manual';
 
 // 'browser' stays disabled until the browser-QA phase; the rest are live in
 // Phase 2 for execution cards (QA runs as an engine-driven command, not agent
@@ -38,11 +41,27 @@ export type QaProvider = 'browser' | 'tests' | 'lint' | 'typecheck' | 'custom' |
 // live UI, and delivers a report + evidence screenshots. Changes nothing.
 export type BacklogTaskType = 'research' | 'execution' | 'qa';
 
+// GitLab issue population (Phase 3). Which open issues a scan pulls for a
+// linked project. See backlog-phase3-gitlab-population-plan.md.
+export type GitlabIssueFilterMode = 'assigned' | 'all' | 'label';
+
+export interface GitlabIssueFilter {
+  mode: GitlabIssueFilterMode;
+  labels: string[]; // used when mode === 'label'
+}
+
 export interface BacklogProject {
   id: string;          // uuid
   name: string;        // basename of path by default, editable
   path: string;        // absolute repo folder — the executor's cwd
   createdAt: number;
+  // GitLab link (Phase 3). All null until the user links the repo's `origin`
+  // remote to its GitLab project; the numeric id survives GitLab renames.
+  gitlabProjectId: number | null;
+  gitlabHost: string | null;        // supports self-managed hosts
+  gitlabProjectPath: string | null; // 'group/sub/project' — display + relink
+  issueFilter: GitlabIssueFilter;
+  gitlabLastScanAt: number | null;
 }
 
 export interface BacklogCard {
@@ -77,6 +96,10 @@ export interface BacklogCard {
   appliedFiles: number | null;         // files the applied patch touched
   sortOrder: number;               // position within Todo
   blockedReason: string | null;
+  // Provenance for auto-populated cards (Phase 3); null for hand-authored ones.
+  // sourceFingerprint is the dedup key, e.g. 'gitlab:<projectId>:<iid>'.
+  sourceUrl: string | null;
+  sourceFingerprint: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -221,6 +244,42 @@ export interface BacklogSchedulerConfig {
   webhooks: WebhookTarget[];
 }
 
+// ─── GitLab issue population (Phase 3) ───────────────────────────────────────
+
+// A GitLab issue surfaced by a scan but not yet imported or dismissed — the
+// backing row for the Review & Import picker. fingerprint = 'gitlab:<projectId>:<iid>'.
+export interface GitlabCandidate {
+  fingerprint: string;
+  projectId: string;
+  iid: number;
+  title: string;
+  description: string;
+  webUrl: string;
+  labels: string[];
+  fetchedAt: number;
+}
+
+// Persisted in user-config (sibling of BacklogSchedulerConfig). Governs GitLab
+// issue population. `scoutModel` defaults to a cheap model; the config migration
+// validates it via isSafeModelId and falls back to the default.
+export interface BacklogPopulationConfig {
+  enabled: boolean;
+  defaultFilterMode: GitlabIssueFilterMode; // seeds a newly-linked project's filter
+  scoutModel: string;                       // e.g. 'claude-haiku-4-5'
+  backgroundRefresh: boolean;               // low-frequency badge refresh
+  refreshIntervalMinutes: number;           // used when backgroundRefresh is on
+}
+
+// Live population state shipped in the board hydrate (BacklogState.gitlab).
+// connector is the verdict of the last scan (D8/D9); 'unknown' before any scan.
+export interface GitlabPopulationState {
+  candidates: GitlabCandidate[];
+  connector: 'connected' | 'needs-auth' | 'unknown';
+  scanning: boolean;
+  lastScanAt: number | null;
+  lastReason: string | null; // a human hint when the last scan failed / was skipped
+}
+
 // ─── Live status broadcast to the renderer ───────────────────────────────────
 
 export interface BacklogSchedulerStatus {
@@ -284,7 +343,7 @@ export interface BacklogStatsPayload {
   additions: number;          // Σ applied additions across shipped cards
   deletions: number;          // Σ applied deletions
   filesTouched: number;       // Σ applied file counts
-  methodBreakdown: { clean: number; threeWay: number; stashed: number; alreadyPresent: number };
+  methodBreakdown: { clean: number; threeWay: number; stashed: number; alreadyPresent: number; manual: number };
   perDay: BacklogShippedDayBucket[];       // ascending by date, gap-filled
   perProject: BacklogShippedProjectBucket[]; // descending by shipped
   queriedAt: number;
@@ -298,4 +357,5 @@ export interface BacklogState {
   cards: BacklogCard[];
   templates: BacklogTemplate[];
   status: BacklogSchedulerStatus | null;
+  gitlab: GitlabPopulationState;
 }

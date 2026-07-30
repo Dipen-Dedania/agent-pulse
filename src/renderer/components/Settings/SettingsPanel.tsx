@@ -21,7 +21,8 @@ import { SecretProtectionTab } from './SecretProtectionTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
 import { BacklogBoardTab } from '../Backlog/BacklogBoardTab';
 import { BacklogSchedulerSection } from './BacklogSchedulerSection';
-import { BacklogSchedulerConfig } from '../../../common/backlog-types';
+import { BacklogPopulationSection } from './BacklogPopulationSection';
+import { BacklogSchedulerConfig, BacklogPopulationConfig } from '../../../common/backlog-types';
 import { useBacklogStore, useBacklogSync } from '../../store/useBacklogStore';
 import { AppDialogHost, appAlert } from '../Shared';
 import { UpdatesTab } from './UpdatesTab';
@@ -347,6 +348,7 @@ export const SettingsPanel: React.FC = () => {
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfigUI | null>(null);
   const [backlogSchedulerConfig, setBacklogSchedulerConfig] = useState<BacklogSchedulerConfig | null>(null);
+  const [backlogPopulationConfig, setBacklogPopulationConfig] = useState<BacklogPopulationConfig | null>(null);
   const [bubbleConfig, setBubbleConfig] = useState<BubbleConfig | null>(null);
   const [attentionConfig, setAttentionConfig] = useState<AttentionConfig | null>(null);
   const [statusLineConfig, setStatusLineConfig] = useState<StatusLineConfig | null>(null);
@@ -412,6 +414,7 @@ export const SettingsPanel: React.FC = () => {
         if (config?.antigravityUsage) setAntigravityUsageConfig(config.antigravityUsage);
         if (config?.scheduler) setSchedulerConfig(config.scheduler);
         if (config?.backlogScheduler) setBacklogSchedulerConfig(config.backlogScheduler);
+        if (config?.backlogPopulation) setBacklogPopulationConfig(config.backlogPopulation);
         if (config?.bubble) setBubbleConfig(config.bubble);
         if (config?.attention) setAttentionConfig(config.attention);
         if (config?.statusLine) setStatusLineConfig(config.statusLine);
@@ -479,6 +482,12 @@ export const SettingsPanel: React.FC = () => {
     const handler = (_event: unknown, incoming: BacklogSchedulerConfig) => setBacklogSchedulerConfig(incoming);
     window.electron.on('backlog:scheduler:config-updated', handler);
     return () => window.electron.off('backlog:scheduler:config-updated', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: BacklogPopulationConfig) => setBacklogPopulationConfig(incoming);
+    window.electron.on('backlog:population:config-updated', handler);
+    return () => window.electron.off('backlog:population:config-updated', handler);
   }, []);
 
   useEffect(() => {
@@ -570,6 +579,16 @@ export const SettingsPanel: React.FC = () => {
       setBacklogSchedulerConfig(updated);
     } catch (e) {
       logger.error('[SettingsPanel] failed to update backlog scheduler config', e);
+    }
+  };
+
+  const handleBacklogPopulationConfigChange = async (partial: Partial<BacklogPopulationConfig>) => {
+    setBacklogPopulationConfig((prev) => (prev ? { ...prev, ...partial } : prev));
+    try {
+      const updated = await window.electron.invoke('backlog:population:update-config', partial);
+      setBacklogPopulationConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update backlog population config', e);
     }
   };
 
@@ -1023,6 +1042,12 @@ export const SettingsPanel: React.FC = () => {
                     config={backlogSchedulerConfig}
                     status={backlogStatus}
                     onChange={handleBacklogSchedulerConfigChange}
+                  />
+                )}
+                {backlogPopulationConfig && (
+                  <BacklogPopulationSection
+                    config={backlogPopulationConfig}
+                    onChange={handleBacklogPopulationConfigChange}
                   />
                 )}
                 {statusLineConfig && statusLineDetect && (

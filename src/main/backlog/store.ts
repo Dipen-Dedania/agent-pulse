@@ -17,6 +17,8 @@ import {
   BacklogStatsPayload,
   BacklogStatsRange,
   BacklogTaskType,
+  GitlabCandidate,
+  GitlabIssueFilter,
   QaProvider,
   RiskTier,
   isSafeModelId,
@@ -51,7 +53,46 @@ interface CardRow {
   applied_at: number | null; apply_method: string | null; applied_autorun: number;
   applied_additions: number | null; applied_deletions: number | null; applied_files: number | null;
   sort_order: number; blocked_reason: string | null; model: string | null;
+  source_url: string | null; source_fingerprint: string | null;
   created_at: number; updated_at: number;
+}
+
+interface ProjectRow {
+  id: string; name: string; path: string; created_at: number;
+  gitlab_project_id: number | null; gitlab_host: string | null;
+  gitlab_project_path: string | null; issue_filter: string | null;
+  gitlab_last_scan_at: number | null;
+}
+
+/** Persisted issue_filter JSON → validated GitlabIssueFilter (defaults on garbage). */
+function parseIssueFilter(raw: unknown): GitlabIssueFilter {
+  if (typeof raw === 'string') {
+    try {
+      const p = JSON.parse(raw);
+      const mode = p?.mode === 'all' || p?.mode === 'label' ? p.mode : 'assigned';
+      const labels = Array.isArray(p?.labels)
+        ? p.labels.filter((x: unknown): x is string => typeof x === 'string')
+        : [];
+      return { mode, labels };
+    } catch {
+      /* fall through to default */
+    }
+  }
+  return { mode: 'assigned', labels: [] };
+}
+
+function rowToProject(r: ProjectRow): BacklogProject {
+  return {
+    id: r.id,
+    name: r.name,
+    path: r.path,
+    createdAt: r.created_at,
+    gitlabProjectId: r.gitlab_project_id ?? null,
+    gitlabHost: r.gitlab_host ?? null,
+    gitlabProjectPath: r.gitlab_project_path ?? null,
+    issueFilter: parseIssueFilter(r.issue_filter),
+    gitlabLastScanAt: r.gitlab_last_scan_at ?? null,
+  };
 }
 
 /** Untrusted (IPC) model value → stored value. Anything unsafe becomes null (project default). */
@@ -176,6 +217,8 @@ function rowToCard(row: CardRow): BacklogCard {
     appliedFiles: row.applied_files,
     sortOrder: row.sort_order,
     blockedReason: row.blocked_reason,
+    sourceUrl: row.source_url,
+    sourceFingerprint: row.source_fingerprint,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -196,6 +239,10 @@ export interface CreateCardInput {
   qaCommand?: string | null;
   qaUrl?: string | null;
   acceptanceCriteria?: string[];
+  // Provenance for auto-populated cards (Phase 3); engine-supplied, absent for
+  // hand-authored cards.
+  sourceUrl?: string | null;
+  sourceFingerprint?: string | null;
 }
 
 export type UpdateCardPatch = Partial<Pick<BacklogCard,
@@ -221,25 +268,21 @@ export class BacklogStore {
   // ── Projects ──────────────────────────────────────────────────────────────
 
   listProjects(): BacklogProject[] {
-    const rows = this.db.prepare('SELECT * FROM projects ORDER BY created_at').all() as any[];
-    return rows.map((r) => ({ id: r.id, name: r.name, path: r.path, createdAt: r.created_at }));
+    const rows = this.db.prepare('SELECT * FROM projects ORDER BY created_at').all() as ProjectRow[];
+    return rows.map(rowToProject);
   }
 
   /** Idempotent on path: adding an already-registered folder returns the existing project. */
   addProject(projectPath: string, name?: string): BacklogProject {
-    const existing = this.db.prepare('SELECT * FROM projects WHERE path = ?').get(projectPath) as any;
-    if (existing) {
-      return { id: existing.id, name: existing.name, path: existing.path, createdAt: existing.created_at };
-    }
-    const project: BacklogProject = {
-      id: randomUUID(),
-      name: name?.trim() || path.basename(projectPath),
-      path: projectPath,
-      createdAt: Date.now(),
-    };
+    const existing = this.db.prepare('SELECT * FROM projects WHERE path = ?').get(projectPath) as ProjectRow | undefined;
+    if (existing) return rowToProject(existing);
+    const id = randomUUID();
+    const createdAt = Date.now();
     this.db.prepare('INSERT INTO projects (id, name, path, created_at) VALUES (@id, @name, @path, @createdAt)')
-      .run(project);
-    return project;
+      .run({ id, name: name?.trim() || path.basename(projectPath), path: projectPath, createdAt });
+    // GitLab columns take their DDL defaults on insert; re-read for the full shape.
+    const row = this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectRow;
+    return rowToProject(row);
   }
 
   removeProject(id: string): { ok: boolean; reason?: string } {
@@ -249,6 +292,104 @@ export class BacklogStore {
     }
     this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
     return { ok: true };
+  }
+
+  // ── GitLab population (Phase 3) ─────────────────────────────────────────────
+
+  /** Cache the resolved GitLab identity on a project. Leaves issue_filter as-is
+   * (it keeps its DDL default 'assigned' on a first link; setIssueFilter edits it). */
+  setGitlabLink(projectId: string, link: { id: number; host: string; projectPath: string }): void {
+    this.db.prepare(
+      `UPDATE projects SET gitlab_project_id = @id, gitlab_host = @host,
+         gitlab_project_path = @projectPath WHERE id = @projectId`,
+    ).run({ projectId, id: link.id, host: link.host, projectPath: link.projectPath });
+  }
+
+  /** Unlink a project: clear its GitLab identity and drop its transient
+   * candidate/dismissed rows so a future re-link starts from a clean slate. */
+  clearGitlabLink(projectId: string): void {
+    this.db.prepare(
+      `UPDATE projects SET gitlab_project_id = NULL, gitlab_host = NULL,
+         gitlab_project_path = NULL, gitlab_last_scan_at = NULL WHERE id = ?`,
+    ).run(projectId);
+    this.db.prepare('DELETE FROM gitlab_candidates WHERE project_id = ?').run(projectId);
+    this.db.prepare('DELETE FROM gitlab_dismissed WHERE project_id = ?').run(projectId);
+  }
+
+  setIssueFilter(projectId: string, filter: GitlabIssueFilter): void {
+    const mode = filter.mode === 'all' || filter.mode === 'label' ? filter.mode : 'assigned';
+    const labels = Array.isArray(filter.labels) ? filter.labels.filter((x) => typeof x === 'string') : [];
+    this.db.prepare('UPDATE projects SET issue_filter = ? WHERE id = ?')
+      .run([JSON.stringify({ mode, labels }), projectId]);
+  }
+
+  setLastScan(projectId: string, at: number): void {
+    this.db.prepare('UPDATE projects SET gitlab_last_scan_at = ? WHERE id = ?').run([at, projectId]);
+  }
+
+  /** Dedup guard: is there ANY card (any state) already carrying this fingerprint?
+   * Any-state so a handled-but-still-open issue never re-surfaces as a candidate. */
+  hasCardForFingerprint(fingerprint: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM cards WHERE source_fingerprint = ? LIMIT 1').get(fingerprint);
+  }
+
+  // Candidates: the Review & Import picker's backing store.
+
+  upsertCandidates(rows: GitlabCandidate[]): void {
+    const stmt = this.db.prepare(
+      `INSERT INTO gitlab_candidates (fingerprint, project_id, iid, title, description, web_url, labels, fetched_at)
+       VALUES (@fingerprint, @projectId, @iid, @title, @description, @webUrl, @labels, @fetchedAt)
+       ON CONFLICT(fingerprint) DO UPDATE SET
+         title = excluded.title, description = excluded.description,
+         web_url = excluded.web_url, labels = excluded.labels, fetched_at = excluded.fetched_at`,
+    );
+    for (const c of rows) {
+      stmt.run({ ...c, labels: JSON.stringify(Array.isArray(c.labels) ? c.labels : []) });
+    }
+  }
+
+  listCandidates(projectId?: string): GitlabCandidate[] {
+    const rows = (projectId
+      ? this.db.prepare('SELECT * FROM gitlab_candidates WHERE project_id = ? ORDER BY iid DESC').all(projectId)
+      : this.db.prepare('SELECT * FROM gitlab_candidates ORDER BY fetched_at DESC, iid DESC').all()) as any[];
+    return rows.map((r) => ({
+      fingerprint: r.fingerprint,
+      projectId: r.project_id,
+      iid: r.iid,
+      title: r.title,
+      description: r.description,
+      webUrl: r.web_url,
+      labels: parseJsonStringArray(r.labels),
+      fetchedAt: r.fetched_at,
+    }));
+  }
+
+  deleteCandidates(fingerprints: string[]): void {
+    const stmt = this.db.prepare('DELETE FROM gitlab_candidates WHERE fingerprint = ?');
+    for (const fp of fingerprints) stmt.run(fp);
+  }
+
+  /** Drop this project's candidates whose fingerprint the latest scan no longer returned. */
+  pruneCandidatesNotIn(projectId: string, keepFingerprints: string[]): void {
+    const keep = new Set(keepFingerprints);
+    const existing = this.db.prepare('SELECT fingerprint FROM gitlab_candidates WHERE project_id = ?')
+      .all(projectId) as { fingerprint: string }[];
+    this.deleteCandidates(existing.map((r) => r.fingerprint).filter((fp) => !keep.has(fp)));
+  }
+
+  // Dismissed tombstones: a rejected issue must not re-surface on the next scan.
+
+  dismiss(rows: { fingerprint: string; projectId: string }[]): void {
+    const now = Date.now();
+    const stmt = this.db.prepare(
+      `INSERT INTO gitlab_dismissed (fingerprint, project_id, dismissed_at) VALUES (?, ?, ?)
+       ON CONFLICT(fingerprint) DO NOTHING`,
+    );
+    for (const r of rows) stmt.run([r.fingerprint, r.projectId, now]);
+  }
+
+  isDismissed(fingerprint: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM gitlab_dismissed WHERE fingerprint = ? LIMIT 1').get(fingerprint);
   }
 
   // ── Cards ─────────────────────────────────────────────────────────────────
@@ -294,6 +435,8 @@ export class BacklogStore {
       appliedFiles: null,
       sortOrder: state === 'todo' ? this.nextSortOrder() : 0,
       blockedReason: null,
+      sourceUrl: typeof input.sourceUrl === 'string' ? input.sourceUrl : null,
+      sourceFingerprint: typeof input.sourceFingerprint === 'string' ? input.sourceFingerprint : null,
       createdAt: now,
       updatedAt: now,
     };
@@ -302,12 +445,12 @@ export class BacklogStore {
         id, title, description, project_id, state, task_type, risk_tier, model,
         estimated_minutes, estimated_cost_usd, prereq_ids, qa_provider, qa_command,
         qa_url, acceptance_criteria, worktree_path, base_sha, sort_order,
-        blocked_reason, created_at, updated_at
+        blocked_reason, source_url, source_fingerprint, created_at, updated_at
       ) VALUES (
         @id, @title, @description, @projectId, @state, @taskType, @riskTier, @model,
         @estimatedMinutes, @estimatedCostUsd, @prereqIds, @qaProvider, @qaCommand,
         @qaUrl, @acceptanceCriteria, @worktreePath, @baseSha, @sortOrder,
-        @blockedReason, @createdAt, @updatedAt
+        @blockedReason, @sourceUrl, @sourceFingerprint, @createdAt, @updatedAt
       )
     `).run({
       ...card,
@@ -460,6 +603,21 @@ export class BacklogStore {
   }
 
   /**
+   * Clear a recorded apply, returning the card to the un-applied state (drops
+   * the Shipped ribbon, removes it from the Overnight Backlog aggregates). Used
+   * to undo a manual "Mark as applied" mis-click — the IPC layer restricts this
+   * to hand-marked cards so a real git-apply snapshot is never silently erased.
+   */
+  clearApply(id: string): void {
+    const now = Date.now();
+    this.db.prepare(
+      `UPDATE cards SET applied_at = NULL, apply_method = NULL, applied_autorun = 0,
+        applied_additions = NULL, applied_deletions = NULL, applied_files = NULL, updated_at = ?
+       WHERE id = ?`,
+    ).run([now, id]);
+  }
+
+  /**
    * Aggregate applied execution cards for the Overnight Backlog analytics card.
    * `nowMs` is injected (not read from the clock) so the range cutoff and the
    * per-period buckets are deterministic under test. Served entirely from the
@@ -486,7 +644,7 @@ export class BacklogStore {
 
     let shipped = 0, fromAutorun = 0, fromManual = 0, alreadyPresent = 0;
     let minutesLanded = 0, additions = 0, deletions = 0, filesTouched = 0;
-    const methodBreakdown = { clean: 0, threeWay: 0, stashed: 0, alreadyPresent: 0 };
+    const methodBreakdown = { clean: 0, threeWay: 0, stashed: 0, alreadyPresent: 0, manual: 0 };
     const perDayMap = new Map<string, { autorun: number; manual: number }>();
     const perProjectMap = new Map<string, number>();
     const shippedIds: string[] = [];
@@ -497,6 +655,7 @@ export class BacklogStore {
         case 'three-way': methodBreakdown.threeWay += 1; break;
         case 'stashed': methodBreakdown.stashed += 1; break;
         case 'already-present': methodBreakdown.alreadyPresent += 1; break;
+        case 'manual': methodBreakdown.manual += 1; break;
       }
       // 'already-present' delivered nothing new — count it apart from a real ship.
       if (r.apply_method === 'already-present') { alreadyPresent += 1; continue; }

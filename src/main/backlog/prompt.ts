@@ -153,6 +153,54 @@ export function buildQaPrompt(
   ].join('\n');
 }
 
+// ── GitLab scout prompts (Phase 3 population) ────────────────────────────────
+// The scout is a read-only `claude -p` run with only the GitLab MCP tools
+// allow-listed (see gitlab-scout.ts). These prompts steer it to emit strict
+// JSON so parseScoutIssues can consume the result deterministically. Prompts go
+// over stdin, so interpolated ids/labels never touch argv.
+
+const SCOUT_CONTRACT = `---
+Return ONLY a JSON array as your final message — no prose, no markdown code fences.
+Each element must be exactly:
+  { "iid": <number>, "title": <string>, "description": <string>, "webUrl": <string>, "labels": <string[]> }
+Use the issue's IID (its per-project number), its web URL, and its label names.
+If there are no matching issues, return []. Call the GitLab tool at most once.`;
+
+/** Resolve a 'group/sub/project' path to its numeric GitLab id. */
+export function buildScoutResolvePrompt(host: string, projectPath: string): string {
+  return [
+    `Resolve the GitLab project "${projectPath}" on host ${host} using the GitLab MCP get_project tool.`,
+    'Return ONLY its numeric project id as a bare number — no prose, no punctuation, no code fences.',
+  ].join('\n');
+}
+
+export interface ScoutFilter {
+  mode: 'assigned' | 'all' | 'label';
+  labels: string[];
+}
+
+/** List open issues for a project per the filter mode; output is strict JSON. */
+export function buildScoutPrompt(projectId: number, filter: ScoutFilter): string {
+  let instruction: string;
+  if (filter.mode === 'assigned') {
+    instruction =
+      `List the OPEN issues assigned to me in GitLab project id ${projectId}. ` +
+      `Use the GitLab MCP my_issues tool with project_id=${projectId} and state=opened.`;
+  } else if (filter.mode === 'label') {
+    const labels = filter.labels.filter((l) => l.trim().length > 0);
+    instruction = labels.length > 0
+      ? `List the OPEN issues in GitLab project id ${projectId} carrying the label(s) ${labels.join(', ')}. ` +
+        `Use the GitLab MCP list_issues tool with project_id=${projectId}, state=opened, and labels=[${labels.join(', ')}].`
+      : `List the OPEN issues in GitLab project id ${projectId}. ` +
+        `Use the GitLab MCP list_issues tool with project_id=${projectId} and state=opened.`;
+  } else {
+    instruction =
+      `List ALL OPEN issues in GitLab project id ${projectId}. ` +
+      `Use the GitLab MCP list_issues tool with project_id=${projectId} and state=opened.`;
+  }
+  return [instruction, '', SCOUT_CONTRACT].join('\n');
+}
+
 /** Build the headless executor prompt for an execution card. */
 export function buildExecutionPrompt(
   card: Pick<BacklogCard, 'title' | 'description' | 'acceptanceCriteria'>,

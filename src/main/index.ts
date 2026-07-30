@@ -10,11 +10,12 @@ import { StatusBridgeServer } from './bridge/server';
 import { ToolDetector } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
 import path from 'path';
-import { loadConfig, saveConfig, defaultStatusLineConfig, migrateBacklogScheduler, migrateBacklogTemplates, migrateAppearance, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, CopilotUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
-import { BacklogSchedulerConfig, BacklogTemplate } from '../common/backlog-types';
+import { loadConfig, saveConfig, defaultStatusLineConfig, migrateBacklogScheduler, migrateBacklogPopulation, migrateBacklogTemplates, migrateAppearance, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, CopilotUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
+import { BacklogPopulationConfig, BacklogSchedulerConfig, BacklogTemplate } from '../common/backlog-types';
 import { initBacklogDb, closeBacklogDb } from './backlog/db';
 import { BacklogStore } from './backlog/store';
 import { BacklogEngine } from './backlog/engine';
+import { PopulationScheduler } from './backlog/population-scheduler';
 import { registerBacklogIpc } from './backlog/ipc';
 import { stopAllPlanWatches } from './backlog/refine-watch';
 import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, DisplayInfo, TourState, AppearanceConfig } from '../common/types';
@@ -72,6 +73,7 @@ class AgentPulseApp {
   private attentionEngine: AttentionEngine;
   private backlogStore: BacklogStore | null = null;
   private backlogEngine: BacklogEngine | null = null;
+  private backlogPopulation: PopulationScheduler | null = null;
   private timeline: TimelineHandle | null = null;
   private updater!: UpdaterHandle;
 
@@ -290,10 +292,29 @@ class AgentPulseApp {
           },
         });
         this.backlogEngine.start();
+
+        // GitLab population (Phase 3): self-populate the board from GitLab
+        // issues. Decoupled from the engine, but shares the same usage snapshot
+        // so a scan can't drain the window ahead of execution.
+        this.backlogPopulation = new PopulationScheduler({
+          store: this.backlogStore,
+          getConfig: () => this.userConfig.backlogPopulation,
+          getUsage: () => {
+            const snap = this.usagePoller.getStatus().snapshot;
+            return snap ? { utilization: snap.fiveHour.utilization, resetsAt: snap.fiveHour.resetsAt } : null;
+          },
+          broadcast: () => {
+            for (const win of BrowserWindow.getAllWindows()) {
+              if (!win.isDestroyed()) win.webContents.send('backlog:changed', {});
+            }
+          },
+        });
+        this.backlogPopulation.start();
       }
       registerBacklogIpc({
         store: this.backlogStore,
         engine: this.backlogEngine,
+        population: this.backlogPopulation,
         getTemplates: () => this.userConfig.backlogTemplates,
       });
 
@@ -352,6 +373,7 @@ class AgentPulseApp {
       // Engine stop kills any running claude process tree and finalizes the
       // card as Paused before the DB closes.
       this.backlogEngine?.stop();
+      this.backlogPopulation?.stop();
       // Tear down any open refinement plan-mode transcript watchers (the poll
       // timers are unref'd, but stop them explicitly so nothing runs post-quit).
       stopAllPlanWatches();
@@ -612,6 +634,20 @@ class AgentPulseApp {
       const updated = this.userConfig.backlogScheduler;
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send('backlog:scheduler:config-updated', updated);
+      }
+      return updated;
+    });
+
+    ipcMain.handle('backlog:population:update-config', (_event, partial: Partial<BacklogPopulationConfig>) => {
+      // Revalidate the merged result — renderer payloads get the same guarantees
+      // as disk loads (scoutModel isSafeModelId-checked, filter-mode enum-checked,
+      // interval clamped).
+      this.userConfig.backlogPopulation = migrateBacklogPopulation({ ...this.userConfig.backlogPopulation, ...partial });
+      saveConfig(this.userConfig);
+      this.backlogPopulation?.applyConfig();
+      const updated = this.userConfig.backlogPopulation;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('backlog:population:config-updated', updated);
       }
       return updated;
     });

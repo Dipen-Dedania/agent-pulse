@@ -40,7 +40,7 @@ type DatabaseConstructor = new (path: string) => Database;
 // v7: cards.applied_at / apply_method / applied_autorun / applied_additions /
 //     applied_deletions / applied_files — apply tracking for the "Shipped"
 //     ribbon and the Overnight Backlog analytics (see analytics-improvement-plan).
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -48,10 +48,15 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 CREATE TABLE IF NOT EXISTS projects (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,
-  path        TEXT NOT NULL UNIQUE,
-  created_at  INTEGER NOT NULL
+  id                  TEXT PRIMARY KEY,
+  name                TEXT NOT NULL,
+  path                TEXT NOT NULL UNIQUE,
+  created_at          INTEGER NOT NULL,
+  gitlab_project_id   INTEGER,
+  gitlab_host         TEXT,
+  gitlab_project_path TEXT,
+  issue_filter        TEXT NOT NULL DEFAULT '{"mode":"assigned","labels":[]}',
+  gitlab_last_scan_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS cards (
@@ -82,12 +87,17 @@ CREATE TABLE IF NOT EXISTS cards (
   applied_additions   INTEGER,
   applied_deletions   INTEGER,
   applied_files       INTEGER,
+  source_url          TEXT,
+  source_fingerprint  TEXT,
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_cards_state_sort ON cards (state, sort_order);
 CREATE INDEX IF NOT EXISTS idx_cards_project    ON cards (project_id);
+-- idx_cards_source (on the v8 source_fingerprint column) is created AFTER the
+-- migration block, not here: SCHEMA_SQL runs before migrations, so on a
+-- migrating pre-v8 board the column would not exist yet when this runs.
 
 CREATE TABLE IF NOT EXISTS attempts (
   id          TEXT PRIMARY KEY,
@@ -126,6 +136,30 @@ CREATE TABLE IF NOT EXISTS card_attachments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_attachments_card ON card_attachments (card_id, created_at);
+
+-- GitLab population (Phase 3). Candidates = issues surfaced by a scan, awaiting
+-- the Review & Import picker. Dismissed = tombstones so a rejected issue does
+-- not re-surface. Both cascade on project removal (foreign_keys = ON below).
+CREATE TABLE IF NOT EXISTS gitlab_candidates (
+  fingerprint  TEXT PRIMARY KEY,
+  project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  iid          INTEGER NOT NULL,
+  title        TEXT NOT NULL,
+  description  TEXT NOT NULL DEFAULT '',
+  web_url      TEXT NOT NULL,
+  labels       TEXT NOT NULL DEFAULT '[]',
+  fetched_at   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_gitlab_candidates_project ON gitlab_candidates (project_id);
+
+CREATE TABLE IF NOT EXISTS gitlab_dismissed (
+  fingerprint  TEXT PRIMARY KEY,
+  project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  dismissed_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_gitlab_dismissed_project ON gitlab_dismissed (project_id);
 `;
 
 /**
@@ -184,8 +218,24 @@ export function openBacklogDb(dbPath: string): Database | null {
         db.exec('ALTER TABLE cards ADD COLUMN applied_deletions INTEGER');
         db.exec('ALTER TABLE cards ADD COLUMN applied_files INTEGER');
       }
+      if (current < 8) {
+        // GitLab population columns; the gitlab_candidates/gitlab_dismissed
+        // tables are created by CREATE TABLE IF NOT EXISTS in SCHEMA_SQL above.
+        db.exec('ALTER TABLE projects ADD COLUMN gitlab_project_id INTEGER');
+        db.exec('ALTER TABLE projects ADD COLUMN gitlab_host TEXT');
+        db.exec('ALTER TABLE projects ADD COLUMN gitlab_project_path TEXT');
+        db.exec(`ALTER TABLE projects ADD COLUMN issue_filter TEXT NOT NULL DEFAULT '{"mode":"assigned","labels":[]}'`);
+        db.exec('ALTER TABLE projects ADD COLUMN gitlab_last_scan_at INTEGER');
+        db.exec('ALTER TABLE cards ADD COLUMN source_url TEXT');
+        db.exec('ALTER TABLE cards ADD COLUMN source_fingerprint TEXT');
+      }
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }
+
+    // The v8 source_fingerprint column exists in all paths by now (fresh boards
+    // via SCHEMA_SQL's cards DDL; migrated boards via the ALTER above), so its
+    // index is safe to create unconditionally here.
+    db.exec('CREATE INDEX IF NOT EXISTS idx_cards_source ON cards (source_fingerprint)');
 
     // Crash recovery: a card left mid-run by an app crash/kill would be
     // stranded in a column no engine will ever touch again. Paused is the

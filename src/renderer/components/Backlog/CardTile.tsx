@@ -64,6 +64,7 @@ const APPLY_METHOD_META: Record<NonNullable<BacklogCard['applyMethod']>, { note:
   'three-way':      { note: '3-way merge — review',   review: true },
   'stashed':        { note: 'stash + apply — review', review: true },
   'already-present':{ note: 'already present',         review: false },
+  'manual':         { note: 'marked applied by hand',  review: false },
 };
 
 // The board already differentiates by column; this ribbon makes "shipped to the
@@ -122,15 +123,27 @@ interface Props {
   onRefine: () => void;
   /** Refinement cards: pull the plan from the session transcript now (fallback). */
   onImportPlan: () => void;
+  /** Execution cards: flag a diff landed outside Agent Pulse as shipped (method 'manual'). */
+  onMarkApplied: () => void;
+  /** Execution cards: undo a manual "Mark applied" (hand-marked cards only). */
+  onClearApplied: () => void;
 }
 
 export const CardTile: React.FC<Props> = ({
   card, projectName, projectDefaultModel, isRunning, unmetPrereqs, canMoveUp, canMoveDown,
   onEdit, onDelete, onMove, onRunNow, onStop, onReorder, onViewDetail, onRestart,
-  onRefine, onImportPlan,
+  onRefine, onImportPlan, onMarkApplied, onClearApplied,
 }) => {
   const tier = TIER_META[card.riskTier];
   const age = isRunning ? null : formatAge(card.updatedAt);
+  // "Mark applied" is offered for execution cards that produced a diff but
+  // haven't been recorded as landed — the manual override for work you merged
+  // outside Agent Pulse. "Unmark" only for hand-marks (a real git-apply record
+  // is a fact and stays put).
+  const canMarkApplied =
+    !isRunning && card.taskType === 'execution' && card.appliedAt == null &&
+    (card.worktreePath != null || card.state === 'done');
+  const canUnmarkApplied = !isRunning && card.applyMethod === 'manual';
 
   return (
     // hoverLift: subtle scale-up on hover, scale-down on press — springs back
@@ -168,6 +181,16 @@ export const CardTile: React.FC<Props> = ({
           </span>
         </Tooltip>
         <span className={`px-1.5 py-0.5 rounded ${projectColor(card.projectId).chip}`}>{projectName}</span>
+        {card.sourceFingerprint?.startsWith('gitlab:') && card.sourceUrl && (
+          <Tooltip content={`GitLab issue — open ${card.sourceUrl}`}>
+            <button
+              onClick={(e) => { e.stopPropagation(); void window.electron.invoke('open-external', card.sourceUrl); }}
+              className='px-1.5 py-0.5 rounded font-mono bg-orange-500/15 text-orange-300 light:text-orange-700 hover:bg-orange-500/25 cursor-pointer transition-colors'
+            >
+              🦊 #{card.sourceFingerprint.split(':').pop()}
+            </button>
+          </Tooltip>
+        )}
         {card.worktreePath && (
           <Tooltip content={`Worktree: ${card.worktreePath}`}>
             <span>📁</span>
@@ -311,6 +334,21 @@ export const CardTile: React.FC<Props> = ({
             {/* Done and Blocked already surface an explicit Report button. */}
             {card.state !== 'done' && card.state !== 'blocked' && (
               <ActionButton onClick={onViewDetail} title='History'>🕘</ActionButton>
+            )}
+            {canUnmarkApplied ? (
+              <ActionButton
+                onClick={onClearApplied}
+                title='Unmark applied — this card was marked applied by hand; clear it and it drops out of the Shipped count'
+              >
+                ↺ Unmark
+              </ActionButton>
+            ) : canMarkApplied && (
+              <ActionButton
+                onClick={onMarkApplied}
+                title='Mark as applied — for a diff you landed outside Agent Pulse (your own merge/commit). Counts toward Shipped so the overnight total isn’t undercounted.'
+              >
+                ✓ Applied
+              </ActionButton>
             )}
             <ActionButton onClick={onEdit} title='Edit card'>✎</ActionButton>
             <ActionButton onClick={onDelete} title='Delete card' danger>✕</ActionButton>

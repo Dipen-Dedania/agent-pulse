@@ -8,6 +8,7 @@
 export { Button, type ButtonProps, type ButtonVariant, type ButtonSize } from './Button';
 export { GlassToggle } from './GlassToggle';
 export { Select, type SelectOption } from './Select';
+export { Checkbox } from './Checkbox';
 export { appAlert, appConfirm, AppDialogHost, type ConfirmOptions } from './AppDialog';
 export { TooltipOverlay } from './TooltipOverlay';
 export { Tooltip } from './Tooltip';

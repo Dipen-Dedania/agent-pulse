@@ -51,6 +51,8 @@ function card(partial: Partial<BacklogCard>): BacklogCard {
     appliedFiles: null,
     sortOrder: 0,
     blockedReason: null,
+    sourceUrl: null,
+    sourceFingerprint: null,
     createdAt: 0,
     updatedAt: 0,
     ...partial,

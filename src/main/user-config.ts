@@ -3,7 +3,14 @@ import path from 'path';
 import os from 'os';
 import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold, AppearanceConfig, ThemeMode } from '../common/types';
 import { GuardrailConfig } from '../common/guardrails';
-import { BacklogSchedulerConfig, BacklogSlot, BacklogTemplate } from '../common/backlog-types';
+import {
+  BacklogPopulationConfig,
+  BacklogSchedulerConfig,
+  BacklogSlot,
+  BacklogTemplate,
+  GitlabIssueFilterMode,
+  isSafeModelId,
+} from '../common/backlog-types';
 import { SecretProtectionConfig, SecretRule } from '../common/secretProtection';
 import { parseHHmm } from './scheduler/timing';
 import { logger } from '../common/logger';
@@ -135,6 +142,9 @@ export interface UserConfig {
   // Backlog Scheduler — time RANGES during which queued backlog cards may
   // auto-execute (vs the Cowork scheduler's fire instants). See backlog.md.
   backlogScheduler: BacklogSchedulerConfig;
+  // GitLab issue population (Phase 3): governs how the board self-populates from
+  // GitLab issues. See backlog-phase3-gitlab-population-plan.md.
+  backlogPopulation: BacklogPopulationConfig;
   // Quick-task templates for the backlog board's card creator.
   backlogTemplates: BacklogTemplate[];
   statusLine: StatusLineConfig;
@@ -251,6 +261,13 @@ const DEFAULTS: UserConfig = {
     usageGatePercent: 95, // pause new claims once the 5-hour window is ≥95% spent
     maxConcurrent: 1, // Phase 1: sequential only; migration clamps this
     webhooks: [],
+  },
+  backlogPopulation: {
+    enabled: false,
+    defaultFilterMode: 'assigned',
+    scoutModel: 'claude-haiku-4-5', // cheap extraction model; Spike 0 confirmed capable
+    backgroundRefresh: false,
+    refreshIntervalMinutes: 120,
   },
   // Seed templates from backlog.md. Phase 1 is research-only: every template
   // outputs a report/plan — nothing touches the repo.
@@ -452,6 +469,32 @@ export function migrateBacklogScheduler(raw: unknown): BacklogSchedulerConfig {
     usageGatePercent,
     maxConcurrent: 1,
     webhooks,
+  };
+}
+
+// Validate the persisted GitLab-population config. scoutModel must pass
+// isSafeModelId (it reaches argv through cmd.exe where no quoting-safe escape
+// exists) — an unsafe/absent value falls back to the default. filter mode is
+// enum-checked; refresh interval clamped to a sane band. Exported: the
+// backlog:population:update-config IPC handler revalidates renderer partials
+// through it before persisting.
+const FILTER_MODES: GitlabIssueFilterMode[] = ['assigned', 'all', 'label'];
+export function migrateBacklogPopulation(raw: unknown): BacklogPopulationConfig {
+  const d = DEFAULTS.backlogPopulation;
+  if (!raw || typeof raw !== 'object') return { ...d };
+  const s = raw as any;
+  const rawModel = typeof s.scoutModel === 'string' ? s.scoutModel.trim() : '';
+  const scoutModel = isSafeModelId(rawModel) ? rawModel : d.scoutModel;
+  const refreshIntervalMinutes =
+    typeof s.refreshIntervalMinutes === 'number' && Number.isFinite(s.refreshIntervalMinutes)
+      ? Math.min(1440, Math.max(15, Math.round(s.refreshIntervalMinutes)))
+      : d.refreshIntervalMinutes;
+  return {
+    enabled: typeof s.enabled === 'boolean' ? s.enabled : d.enabled,
+    defaultFilterMode: FILTER_MODES.includes(s.defaultFilterMode) ? s.defaultFilterMode : d.defaultFilterMode,
+    scoutModel,
+    backgroundRefresh: typeof s.backgroundRefresh === 'boolean' ? s.backgroundRefresh : d.backgroundRefresh,
+    refreshIntervalMinutes,
   };
 }
 
@@ -802,6 +845,7 @@ export function loadConfig(): UserConfig {
         tour: migrateTour(parsed.tour),
         scheduler: migrateScheduler(parsed.scheduler),
         backlogScheduler: migrateBacklogScheduler(parsed.backlogScheduler),
+        backlogPopulation: migrateBacklogPopulation(parsed.backlogPopulation),
         backlogTemplates: migrateBacklogTemplates(parsed.backlogTemplates),
         statusLine: migrateStatusLine(parsed.statusLine),
         appearance: migrateAppearance(parsed.appearance),
@@ -850,6 +894,7 @@ export function loadConfig(): UserConfig {
     tour: migrateTour(undefined),
     scheduler: migrateScheduler(undefined),
     backlogScheduler: migrateBacklogScheduler(undefined),
+    backlogPopulation: migrateBacklogPopulation(undefined),
     backlogTemplates: migrateBacklogTemplates(undefined),
     statusLine: migrateStatusLine(undefined),
     appearance: migrateAppearance(undefined),

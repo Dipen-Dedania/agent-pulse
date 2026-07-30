@@ -126,7 +126,7 @@ export const InfoTooltip: React.FC<{ children: React.ReactNode; label?: string }
           }}
           className='w-max max-w-[18rem]'
         >
-          <span className='block glass-modal rounded-lg px-3 py-2.5 text-left font-normal normal-case tracking-normal'>
+          <span className='block glass-modal rounded-lg px-3 py-2.5 text-left text-[11px] leading-relaxed text-primary font-normal normal-case tracking-normal'>
             {children}
           </span>
         </div>,

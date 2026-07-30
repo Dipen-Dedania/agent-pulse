@@ -269,6 +269,78 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(got.baseSha).toBeNull();
   });
 
+  // ── Phase 3: GitLab population columns ────────────────────────────────────
+
+  it('a new project starts with an empty GitLab link and the default issue filter', () => {
+    const p = store.listProjects().find((x) => x.id === projectId)!;
+    expect(p.gitlabProjectId).toBeNull();
+    expect(p.gitlabHost).toBeNull();
+    expect(p.gitlabProjectPath).toBeNull();
+    expect(p.gitlabLastScanAt).toBeNull();
+    expect(p.issueFilter).toEqual({ mode: 'assigned', labels: [] });
+  });
+
+  it('createCard carries source provenance and defaults it to null', () => {
+    const plain = store.createCard({ title: 'hand-authored', projectId });
+    expect(plain.sourceUrl).toBeNull();
+    expect(plain.sourceFingerprint).toBeNull();
+
+    const fromIssue = store.createCard({
+      title: 'from gitlab',
+      projectId,
+      sourceUrl: 'https://gitlab.com/grp/proj/-/issues/42',
+      sourceFingerprint: 'gitlab:1234:42',
+    });
+    const got = store.getCard(fromIssue.id)!;
+    expect(got.sourceUrl).toBe('https://gitlab.com/grp/proj/-/issues/42');
+    expect(got.sourceFingerprint).toBe('gitlab:1234:42');
+  });
+
+  it('setGitlabLink / setIssueFilter round-trip; clearGitlabLink resets', () => {
+    store.setGitlabLink(projectId, { id: 555, host: 'gitlab.com', projectPath: 'grp/proj' });
+    store.setIssueFilter(projectId, { mode: 'label', labels: ['bug', 'p1'] });
+    let p = store.listProjects().find((x) => x.id === projectId)!;
+    expect(p.gitlabProjectId).toBe(555);
+    expect(p.gitlabHost).toBe('gitlab.com');
+    expect(p.gitlabProjectPath).toBe('grp/proj');
+    expect(p.issueFilter).toEqual({ mode: 'label', labels: ['bug', 'p1'] });
+    store.clearGitlabLink(projectId);
+    p = store.listProjects().find((x) => x.id === projectId)!;
+    expect(p.gitlabProjectId).toBeNull();
+    expect(p.gitlabHost).toBeNull();
+  });
+
+  it('candidate upsert / list / delete / prune', () => {
+    const mk = (iid: number) => ({
+      fingerprint: `gitlab:1:${iid}`, projectId, iid, title: `t${iid}`,
+      description: '', webUrl: `u${iid}`, labels: ['x'], fetchedAt: iid,
+    });
+    store.upsertCandidates([mk(1), mk(2), mk(3)]);
+    expect(store.listCandidates(projectId)).toHaveLength(3);
+    // Upsert updates in place (no duplicate) and refreshes fields.
+    store.upsertCandidates([{ ...mk(1), title: 'renamed' }]);
+    const list = store.listCandidates(projectId);
+    expect(list).toHaveLength(3);
+    expect(list.find((c) => c.iid === 1)!.title).toBe('renamed');
+    // Prune keeps only the fingerprints the latest scan returned.
+    store.pruneCandidatesNotIn(projectId, ['gitlab:1:2']);
+    expect(store.listCandidates(projectId).map((c) => c.iid)).toEqual([2]);
+    store.deleteCandidates(['gitlab:1:2']);
+    expect(store.listCandidates(projectId)).toHaveLength(0);
+  });
+
+  it('dismiss tombstones a fingerprint; hasCardForFingerprint sees any state', () => {
+    expect(store.isDismissed('gitlab:1:9')).toBe(false);
+    store.dismiss([{ fingerprint: 'gitlab:1:9', projectId }]);
+    expect(store.isDismissed('gitlab:1:9')).toBe(true);
+    // A card carrying the fingerprint is detected regardless of its state.
+    const card = store.createCard({ title: 'imported', projectId, sourceFingerprint: 'gitlab:1:10' });
+    expect(store.hasCardForFingerprint('gitlab:1:10')).toBe(true);
+    store.setCardState(card.id, 'done');
+    expect(store.hasCardForFingerprint('gitlab:1:10')).toBe(true);
+    expect(store.hasCardForFingerprint('gitlab:1:404')).toBe(false);
+  });
+
   it('artifacts persist their kind (report default, diff, qa-report)', () => {
     const card = store.createCard({ title: 'x', projectId, state: 'todo' });
     const attempt = store.insertAttempt(card.id, false);
@@ -354,7 +426,7 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(s.fromAutorun).toBe(2);
     expect(s.fromManual).toBe(1);
     expect(s.alreadyPresent).toBe(1);
-    expect(s.methodBreakdown).toEqual({ clean: 1, threeWay: 1, stashed: 1, alreadyPresent: 1 });
+    expect(s.methodBreakdown).toEqual({ clean: 1, threeWay: 1, stashed: 1, alreadyPresent: 1, manual: 0 });
     expect(s.additions).toBe(128);          // 100 + 20 + 8 (already-present/out-of-range excluded)
     expect(s.deletions).toBe(16);
     expect(s.filesTouched).toBe(8);
@@ -366,6 +438,33 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(s.perProject).toEqual([{ projectId, name: 'demo', shipped: 3 }]);
     // Per-day buckets are gap-filled across the range; their ship totals sum to shipped.
     expect(s.perDay.reduce((n, d) => n + d.autorun + d.manual, 0)).toBe(3);
+  });
+
+  it('a manual mark counts as a real ship, and clearApply reverts it', () => {
+    const now = Date.now();
+    const card = store.createCard({ title: 'landed elsewhere', projectId, taskType: 'execution' });
+    store.setWorktree(card.id, `E:/wt/${card.id}`, 'sha');
+    store.setCardState(card.id, 'done');
+    // Manual mark: method 'manual', no LOC snapshot (worktree gone).
+    store.recordApply(card.id, { method: 'manual', autorun: false, additions: null, deletions: null, files: null });
+
+    let s = store.getShippedStats('7d', now);
+    expect(s.shipped).toBe(1);
+    expect(s.fromManual).toBe(1);
+    expect(s.fromAutorun).toBe(0);
+    expect(s.methodBreakdown.manual).toBe(1);
+    expect(s.alreadyPresent).toBe(0);
+    // No LOC snapshot on a hand-mark — sums stay at zero, ship still counts.
+    expect(s.additions).toBe(0);
+    expect(s.awaitingReview).toBe(0);
+
+    store.clearApply(card.id);
+    expect(store.getCard(card.id)!.appliedAt).toBeNull();
+    expect(store.getCard(card.id)!.applyMethod).toBeNull();
+    s = store.getShippedStats('7d', now);
+    expect(s.shipped).toBe(0);
+    expect(s.methodBreakdown.manual).toBe(0);
+    expect(s.awaitingReview).toBe(1); // back to a done-but-unapplied diff
   });
 
   it('getShippedStats ignores research/qa cards and returns a clean zero payload', () => {
@@ -438,8 +537,8 @@ describe.skipIf(!dbAvailable)('BacklogStore attachments', () => {
   });
 });
 
-describe.skipIf(!dbAvailable)('backlog schema migration v2 → v7', () => {
-  it('adds the Phase 2 columns, attachments table, qa_url, and apply-tracking columns to an existing v2 board', () => {
+describe.skipIf(!dbAvailable)('backlog schema migration v2 → v8', () => {
+  it('adds Phase 2 columns, attachments, qa_url, apply-tracking, and the v8 GitLab-population columns/tables to an existing v2 board', () => {
     const fs = require('fs') as typeof import('fs');
     const os = require('os') as typeof import('os');
     const path = require('path') as typeof import('path');
@@ -488,11 +587,28 @@ describe.skipIf(!dbAvailable)('backlog schema migration v2 → v7', () => {
       expect(card.appliedAutorun).toBe(false);
       expect(card.appliedAdditions).toBeNull();
       const version = migrated.prepare('SELECT version FROM schema_version').get() as { version: number };
-      expect(version.version).toBe(7);
+      expect(version.version).toBe(8);
       // v4: the attachments table exists and is usable on a migrated board.
       expect(store.listAttachments('c1')).toEqual([]);
       store.setCardAttachments('c1', { keepIds: [], add: [{ filename: 'note.md', content: 'hi', bytes: 2 }] });
       expect(store.listAttachments('c1')).toHaveLength(1);
+      // v8 GitLab-population defaults on a migrated board.
+      const project = store.listProjects().find((p) => p.id === 'p1')!;
+      expect(project.gitlabProjectId).toBeNull();
+      expect(project.gitlabHost).toBeNull();
+      expect(project.issueFilter).toEqual({ mode: 'assigned', labels: [] });
+      expect(card.sourceUrl).toBeNull();
+      expect(card.sourceFingerprint).toBeNull();
+      // v8 tables were created by SCHEMA_SQL on the migrating board.
+      const tables = migrated
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('gitlab_candidates','gitlab_dismissed')")
+        .all() as { name: string }[];
+      expect(tables.map((t) => t.name).sort()).toEqual(['gitlab_candidates', 'gitlab_dismissed']);
+      // idx_cards_source (created after the migration block) exists too.
+      const idx = migrated
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name = 'idx_cards_source'")
+        .get() as { name: string } | undefined;
+      expect(idx?.name).toBe('idx_cards_source');
       migrated.close();
     } finally {
       // Windows can hold the SQLite file handle briefly after close(), so retry

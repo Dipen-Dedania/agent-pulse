@@ -147,6 +147,7 @@ export const BacklogShippedCard: React.FC = () => {
             </span>
             <span className='text-faint'>
               clean {data!.methodBreakdown.clean} · 3-way {data!.methodBreakdown.threeWay} · stashed {data!.methodBreakdown.stashed}
+              {data!.methodBreakdown.manual > 0 && ` · manual ${data!.methodBreakdown.manual}`}
               {data!.alreadyPresent > 0 && ` · already-present ${data!.alreadyPresent}`}
             </span>
             <span className='flex items-center gap-1'>

@@ -9,6 +9,8 @@ import {
   BacklogSchedulerStatus,
   BacklogState,
   BacklogTemplate,
+  GitlabIssueFilter,
+  GitlabPopulationState,
   PendingAttachment,
 } from '../../common/backlog-types';
 import { logger } from '../../common/logger';
@@ -27,9 +29,18 @@ interface BacklogStore {
   cards: BacklogCard[];
   templates: BacklogTemplate[];
   status: BacklogSchedulerStatus | null;
+  gitlab: GitlabPopulationState;
 
   hydrate: () => Promise<void>;
   setStatus: (status: BacklogSchedulerStatus) => void;
+
+  // GitLab population (Phase 3)
+  linkGitlab: (projectId: string) => Promise<{ ok: boolean; reason?: string; projectPath?: string; host?: string; id?: number }>;
+  unlinkGitlab: (projectId: string) => Promise<{ ok: boolean; reason?: string }>;
+  setIssueFilter: (projectId: string, filter: GitlabIssueFilter) => Promise<{ ok: boolean; reason?: string }>;
+  scanGitlab: (projectId?: string) => Promise<{ ok?: boolean; candidates?: number; reason?: string }>;
+  importCandidates: (fingerprints: string[]) => Promise<{ ok: boolean; imported?: number; reason?: string }>;
+  dismissCandidates: (fingerprints: string[]) => Promise<{ ok: boolean; dismissed?: number; reason?: string }>;
 
   addProject: (path: string) => Promise<BacklogProject | null>;
   removeProject: (id: string) => Promise<{ ok: boolean; reason?: string }>;
@@ -56,6 +67,8 @@ interface BacklogStore {
   removeWorktree: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
   applyWorktree: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; conflicted?: boolean; dirtyTarget?: boolean; changedFiles?: string[] }>;
   applyWorktreeStashed: (cardId: string) => Promise<{ ok: boolean; reason?: string; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; stashed?: boolean; stashConflicted?: boolean; changedFiles?: string[] }>;
+  markApplied: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
+  clearApplied: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
   resumeSession: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
   refineStart: (cardId: string) => Promise<{ ok: boolean; reason?: string }>;
   importPlan: (cardId: string) => Promise<{ ok: boolean; reason?: string; imported?: boolean; chars?: number }>;
@@ -73,6 +86,7 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
   cards: [],
   templates: [],
   status: null,
+  gitlab: { candidates: [], connector: 'unknown', scanning: false, lastScanAt: null, lastReason: null },
 
   hydrate: async () => {
     try {
@@ -85,6 +99,7 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
         cards: state.cards,
         templates: state.templates,
         status: state.status,
+        gitlab: state.gitlab,
       });
     } catch (e) {
       logger.error('[useBacklogStore] hydrate failed', e);
@@ -187,6 +202,76 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
     }
   },
 
+  // ── GitLab population (Phase 3) ────────────────────────────────────────────
+  // All delegate to main, which broadcasts `backlog:changed`; we also await a
+  // hydrate so the caller sees fresh state without waiting for the broadcast.
+
+  linkGitlab: async (projectId) => {
+    try {
+      const res = await window.electron.invoke('backlog:link-gitlab', { projectId });
+      await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] linkGitlab failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  unlinkGitlab: async (projectId) => {
+    try {
+      const res = await window.electron.invoke('backlog:unlink-gitlab', { projectId });
+      await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] unlinkGitlab failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  setIssueFilter: async (projectId, filter) => {
+    try {
+      const res = await window.electron.invoke('backlog:set-issue-filter', { projectId, filter });
+      await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] setIssueFilter failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  scanGitlab: async (projectId) => {
+    try {
+      const res = await window.electron.invoke('backlog:scan-gitlab', { projectId });
+      await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] scanGitlab failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  importCandidates: async (fingerprints) => {
+    try {
+      const res = await window.electron.invoke('backlog:import-candidates', { fingerprints });
+      await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] importCandidates failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  dismissCandidates: async (fingerprints) => {
+    try {
+      const res = await window.electron.invoke('backlog:dismiss-candidates', { fingerprints });
+      await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] dismissCandidates failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
   // Discards the worktree's uncommitted changes (confirmed in the caller);
   // the captured diff artifact stays on the card either way.
   removeWorktree: async (cardId) => {
@@ -220,6 +305,31 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
       return res ?? { ok: false, reason: 'unavailable' };
     } catch (e) {
       logger.error('[useBacklogStore] applyWorktreeStashed failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  // Manual override for diffs landed outside Agent Pulse — records the card as
+  // shipped ('manual' method). Hydrate so the Shipped ribbon appears.
+  markApplied: async (cardId) => {
+    try {
+      const res = await window.electron.invoke('backlog:mark-applied', { cardId });
+      if (res?.ok) await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] markApplied failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  // Undo a manual mark (hand-marked cards only). Hydrate so the ribbon clears.
+  clearApplied: async (cardId) => {
+    try {
+      const res = await window.electron.invoke('backlog:clear-applied', { cardId });
+      if (res?.ok) await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] clearApplied failed', e);
       return { ok: false, reason: String(e) };
     }
   },

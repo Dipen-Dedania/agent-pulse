@@ -16,10 +16,13 @@ import {
   BacklogState,
   BacklogStatsRange,
   BacklogTemplate,
+  GitlabIssueFilter,
+  GitlabPopulationState,
   PendingAttachment,
 } from '../../common/backlog-types';
 import { BacklogStore, CreateCardInput, UpdateCardPatch } from './store';
 import { BacklogEngine } from './engine';
+import { PopulationScheduler } from './population-scheduler';
 import { resolveProjectDefaultModel, ProjectDefaultModel } from './claude-settings';
 import { ApplyResult, applyWorktree, applyWorktreeStashed, removeWorktree } from './worktree';
 import { isSafeSessionId } from './runner';
@@ -57,9 +60,15 @@ function savePlanAttachment(store: BacklogStore, cardId: string, plan: string): 
 export interface BacklogIpcDeps {
   store: BacklogStore | null;
   engine: BacklogEngine | null;
+  population: PopulationScheduler | null;
   getTemplates: () => BacklogTemplate[];
   unavailableReason?: string;
 }
+
+// Board hydrate needs a gitlab slice even when population/store is unavailable.
+const EMPTY_GITLAB_STATE: GitlabPopulationState = {
+  candidates: [], connector: 'unknown', scanning: false, lastScanAt: null, lastReason: null,
+};
 
 function broadcastChanged() {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -99,7 +108,7 @@ function recordApplyOnSuccess(store: BacklogStore, cardId: string, res: ApplyRes
 }
 
 export function registerBacklogIpc(deps: BacklogIpcDeps): void {
-  const { store, engine, getTemplates } = deps;
+  const { store, engine, population, getTemplates } = deps;
 
   ipcMain.handle('backlog:get-state', (): BacklogState => {
     if (!store) {
@@ -110,6 +119,7 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
         cards: [],
         templates: getTemplates(),
         status: null,
+        gitlab: EMPTY_GITLAB_STATE,
       };
     }
     return {
@@ -118,6 +128,7 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
       cards: store.listCards(),
       templates: getTemplates(),
       status: engine?.getStatus() ?? null,
+      gitlab: population?.getState() ?? EMPTY_GITLAB_STATE,
     };
   });
 
@@ -145,6 +156,48 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     const res = store.removeProject(args.id);
     if (res.ok) broadcastChanged();
     return res;
+  });
+
+  // ── GitLab population (Phase 3) ────────────────────────────────────────────
+  // link/unlink/set-filter/scan/import/dismiss all delegate to the population
+  // scheduler, which broadcasts `backlog:changed` (the hydrate carries the
+  // gitlab slice). projectId always references a registered project row.
+
+  ipcMain.handle('backlog:link-gitlab', async (_e, args: { projectId: string }) => {
+    if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
+    return population.linkProject(args?.projectId);
+  });
+
+  ipcMain.handle('backlog:unlink-gitlab', (_e, args: { projectId: string }) => {
+    if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
+    return population.unlinkProject(args?.projectId);
+  });
+
+  ipcMain.handle('backlog:set-issue-filter', (_e, args: { projectId: string; filter: GitlabIssueFilter }) => {
+    if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
+    return population.setIssueFilter(args?.projectId, args?.filter);
+  });
+
+  ipcMain.handle('backlog:scan-gitlab', async (_e, args: { projectId?: string }) => {
+    if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
+    return args?.projectId ? population.refreshProject(args.projectId) : population.refreshAll();
+  });
+
+  ipcMain.handle('backlog:list-candidates', (_e, args: { projectId?: string }) => {
+    if (!store) return { candidates: [] };
+    return { candidates: store.listCandidates(args?.projectId) };
+  });
+
+  ipcMain.handle('backlog:import-candidates', (_e, args: { fingerprints: string[] }) => {
+    if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
+    const fps = Array.isArray(args?.fingerprints) ? args.fingerprints.filter((x): x is string => typeof x === 'string') : [];
+    return population.importCandidates(fps);
+  });
+
+  ipcMain.handle('backlog:dismiss-candidates', (_e, args: { fingerprints: string[] }) => {
+    if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
+    const fps = Array.isArray(args?.fingerprints) ? args.fingerprints.filter((x): x is string => typeof x === 'string') : [];
+    return population.dismissCandidates(fps);
   });
 
   // What "Project default" resolves to for the card editor's model picker.
@@ -268,6 +321,51 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     const res = await applyWorktreeStashed(project.path, card.worktreePath);
     recordApplyOnSuccess(store, card.id, res);
     return res;
+  });
+
+  // "Mark as applied" — a manual override for execution cards whose diff was
+  // landed OUTSIDE Agent Pulse (your own git merge/commit), so the auto-capture
+  // in the apply handlers never fired. Without it the "shipped overnight" count
+  // silently undercounts. Records method 'manual' with no LOC snapshot (the
+  // worktree is typically already gone, so the real diff is unrecoverable) and
+  // derives the overnight/manual origin from the card's latest attempt — same
+  // rule as an in-app apply. Refused once the card is already applied so a real
+  // git-apply snapshot is never overwritten by a hand-mark.
+  ipcMain.handle('backlog:mark-applied', (_e, args: { cardId: string }) => {
+    if (!store) return { ok: false, reason: 'backlog storage unavailable' };
+    const card = store.getCard(args?.cardId);
+    if (!card) return { ok: false, reason: 'card not found' };
+    if (card.taskType !== 'execution') return { ok: false, reason: 'only execution cards ship a diff' };
+    if (card.appliedAt != null) return { ok: false, reason: 'card is already marked applied' };
+    if (engine?.getStatus().runningCardId === card.id) {
+      return { ok: false, reason: 'card is running — stop it first' };
+    }
+    const latest = store.listAttempts(card.id)[0];
+    store.recordApply(card.id, {
+      method: 'manual',
+      autorun: latest ? !latest.manual : false,
+      additions: null,
+      deletions: null,
+      files: null,
+    });
+    broadcastChanged();
+    return { ok: true };
+  });
+
+  // Undo a manual "Mark as applied" mis-click. Restricted to hand-marked cards
+  // ('manual') so an auto-captured git-apply record (and its LOC snapshot, the
+  // only durable trace of the diff) can't be erased from the UI.
+  ipcMain.handle('backlog:clear-applied', (_e, args: { cardId: string }) => {
+    if (!store) return { ok: false, reason: 'backlog storage unavailable' };
+    const card = store.getCard(args?.cardId);
+    if (!card) return { ok: false, reason: 'card not found' };
+    if (card.appliedAt == null) return { ok: false, reason: 'card is not marked applied' };
+    if (card.applyMethod !== 'manual') {
+      return { ok: false, reason: 'only a manual mark can be cleared — this diff was applied through Agent Pulse' };
+    }
+    store.clearApply(card.id);
+    broadcastChanged();
+    return { ok: true };
   });
 
   // "Resume in Claude Code": open an interactive terminal on the worktree that

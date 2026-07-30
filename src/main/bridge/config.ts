@@ -14,7 +14,9 @@ function resolvePort(): number {
   if (!raw) return DEFAULT_PORT;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
-    logger.warn(`[BridgeConfig] Ignoring invalid AGENT_PULSE_PORT="${raw}", falling back to ${DEFAULT_PORT}`);
+    logger.warn(
+      `[BridgeConfig] Ignoring invalid AGENT_PULSE_PORT="${raw}", falling back to ${DEFAULT_PORT}`,
+    );
     return DEFAULT_PORT;
   }
   return n;

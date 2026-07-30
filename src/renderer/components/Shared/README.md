@@ -18,6 +18,7 @@ duplicating markup elsewhere.
 |---|---|---|
 | `Button` | component | Glass button. `variant?: 'primary'\|'secondary'\|'danger'\|'ghost'` (default `primary`), `size?: 'xs'\|'sm'\|'md'` (default `md`), plus all native `<button>` props. Filled variants always use white text; `size` owns padding (don't override px/py via `className`). Never hand-roll `px-4 py-2 rounded-lg …` shells. |
 | `GlassToggle` | component | Spring-animated switch. `checked`, `onChange(next)`, `size?: 'sm'\|'md'\|'lg'`, `disabled?`, `label?`, `className?`. |
+| `Checkbox` | component | Glass checkbox replacing native `<input type="checkbox">` (whose unstyled box inherits the OS accent colour). `checked`, `onChange(next)`, `indeterminate?` (partial/dash state), `disabled?`, `label?`, `ariaLabel?`, `size?: 'sm'\|'md'`, `className?`. |
 | `Select` | component | Glass dropdown replacing native `<select>`; portal-rendered so it's never clipped. `value`, `options: SelectOption[]`, `onChange(value)`, `className?`, `ariaLabel?`. `SelectOption = { value, label, swatch? }`. |
 | `appAlert` | function | `appAlert(message, title?)` → styled alert; resolves when dismissed. |
 | `appConfirm` | function | `appConfirm({ title, message, confirmLabel?, cancelLabel?, danger? })` → `Promise<boolean>`. |

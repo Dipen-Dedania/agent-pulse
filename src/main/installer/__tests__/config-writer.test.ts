@@ -635,7 +635,7 @@ describe('ConfigWriter — grok', () => {
 // ── Grok ──────────────────────────────────────────────────────────────────────
 
 describe('ConfigWriter — grok', () => {
-  it('creates ~/.grok/hooks/agent-pulse.json with http hooks', async () => {
+  it('creates ~/.grok/hooks/agent-pulse.json with command hooks', async () => {
     await withFakeHome(async (writer) => {
       const result = await writer.installHook('grok');
       expect(result.success).toBe(true);
@@ -644,14 +644,21 @@ describe('ConfigWriter — grok', () => {
       const hookPath = path.join(tmpDir, '.grok', 'hooks', 'agent-pulse.json');
       expect(fs.existsSync(hookPath)).toBe(true);
 
+      // Grok's SSRF protection rejects http:// hook URLs, so we install a
+      // COMMAND hook that POSTs to the bridge via a script instead.
       const config = JSON.parse(fs.readFileSync(hookPath, 'utf8'));
       const hook = config.hooks.PreToolUse[0].hooks[0];
-      expect(hook.type).toBe('http');
-      expect(hook.url).toBe('http://localhost:4242/event');
+      expect(hook.type).toBe('command');
+      expect(hook.command).toBeTruthy();
       expect(config.hooks.SessionStart).toBeDefined();
       expect(config.hooks.StopFailure).toBeDefined();
       // Grok's matcher is a regex, so PreToolUse uses '.*', not Claude's '*'.
       expect(config.hooks.PreToolUse[0].matcher).toBe('.*');
+
+      // The command hook references scripts that must exist on disk.
+      const hooksDir = path.join(tmpDir, '.grok', 'hooks');
+      expect(fs.existsSync(path.join(hooksDir, 'agent-pulse.sh'))).toBe(true);
+      expect(fs.existsSync(path.join(hooksDir, 'agent-pulse.ps1'))).toBe(true);
     });
   });
 

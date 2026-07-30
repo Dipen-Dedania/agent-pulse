@@ -4,7 +4,7 @@ import {
   BacklogTemplate, PendingAttachment, QaProvider, RiskTier, isSafeModelId,
 } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, Button, Select, Tooltip } from '../Shared';
+import { appAlert, Button, Checkbox, Select, Tooltip } from '../Shared';
 import { TIER_META } from './CardTile';
 import { TemplateManagerModal } from './TemplateManagerModal';
 
@@ -529,11 +529,11 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             <div className='apple-scroll flex flex-col gap-1 max-h-36 overflow-y-auto glass-secondary shrink-0 p-2'>
               {prereqCandidates.map((c) => (
                 <label key={c.id} className='flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-glass/60 cursor-pointer'>
-                  <input
-                    type='checkbox'
+                  <Checkbox
+                    size='sm'
                     checked={prereqIds.includes(c.id)}
                     onChange={() => togglePrereq(c.id)}
-                    className='accent-blue-500'
+                    ariaLabel={`Require "${c.title}" done first`}
                   />
                   <span className='flex-1 min-w-0 text-sm text-primary truncate'>{c.title}</span>
                   <span className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 ${

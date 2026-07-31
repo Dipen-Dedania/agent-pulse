@@ -9,8 +9,10 @@ import {
   BacklogSchedulerStatus,
   BacklogState,
   BacklogTemplate,
-  GitlabIssueFilter,
-  GitlabPopulationState,
+  IssueFilter,
+  IssuePopulationState,
+  LinearProject,
+  LinearTeam,
   PendingAttachment,
 } from '../../common/backlog-types';
 import { logger } from '../../common/logger';
@@ -29,16 +31,19 @@ interface BacklogStore {
   cards: BacklogCard[];
   templates: BacklogTemplate[];
   status: BacklogSchedulerStatus | null;
-  gitlab: GitlabPopulationState;
+  population: IssuePopulationState;
 
   hydrate: () => Promise<void>;
   setStatus: (status: BacklogSchedulerStatus) => void;
 
-  // GitLab population (Phase 3)
+  // Issue population (Phase 3): GitLab + Linear
   linkGitlab: (projectId: string) => Promise<{ ok: boolean; reason?: string; projectPath?: string; host?: string; id?: number }>;
-  unlinkGitlab: (projectId: string) => Promise<{ ok: boolean; reason?: string }>;
-  setIssueFilter: (projectId: string, filter: GitlabIssueFilter) => Promise<{ ok: boolean; reason?: string }>;
-  scanGitlab: (projectId?: string) => Promise<{ ok?: boolean; candidates?: number; reason?: string }>;
+  listLinearTeams: () => Promise<{ ok: boolean; teams: LinearTeam[]; reason?: string }>;
+  listLinearProjects: (teamId: string) => Promise<{ ok: boolean; projects: LinearProject[]; reason?: string }>;
+  linkLinear: (projectId: string, team: LinearTeam, project?: LinearProject | null) => Promise<{ ok: boolean; reason?: string }>;
+  unlinkSource: (projectId: string) => Promise<{ ok: boolean; reason?: string }>;
+  setIssueFilter: (projectId: string, filter: IssueFilter) => Promise<{ ok: boolean; reason?: string }>;
+  scan: (projectId?: string) => Promise<{ ok?: boolean; candidates?: number; reason?: string }>;
   importCandidates: (fingerprints: string[]) => Promise<{ ok: boolean; imported?: number; reason?: string }>;
   dismissCandidates: (fingerprints: string[]) => Promise<{ ok: boolean; dismissed?: number; reason?: string }>;
 
@@ -86,7 +91,7 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
   cards: [],
   templates: [],
   status: null,
-  gitlab: { candidates: [], connector: 'unknown', scanning: false, lastScanAt: null, lastReason: null },
+  population: { candidates: [], connector: 'unknown', scanning: false, lastScanAt: null, lastReason: null },
 
   hydrate: async () => {
     try {
@@ -99,7 +104,7 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
         cards: state.cards,
         templates: state.templates,
         status: state.status,
-        gitlab: state.gitlab,
+        population: state.population,
       });
     } catch (e) {
       logger.error('[useBacklogStore] hydrate failed', e);
@@ -202,7 +207,7 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
     }
   },
 
-  // ── GitLab population (Phase 3) ────────────────────────────────────────────
+  // ── Issue population (Phase 3): GitLab + Linear ────────────────────────────
   // All delegate to main, which broadcasts `backlog:changed`; we also await a
   // hydrate so the caller sees fresh state without waiting for the broadcast.
 
@@ -217,13 +222,51 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
     }
   },
 
-  unlinkGitlab: async (projectId) => {
+  // Read-only scout that lists Linear teams for the link picker. No state
+  // change, so no hydrate.
+  listLinearTeams: async () => {
     try {
-      const res = await window.electron.invoke('backlog:unlink-gitlab', { projectId });
+      const res = await window.electron.invoke('backlog:list-linear-teams');
+      return res ?? { ok: false, teams: [], reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] listLinearTeams failed', e);
+      return { ok: false, teams: [], reason: String(e) };
+    }
+  },
+
+  // Read-only scout that lists a team's Linear projects for the optional
+  // narrowing step. No state change, so no hydrate.
+  listLinearProjects: async (teamId) => {
+    try {
+      const res = await window.electron.invoke('backlog:list-linear-projects', { teamId });
+      return res ?? { ok: false, projects: [], reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] listLinearProjects failed', e);
+      return { ok: false, projects: [], reason: String(e) };
+    }
+  },
+
+  linkLinear: async (projectId, team, project) => {
+    try {
+      const res = await window.electron.invoke('backlog:link-linear', {
+        projectId, teamId: team.id, teamKey: team.key, teamName: team.name,
+        scopeProjectId: project?.id, scopeProjectName: project?.name,
+      });
       await get().hydrate();
       return res ?? { ok: false, reason: 'unavailable' };
     } catch (e) {
-      logger.error('[useBacklogStore] unlinkGitlab failed', e);
+      logger.error('[useBacklogStore] linkLinear failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  unlinkSource: async (projectId) => {
+    try {
+      const res = await window.electron.invoke('backlog:unlink-source', { projectId });
+      await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] unlinkSource failed', e);
       return { ok: false, reason: String(e) };
     }
   },
@@ -239,13 +282,13 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
     }
   },
 
-  scanGitlab: async (projectId) => {
+  scan: async (projectId) => {
     try {
-      const res = await window.electron.invoke('backlog:scan-gitlab', { projectId });
+      const res = await window.electron.invoke('backlog:scan', { projectId });
       await get().hydrate();
       return res ?? { ok: false, reason: 'unavailable' };
     } catch (e) {
-      logger.error('[useBacklogStore] scanGitlab failed', e);
+      logger.error('[useBacklogStore] scan failed', e);
       return { ok: false, reason: String(e) };
     }
   },

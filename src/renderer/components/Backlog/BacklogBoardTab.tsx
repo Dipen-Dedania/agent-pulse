@@ -8,8 +8,9 @@ import { appAlert, appConfirm, Button, Tooltip } from '../Shared';
 import { CardTile } from './CardTile';
 import { CardEditorModal } from './CardEditorModal';
 import { ArtifactViewer } from './ArtifactViewer';
-import { GitlabHeaderActions, GitlabProjectStrip } from './GitlabControls';
-import { GitlabImportModal } from './GitlabImportModal';
+import { IssueSourceHeaderActions, IssueSourceProjectStrip } from './IssueSourceControls';
+import { IssueImportModal } from './IssueImportModal';
+import { SOURCE_META } from './source-meta';
 import { projectColor } from './project-colors';
 import { listItem } from '../../motion';
 
@@ -375,7 +376,7 @@ export const BacklogBoardTab: React.FC = () => {
               + New card
             </Button>
           </Tooltip>
-          <GitlabHeaderActions projectFilter={projectFilter} onReview={() => setImportOpen(true)} />
+          <IssueSourceHeaderActions projectFilter={projectFilter} onReview={() => setImportOpen(true)} />
         </div>
 
         {store.projects.length > 0 && (
@@ -390,7 +391,7 @@ export const BacklogBoardTab: React.FC = () => {
             </button>
             {store.projects.map((p) => (
               <span key={p.id} className='flex items-center'>
-                <Tooltip content={p.gitlabProjectId != null ? `${p.path} · 🦊 ${p.gitlabProjectPath} (id ${p.gitlabProjectId})` : p.path}>
+                <Tooltip content={p.source ? `${p.path} · ${SOURCE_META[p.source.kind].icon} ${p.source.name}` : p.path}>
                   <button
                     onClick={() => setProjectFilter(p.id)}
                     className={`px-3 py-1 rounded-l-lg text-xs font-medium cursor-pointer transition-colors ${
@@ -398,7 +399,7 @@ export const BacklogBoardTab: React.FC = () => {
                     }`}
                   >
                     {p.name}
-                    {p.gitlabProjectId != null && <span className='ml-1 opacity-70'>🦊</span>}
+                    {p.source && <span className='ml-1 opacity-70'>{SOURCE_META[p.source.kind].icon}</span>}
                   </button>
                 </Tooltip>
                 <Tooltip content={`Remove ${p.name} from the board`}>
@@ -415,8 +416,8 @@ export const BacklogBoardTab: React.FC = () => {
           </div>
         )}
 
-        {/* Per-project GitLab link controls, shown when a single project is selected. */}
-        {projectFilter !== 'all' && <GitlabProjectStrip projectId={projectFilter} />}
+        {/* Per-project issue-source link controls, shown when a single project is selected. */}
+        {projectFilter !== 'all' && <IssueSourceProjectStrip projectId={projectFilter} />}
       </div>
 
       {store.projects.length === 0 ? (
@@ -484,7 +485,7 @@ export const BacklogBoardTab: React.FC = () => {
         />
       )}
       {detailCard && <ArtifactViewer card={detailCard} onClose={() => setDetailCard(null)} />}
-      {importOpen && <GitlabImportModal projectFilter={projectFilter} onClose={() => setImportOpen(false)} />}
+      {importOpen && <IssueImportModal projectFilter={projectFilter} onClose={() => setImportOpen(false)} />}
     </div>
   );
 };

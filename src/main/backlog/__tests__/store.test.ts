@@ -269,14 +269,12 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(got.baseSha).toBeNull();
   });
 
-  // ── Phase 3: GitLab population columns ────────────────────────────────────
+  // ── Phase 3: issue population (source-neutral) ────────────────────────────
 
-  it('a new project starts with an empty GitLab link and the default issue filter', () => {
+  it('a new project starts unlinked (no source) with the default issue filter', () => {
     const p = store.listProjects().find((x) => x.id === projectId)!;
-    expect(p.gitlabProjectId).toBeNull();
-    expect(p.gitlabHost).toBeNull();
-    expect(p.gitlabProjectPath).toBeNull();
-    expect(p.gitlabLastScanAt).toBeNull();
+    expect(p.source).toBeNull();
+    expect(p.sourceLastScanAt).toBeNull();
     expect(p.issueFilter).toEqual({ mode: 'assigned', labels: [] });
   });
 
@@ -296,24 +294,27 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(got.sourceFingerprint).toBe('gitlab:1234:42');
   });
 
-  it('setGitlabLink / setIssueFilter round-trip; clearGitlabLink resets', () => {
-    store.setGitlabLink(projectId, { id: 555, host: 'gitlab.com', projectPath: 'grp/proj' });
+  it('setSourceLink (gitlab + linear) / setIssueFilter round-trip; clearSourceLink resets', () => {
+    store.setSourceLink(projectId, { kind: 'gitlab', ref: '555', host: 'gitlab.com', slug: 'grp/proj', name: 'grp/proj' });
     store.setIssueFilter(projectId, { mode: 'label', labels: ['bug', 'p1'] });
     let p = store.listProjects().find((x) => x.id === projectId)!;
-    expect(p.gitlabProjectId).toBe(555);
-    expect(p.gitlabHost).toBe('gitlab.com');
-    expect(p.gitlabProjectPath).toBe('grp/proj');
+    expect(p.source).toEqual({ kind: 'gitlab', ref: '555', host: 'gitlab.com', slug: 'grp/proj', name: 'grp/proj' });
     expect(p.issueFilter).toEqual({ mode: 'label', labels: ['bug', 'p1'] });
-    store.clearGitlabLink(projectId);
+
+    // Re-linking to Linear (one source per project) overwrites the GitLab link.
+    store.setSourceLink(projectId, { kind: 'linear', ref: 'team-uuid', host: null, slug: 'DEV', name: 'Development' });
     p = store.listProjects().find((x) => x.id === projectId)!;
-    expect(p.gitlabProjectId).toBeNull();
-    expect(p.gitlabHost).toBeNull();
+    expect(p.source).toEqual({ kind: 'linear', ref: 'team-uuid', host: null, slug: 'DEV', name: 'Development' });
+
+    store.clearSourceLink(projectId);
+    p = store.listProjects().find((x) => x.id === projectId)!;
+    expect(p.source).toBeNull();
   });
 
-  it('candidate upsert / list / delete / prune', () => {
-    const mk = (iid: number) => ({
-      fingerprint: `gitlab:1:${iid}`, projectId, iid, title: `t${iid}`,
-      description: '', webUrl: `u${iid}`, labels: ['x'], fetchedAt: iid,
+  it('candidate upsert / list / delete / prune (source-neutral ref)', () => {
+    const mk = (n: number) => ({
+      fingerprint: `gitlab:1:${n}`, projectId, sourceKind: 'gitlab' as const, ref: String(n), title: `t${n}`,
+      description: '', webUrl: `u${n}`, labels: ['x'], fetchedAt: n,
     });
     store.upsertCandidates([mk(1), mk(2), mk(3)]);
     expect(store.listCandidates(projectId)).toHaveLength(3);
@@ -321,17 +322,27 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     store.upsertCandidates([{ ...mk(1), title: 'renamed' }]);
     const list = store.listCandidates(projectId);
     expect(list).toHaveLength(3);
-    expect(list.find((c) => c.iid === 1)!.title).toBe('renamed');
+    expect(list.find((c) => c.ref === '1')!.title).toBe('renamed');
     // Prune keeps only the fingerprints the latest scan returned.
     store.pruneCandidatesNotIn(projectId, ['gitlab:1:2']);
-    expect(store.listCandidates(projectId).map((c) => c.iid)).toEqual([2]);
+    expect(store.listCandidates(projectId).map((c) => c.ref)).toEqual(['2']);
     store.deleteCandidates(['gitlab:1:2']);
     expect(store.listCandidates(projectId)).toHaveLength(0);
   });
 
+  it('a linear candidate round-trips with a string ref', () => {
+    store.upsertCandidates([{
+      fingerprint: 'linear:team-uuid:DEV-1036', projectId, sourceKind: 'linear', ref: 'DEV-1036',
+      title: 'homepage', description: 'd', webUrl: 'https://linear.app/x', labels: ['FE'], fetchedAt: 1,
+    }]);
+    const c = store.listCandidates(projectId)[0];
+    expect(c.sourceKind).toBe('linear');
+    expect(c.ref).toBe('DEV-1036');
+  });
+
   it('dismiss tombstones a fingerprint; hasCardForFingerprint sees any state', () => {
     expect(store.isDismissed('gitlab:1:9')).toBe(false);
-    store.dismiss([{ fingerprint: 'gitlab:1:9', projectId }]);
+    store.dismiss([{ fingerprint: 'gitlab:1:9', projectId, sourceKind: 'gitlab' }]);
     expect(store.isDismissed('gitlab:1:9')).toBe(true);
     // A card carrying the fingerprint is detected regardless of its state.
     const card = store.createCard({ title: 'imported', projectId, sourceFingerprint: 'gitlab:1:10' });
@@ -537,8 +548,8 @@ describe.skipIf(!dbAvailable)('BacklogStore attachments', () => {
   });
 });
 
-describe.skipIf(!dbAvailable)('backlog schema migration v2 → v8', () => {
-  it('adds Phase 2 columns, attachments, qa_url, apply-tracking, and the v8 GitLab-population columns/tables to an existing v2 board', () => {
+describe.skipIf(!dbAvailable)('backlog schema migration v2 → v9', () => {
+  it('adds Phase 2 columns, attachments, qa_url, apply-tracking, and the source-neutral population columns/tables to an existing v2 board', () => {
     const fs = require('fs') as typeof import('fs');
     const os = require('os') as typeof import('os');
     const path = require('path') as typeof import('path');
@@ -587,23 +598,23 @@ describe.skipIf(!dbAvailable)('backlog schema migration v2 → v8', () => {
       expect(card.appliedAutorun).toBe(false);
       expect(card.appliedAdditions).toBeNull();
       const version = migrated.prepare('SELECT version FROM schema_version').get() as { version: number };
-      expect(version.version).toBe(8);
+      expect(version.version).toBe(9);
       // v4: the attachments table exists and is usable on a migrated board.
       expect(store.listAttachments('c1')).toEqual([]);
       store.setCardAttachments('c1', { keepIds: [], add: [{ filename: 'note.md', content: 'hi', bytes: 2 }] });
       expect(store.listAttachments('c1')).toHaveLength(1);
-      // v8 GitLab-population defaults on a migrated board.
+      // v9 population defaults on a migrated board: unlinked, default filter.
       const project = store.listProjects().find((p) => p.id === 'p1')!;
-      expect(project.gitlabProjectId).toBeNull();
-      expect(project.gitlabHost).toBeNull();
+      expect(project.source).toBeNull();
+      expect(project.sourceLastScanAt).toBeNull();
       expect(project.issueFilter).toEqual({ mode: 'assigned', labels: [] });
       expect(card.sourceUrl).toBeNull();
       expect(card.sourceFingerprint).toBeNull();
-      // v8 tables were created by SCHEMA_SQL on the migrating board.
+      // v9 source-neutral tables were created by SCHEMA_SQL on the migrating board.
       const tables = migrated
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('gitlab_candidates','gitlab_dismissed')")
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('issue_candidates','issue_dismissed')")
         .all() as { name: string }[];
-      expect(tables.map((t) => t.name).sort()).toEqual(['gitlab_candidates', 'gitlab_dismissed']);
+      expect(tables.map((t) => t.name).sort()).toEqual(['issue_candidates', 'issue_dismissed']);
       // idx_cards_source (created after the migration block) exists too.
       const idx = migrated
         .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name = 'idx_cards_source'")
@@ -613,6 +624,78 @@ describe.skipIf(!dbAvailable)('backlog schema migration v2 → v8', () => {
     } finally {
       // Windows can hold the SQLite file handle briefly after close(), so retry
       // the unlink to avoid a flaky EBUSY here.
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+});
+
+describe.skipIf(!dbAvailable)('backlog schema migration v8 → v9 (GitLab → source-neutral)', () => {
+  it('backfills source_* from gitlab_*, carries candidates/dismissals into issue_* tables, and drops the old tables', () => {
+    const fs = require('fs') as typeof import('fs');
+    const os = require('os') as typeof import('os');
+    const path = require('path') as typeof import('path');
+    const Database = require('better-sqlite3');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pulse-mig9-'));
+    const dbPath = path.join(dir, 'board.db');
+    try {
+      // Build a v8 board: gitlab_* columns on a linked project, plus the
+      // gitlab_candidates / gitlab_dismissed tables with rows.
+      const legacy = new Database(dbPath);
+      legacy.exec(`
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+        CREATE TABLE projects (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL,
+          gitlab_project_id INTEGER, gitlab_host TEXT, gitlab_project_path TEXT,
+          issue_filter TEXT NOT NULL DEFAULT '{"mode":"assigned","labels":[]}', gitlab_last_scan_at INTEGER
+        );
+        CREATE TABLE cards (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+          project_id TEXT NOT NULL REFERENCES projects(id), state TEXT NOT NULL DEFAULT 'refinement',
+          sort_order INTEGER NOT NULL DEFAULT 0, source_url TEXT, source_fingerprint TEXT,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE gitlab_candidates (
+          fingerprint TEXT PRIMARY KEY, project_id TEXT NOT NULL, iid INTEGER NOT NULL,
+          title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', web_url TEXT NOT NULL,
+          labels TEXT NOT NULL DEFAULT '[]', fetched_at INTEGER NOT NULL
+        );
+        CREATE TABLE gitlab_dismissed (
+          fingerprint TEXT PRIMARY KEY, project_id TEXT NOT NULL, dismissed_at INTEGER NOT NULL
+        );
+        INSERT INTO schema_version (version) VALUES (8);
+        INSERT INTO projects (id, name, path, created_at, gitlab_project_id, gitlab_host, gitlab_project_path, gitlab_last_scan_at)
+          VALUES ('p1', 'demo', 'E:/repos/demo', 1, 4242, 'gitlab.com', 'grp/demo', 999);
+        INSERT INTO gitlab_candidates (fingerprint, project_id, iid, title, description, web_url, labels, fetched_at)
+          VALUES ('gitlab:4242:7', 'p1', 7, 'cand', 'd', 'https://x/7', '["bug"]', 5);
+        INSERT INTO gitlab_dismissed (fingerprint, project_id, dismissed_at)
+          VALUES ('gitlab:4242:9', 'p1', 6);
+      `);
+      legacy.close();
+
+      const migrated = openBacklogDb(dbPath)!;
+      expect(migrated).not.toBeNull();
+      const store = new BacklogStore(migrated);
+
+      // Version advanced, and the GitLab link backfilled onto the source shape.
+      expect((migrated.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(9);
+      const project = store.listProjects().find((p) => p.id === 'p1')!;
+      expect(project.source).toEqual({ kind: 'gitlab', ref: '4242', host: 'gitlab.com', slug: 'grp/demo', name: 'grp/demo' });
+      expect(project.sourceLastScanAt).toBe(999);
+
+      // Candidate + dismissal carried into the source-neutral tables.
+      const cands = store.listCandidates('p1');
+      expect(cands).toHaveLength(1);
+      expect(cands[0]).toMatchObject({ fingerprint: 'gitlab:4242:7', sourceKind: 'gitlab', ref: '7', title: 'cand' });
+      expect(store.isDismissed('gitlab:4242:9')).toBe(true);
+
+      // The old GitLab tables are gone; the source-neutral ones exist.
+      const tables = migrated
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('gitlab_candidates','gitlab_dismissed','issue_candidates','issue_dismissed')")
+        .all() as { name: string }[];
+      expect(tables.map((t) => t.name).sort()).toEqual(['issue_candidates', 'issue_dismissed']);
+
+      migrated.close();
+    } finally {
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });

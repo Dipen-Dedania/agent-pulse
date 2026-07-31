@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { BacklogPopulationConfig, GitlabIssueFilterMode } from '../../../common/backlog-types';
+import { BacklogPopulationConfig, IssueFilterMode } from '../../../common/backlog-types';
 import { GlassToggle, Select } from '../Shared';
 
-// Settings → Usage → Claude Code: GitLab issue population config (Phase 3),
-// sibling of the Backlog Scheduler section. The per-project link + scan + review
-// live on the board itself; this governs defaults + the optional background
-// refresh. See backlog-phase3-gitlab-population-plan.md (WS5, row 15).
+// Settings → Usage → Claude Code: issue population config (Phase 3), sibling of
+// the Backlog Scheduler section. Governs GitLab + Linear population defaults.
+// The per-project link + scan + review live on the board itself; this governs
+// defaults + the optional background refresh. See backlog-phase3-gitlab-population-plan.md.
 
 interface Props {
   config: BacklogPopulationConfig;
@@ -32,12 +32,13 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
     <section className='mt-6 glass-primary p-6'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
-          <h2 className='text-lg font-bold text-strong'>GitLab issue population</h2>
+          <h2 className='text-lg font-bold text-strong'>Issue population</h2>
           <p className='text-sm text-muted mt-1'>
-            Fill the <span className='text-body'>Backlog</span> board from your open GitLab issues. Link a
-            project on the board (it reads the repo’s <span className='font-mono'>origin</span> remote), scan,
-            then review &amp; import — imported issues land in Refinement. Uses your org GitLab connector, so
-            there’s no token to manage.
+            Fill the <span className='text-body'>Backlog</span> board from your open issues in
+            <span className='text-body'> GitLab</span> or <span className='text-body'>Linear</span>. Link a
+            project on the board — GitLab reads the repo’s <span className='font-mono'>origin</span> remote,
+            Linear links to a team you pick — then scan and review &amp; import; imported issues land in
+            Refinement. Uses your org connectors, so there’s no token to manage.
           </p>
         </div>
         <GlassToggle checked={config.enabled} onChange={(v) => onChange({ enabled: v })} label='Toggle GitLab population' />
@@ -48,13 +49,13 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
           <span className='text-xs font-medium text-muted'>Default issue filter (for newly linked projects)</span>
           <Select
             value={config.defaultFilterMode}
-            ariaLabel='Default GitLab issue filter'
+            ariaLabel='Default issue filter'
             options={[
               { value: 'assigned', label: 'Assigned to me' },
               { value: 'all', label: 'All open' },
               { value: 'label', label: 'By label' },
             ]}
-            onChange={(v) => onChange({ defaultFilterMode: v as GitlabIssueFilterMode })}
+            onChange={(v) => onChange({ defaultFilterMode: v as IssueFilterMode })}
           />
         </label>
 

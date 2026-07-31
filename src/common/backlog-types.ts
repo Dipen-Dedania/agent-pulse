@@ -41,13 +41,50 @@ export type QaProvider = 'browser' | 'tests' | 'lint' | 'typecheck' | 'custom' |
 // live UI, and delivers a report + evidence screenshots. Changes nothing.
 export type BacklogTaskType = 'research' | 'execution' | 'qa';
 
-// GitLab issue population (Phase 3). Which open issues a scan pulls for a
-// linked project. See backlog-phase3-gitlab-population-plan.md.
-export type GitlabIssueFilterMode = 'assigned' | 'all' | 'label';
+// Issue population (Phase 3). Which open issues a scan pulls for a linked
+// project. Shared by every provider (GitLab, Linear). See
+// backlog-phase3-gitlab-population-plan.md.
+export type IssueFilterMode = 'assigned' | 'all' | 'label';
 
-export interface GitlabIssueFilter {
-  mode: GitlabIssueFilterMode;
+export interface IssueFilter {
+  mode: IssueFilterMode;
   labels: string[]; // used when mode === 'label'
+}
+
+// Which external system a project pulls issues from. One source per project.
+export type IssueSourceKind = 'gitlab' | 'linear';
+
+// A Linear team, the unit a project links to. Surfaced by the link-time picker
+// (the Linear scout's list_teams) and passed back on link.
+export interface LinearTeam {
+  id: string;    // uuid — the stable link key (stored as source.ref)
+  key?: string;  // e.g. 'DEV' — display only; list_teams no longer returns it
+  name: string;  // e.g. 'Development'
+}
+
+// A Linear project within a team — the optional narrowing step at link time. If
+// the workspace runs one Linear project per repo, picking one here scopes scans
+// to just that repo's issues instead of the whole team's backlog (stored as
+// source.scopeRef / scopeName; the Linear list_issues `project` filter param).
+export interface LinearProject {
+  id: string;   // uuid — the list_issues `project` filter value
+  name: string; // e.g. 'Being website rebuild'
+}
+
+// A project's resolved link to an external issue source. `ref` is the stable
+// key (GitLab numeric project id as text; Linear team id); `slug`/`name` are
+// display-facing (GitLab 'group/sub/project'; Linear team key 'DEV' / name).
+// `scopeRef`/`scopeName` are an optional, provider-interpreted narrowing within
+// `ref` — for Linear, a project id + name that scopes scans to one project;
+// unused by GitLab. They never affect dedup (the fingerprint keys on `ref`).
+export interface IssueSourceLink {
+  kind: IssueSourceKind;
+  ref: string;
+  host: string | null; // GitLab host (self-managed support); null for Linear
+  slug: string;
+  name: string;
+  scopeRef?: string;   // Linear project id; undefined = whole team
+  scopeName?: string;  // Linear project name (display)
 }
 
 export interface BacklogProject {
@@ -55,13 +92,11 @@ export interface BacklogProject {
   name: string;        // basename of path by default, editable
   path: string;        // absolute repo folder — the executor's cwd
   createdAt: number;
-  // GitLab link (Phase 3). All null until the user links the repo's `origin`
-  // remote to its GitLab project; the numeric id survives GitLab renames.
-  gitlabProjectId: number | null;
-  gitlabHost: string | null;        // supports self-managed hosts
-  gitlabProjectPath: string | null; // 'group/sub/project' — display + relink
-  issueFilter: GitlabIssueFilter;
-  gitlabLastScanAt: number | null;
+  // Issue-source link (Phase 3). null until the user links this project to a
+  // GitLab project (via its `origin` remote) or a Linear team (via a picker).
+  source: IssueSourceLink | null;
+  issueFilter: IssueFilter;
+  sourceLastScanAt: number | null;
 }
 
 export interface BacklogCard {
@@ -244,14 +279,17 @@ export interface BacklogSchedulerConfig {
   webhooks: WebhookTarget[];
 }
 
-// ─── GitLab issue population (Phase 3) ───────────────────────────────────────
+// ─── Issue population (Phase 3) ──────────────────────────────────────────────
 
-// A GitLab issue surfaced by a scan but not yet imported or dismissed — the
-// backing row for the Review & Import picker. fingerprint = 'gitlab:<projectId>:<iid>'.
-export interface GitlabCandidate {
+// An external issue surfaced by a scan but not yet imported or dismissed — the
+// backing row for the Review & Import picker. `ref` is the provider's human
+// key (GitLab iid '54'; Linear identifier 'DEV-1036'). fingerprint is
+// 'gitlab:<projectId>:<iid>' or 'linear:<teamId>:<identifier>'.
+export interface IssueCandidate {
   fingerprint: string;
   projectId: string;
-  iid: number;
+  sourceKind: IssueSourceKind;
+  ref: string;
   title: string;
   description: string;
   webUrl: string;
@@ -259,21 +297,21 @@ export interface GitlabCandidate {
   fetchedAt: number;
 }
 
-// Persisted in user-config (sibling of BacklogSchedulerConfig). Governs GitLab
-// issue population. `scoutModel` defaults to a cheap model; the config migration
-// validates it via isSafeModelId and falls back to the default.
+// Persisted in user-config (sibling of BacklogSchedulerConfig). Governs issue
+// population for every provider. `scoutModel` defaults to a cheap model; the
+// config migration validates it via isSafeModelId and falls back to the default.
 export interface BacklogPopulationConfig {
   enabled: boolean;
-  defaultFilterMode: GitlabIssueFilterMode; // seeds a newly-linked project's filter
-  scoutModel: string;                       // e.g. 'claude-haiku-4-5'
-  backgroundRefresh: boolean;               // low-frequency badge refresh
-  refreshIntervalMinutes: number;           // used when backgroundRefresh is on
+  defaultFilterMode: IssueFilterMode; // seeds a newly-linked project's filter
+  scoutModel: string;                 // e.g. 'claude-haiku-4-5'
+  backgroundRefresh: boolean;         // low-frequency badge refresh
+  refreshIntervalMinutes: number;     // used when backgroundRefresh is on
 }
 
-// Live population state shipped in the board hydrate (BacklogState.gitlab).
+// Live population state shipped in the board hydrate (BacklogState.population).
 // connector is the verdict of the last scan (D8/D9); 'unknown' before any scan.
-export interface GitlabPopulationState {
-  candidates: GitlabCandidate[];
+export interface IssuePopulationState {
+  candidates: IssueCandidate[];
   connector: 'connected' | 'needs-auth' | 'unknown';
   scanning: boolean;
   lastScanAt: number | null;
@@ -357,5 +395,5 @@ export interface BacklogState {
   cards: BacklogCard[];
   templates: BacklogTemplate[];
   status: BacklogSchedulerStatus | null;
-  gitlab: GitlabPopulationState;
+  population: IssuePopulationState;
 }

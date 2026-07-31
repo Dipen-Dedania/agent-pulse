@@ -16,8 +16,8 @@ import {
   BacklogState,
   BacklogStatsRange,
   BacklogTemplate,
-  GitlabIssueFilter,
-  GitlabPopulationState,
+  IssueFilter,
+  IssuePopulationState,
   PendingAttachment,
 } from '../../common/backlog-types';
 import { BacklogStore, CreateCardInput, UpdateCardPatch } from './store';
@@ -65,8 +65,8 @@ export interface BacklogIpcDeps {
   unavailableReason?: string;
 }
 
-// Board hydrate needs a gitlab slice even when population/store is unavailable.
-const EMPTY_GITLAB_STATE: GitlabPopulationState = {
+// Board hydrate needs a population slice even when population/store is unavailable.
+const EMPTY_POPULATION_STATE: IssuePopulationState = {
   candidates: [], connector: 'unknown', scanning: false, lastScanAt: null, lastReason: null,
 };
 
@@ -119,7 +119,7 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
         cards: [],
         templates: getTemplates(),
         status: null,
-        gitlab: EMPTY_GITLAB_STATE,
+        population: EMPTY_POPULATION_STATE,
       };
     }
     return {
@@ -128,7 +128,7 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
       cards: store.listCards(),
       templates: getTemplates(),
       status: engine?.getStatus() ?? null,
-      gitlab: population?.getState() ?? EMPTY_GITLAB_STATE,
+      population: population?.getState() ?? EMPTY_POPULATION_STATE,
     };
   });
 
@@ -158,27 +158,54 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     return res;
   });
 
-  // ── GitLab population (Phase 3) ────────────────────────────────────────────
+  // ── Issue population (Phase 3): GitLab + Linear ────────────────────────────
   // link/unlink/set-filter/scan/import/dismiss all delegate to the population
   // scheduler, which broadcasts `backlog:changed` (the hydrate carries the
-  // gitlab slice). projectId always references a registered project row.
+  // population slice). projectId always references a registered project row.
 
   ipcMain.handle('backlog:link-gitlab', async (_e, args: { projectId: string }) => {
     if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
-    return population.linkProject(args?.projectId);
+    return population.linkGitlab(args?.projectId);
   });
 
-  ipcMain.handle('backlog:unlink-gitlab', (_e, args: { projectId: string }) => {
+  // List the workspace's Linear teams for the link-time picker (read-only scout).
+  ipcMain.handle('backlog:list-linear-teams', async () => {
+    if (!store || !population) return { ok: false, teams: [], reason: 'backlog storage unavailable' };
+    return population.listLinearTeams();
+  });
+
+  // List a chosen team's Linear projects for the optional narrowing step (read-only scout).
+  ipcMain.handle('backlog:list-linear-projects', async (_e, args: { teamId: string }) => {
+    if (!store || !population) return { ok: false, projects: [], reason: 'backlog storage unavailable' };
+    return population.listLinearProjects(args?.teamId);
+  });
+
+  ipcMain.handle(
+    'backlog:link-linear',
+    (_e, args: { projectId: string; teamId: string; teamKey: string; teamName: string; scopeProjectId?: string; scopeProjectName?: string }) => {
+      if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
+      const scope = typeof args?.scopeProjectId === 'string' && args.scopeProjectId.trim().length > 0
+        ? { projectId: args.scopeProjectId, projectName: args.scopeProjectName ?? '' }
+        : null;
+      return population.linkLinear(
+        args?.projectId,
+        { teamId: args?.teamId, teamKey: args?.teamKey, teamName: args?.teamName },
+        scope,
+      );
+    },
+  );
+
+  ipcMain.handle('backlog:unlink-source', (_e, args: { projectId: string }) => {
     if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
     return population.unlinkProject(args?.projectId);
   });
 
-  ipcMain.handle('backlog:set-issue-filter', (_e, args: { projectId: string; filter: GitlabIssueFilter }) => {
+  ipcMain.handle('backlog:set-issue-filter', (_e, args: { projectId: string; filter: IssueFilter }) => {
     if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
     return population.setIssueFilter(args?.projectId, args?.filter);
   });
 
-  ipcMain.handle('backlog:scan-gitlab', async (_e, args: { projectId?: string }) => {
+  ipcMain.handle('backlog:scan', async (_e, args: { projectId?: string }) => {
     if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
     return args?.projectId ? population.refreshProject(args.projectId) : population.refreshAll();
   });

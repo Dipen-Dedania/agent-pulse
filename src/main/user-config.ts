@@ -8,7 +8,7 @@ import {
   BacklogSchedulerConfig,
   BacklogSlot,
   BacklogTemplate,
-  GitlabIssueFilterMode,
+  IssueFilterMode,
   isSafeModelId,
 } from '../common/backlog-types';
 import { SecretProtectionConfig, SecretRule } from '../common/secretProtection';
@@ -478,7 +478,7 @@ export function migrateBacklogScheduler(raw: unknown): BacklogSchedulerConfig {
 // enum-checked; refresh interval clamped to a sane band. Exported: the
 // backlog:population:update-config IPC handler revalidates renderer partials
 // through it before persisting.
-const FILTER_MODES: GitlabIssueFilterMode[] = ['assigned', 'all', 'label'];
+const FILTER_MODES: IssueFilterMode[] = ['assigned', 'all', 'label'];
 export function migrateBacklogPopulation(raw: unknown): BacklogPopulationConfig {
   const d = DEFAULTS.backlogPopulation;
   if (!raw || typeof raw !== 'object') return { ...d };

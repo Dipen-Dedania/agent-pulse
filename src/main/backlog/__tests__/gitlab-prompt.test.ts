@@ -28,6 +28,12 @@ describe('buildScoutPrompt', () => {
     expect(p).toMatch(/ALL OPEN/);
   });
 
+  it('bounds the scan: caps the issue count and previews the description', () => {
+    const p = buildScoutPrompt(1234, { mode: 'all', labels: [] });
+    expect(p).toMatch(/at most 50 issues/);
+    expect(p).toMatch(/first 500 characters/);
+  });
+
   it('label mode passes the configured labels to list_issues', () => {
     const p = buildScoutPrompt(1234, { mode: 'label', labels: ['bug', 'p1'] });
     expect(p).toContain('list_issues');

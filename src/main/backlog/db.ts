@@ -40,7 +40,19 @@ type DatabaseConstructor = new (path: string) => Database;
 // v7: cards.applied_at / apply_method / applied_autorun / applied_additions /
 //     applied_deletions / applied_files — apply tracking for the "Shipped"
 //     ribbon and the Overnight Backlog analytics (see analytics-improvement-plan).
-const SCHEMA_VERSION = 8;
+// v8: projects.gitlab_* / issue_filter + cards.source_* + gitlab_candidates /
+//     gitlab_dismissed — GitLab issue population (Phase 3).
+// v9: generalize issue population to any source (GitLab + Linear): projects
+//     gains source_kind / source_ref / source_host / source_slug / source_name /
+//     source_last_scan_at (backfilled from the v8 gitlab_* columns, which are
+//     left in place unread), and the gitlab_candidates / gitlab_dismissed tables
+//     are superseded by source-neutral issue_candidates / issue_dismissed
+//     (rows copied over with source_kind='gitlab'). See linear-scout.ts.
+// v10: projects.source_scope_ref / source_scope_name — optional narrowing within
+//     a source link. For Linear, the chosen project's id + name scope scans to
+//     one project instead of the whole team; unused by GitLab. Dedup is
+//     unaffected (the fingerprint still keys on source_ref = team id).
+const SCHEMA_VERSION = 10;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -52,11 +64,15 @@ CREATE TABLE IF NOT EXISTS projects (
   name                TEXT NOT NULL,
   path                TEXT NOT NULL UNIQUE,
   created_at          INTEGER NOT NULL,
-  gitlab_project_id   INTEGER,
-  gitlab_host         TEXT,
-  gitlab_project_path TEXT,
+  source_kind         TEXT,
+  source_ref          TEXT,
+  source_host         TEXT,
+  source_slug         TEXT,
+  source_name         TEXT,
+  source_scope_ref    TEXT,
+  source_scope_name   TEXT,
   issue_filter        TEXT NOT NULL DEFAULT '{"mode":"assigned","labels":[]}',
-  gitlab_last_scan_at INTEGER
+  source_last_scan_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS cards (
@@ -137,13 +153,16 @@ CREATE TABLE IF NOT EXISTS card_attachments (
 
 CREATE INDEX IF NOT EXISTS idx_attachments_card ON card_attachments (card_id, created_at);
 
--- GitLab population (Phase 3). Candidates = issues surfaced by a scan, awaiting
--- the Review & Import picker. Dismissed = tombstones so a rejected issue does
--- not re-surface. Both cascade on project removal (foreign_keys = ON below).
-CREATE TABLE IF NOT EXISTS gitlab_candidates (
+-- Issue population (Phase 3), source-neutral (GitLab + Linear). Candidates =
+-- issues surfaced by a scan, awaiting the Review & Import picker. Dismissed =
+-- tombstones so a rejected issue does not re-surface. The ref column is the
+-- provider's human key (GitLab iid; Linear identifier DEV-1036). Both cascade on project
+-- removal (foreign_keys = ON below).
+CREATE TABLE IF NOT EXISTS issue_candidates (
   fingerprint  TEXT PRIMARY KEY,
   project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  iid          INTEGER NOT NULL,
+  source_kind  TEXT NOT NULL,
+  ref          TEXT NOT NULL,
   title        TEXT NOT NULL,
   description  TEXT NOT NULL DEFAULT '',
   web_url      TEXT NOT NULL,
@@ -151,15 +170,16 @@ CREATE TABLE IF NOT EXISTS gitlab_candidates (
   fetched_at   INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_gitlab_candidates_project ON gitlab_candidates (project_id);
+CREATE INDEX IF NOT EXISTS idx_issue_candidates_project ON issue_candidates (project_id);
 
-CREATE TABLE IF NOT EXISTS gitlab_dismissed (
+CREATE TABLE IF NOT EXISTS issue_dismissed (
   fingerprint  TEXT PRIMARY KEY,
   project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_kind  TEXT NOT NULL,
   dismissed_at INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_gitlab_dismissed_project ON gitlab_dismissed (project_id);
+CREATE INDEX IF NOT EXISTS idx_issue_dismissed_project ON issue_dismissed (project_id);
 `;
 
 /**
@@ -228,6 +248,57 @@ export function openBacklogDb(dbPath: string): Database | null {
         db.exec('ALTER TABLE projects ADD COLUMN gitlab_last_scan_at INTEGER');
         db.exec('ALTER TABLE cards ADD COLUMN source_url TEXT');
         db.exec('ALTER TABLE cards ADD COLUMN source_fingerprint TEXT');
+      }
+      if (current < 9) {
+        // Generalize issue population to any source (GitLab + Linear). Add the
+        // source-neutral columns on projects and backfill them from the v8
+        // gitlab_* columns, which are left in place (unread) to keep the
+        // migration reversible-in-spirit and avoid a table rebuild.
+        db.exec('ALTER TABLE projects ADD COLUMN source_kind TEXT');
+        db.exec('ALTER TABLE projects ADD COLUMN source_ref TEXT');
+        db.exec('ALTER TABLE projects ADD COLUMN source_host TEXT');
+        db.exec('ALTER TABLE projects ADD COLUMN source_slug TEXT');
+        db.exec('ALTER TABLE projects ADD COLUMN source_name TEXT');
+        db.exec('ALTER TABLE projects ADD COLUMN source_last_scan_at INTEGER');
+        db.exec(
+          `UPDATE projects SET
+             source_kind = 'gitlab',
+             source_ref  = CAST(gitlab_project_id AS TEXT),
+             source_host = gitlab_host,
+             source_slug = gitlab_project_path,
+             source_name = gitlab_project_path,
+             source_last_scan_at = gitlab_last_scan_at
+           WHERE gitlab_project_id IS NOT NULL`,
+        );
+        // Copy the GitLab candidate/dismissed rows into the source-neutral
+        // tables (created by SCHEMA_SQL above) with source_kind='gitlab' and
+        // ref = the iid, then drop the old tables. Guarded on existence so a
+        // board that never created them can't throw. Dismissed tombstones MUST
+        // carry over or rejected issues re-surface on the next scan.
+        const hasTable = (name: string): boolean =>
+          !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(name);
+        if (hasTable('gitlab_candidates')) {
+          db.exec(
+            `INSERT OR IGNORE INTO issue_candidates
+               (fingerprint, project_id, source_kind, ref, title, description, web_url, labels, fetched_at)
+             SELECT fingerprint, project_id, 'gitlab', CAST(iid AS TEXT), title, description, web_url, labels, fetched_at
+               FROM gitlab_candidates`,
+          );
+          db.exec('DROP TABLE gitlab_candidates');
+        }
+        if (hasTable('gitlab_dismissed')) {
+          db.exec(
+            `INSERT OR IGNORE INTO issue_dismissed (fingerprint, project_id, source_kind, dismissed_at)
+             SELECT fingerprint, project_id, 'gitlab', dismissed_at FROM gitlab_dismissed`,
+          );
+          db.exec('DROP TABLE gitlab_dismissed');
+        }
+      }
+      if (current < 10) {
+        // Optional per-source narrowing (Linear project within a team). Nullable,
+        // so existing links keep whole-team scope until re-linked with a project.
+        db.exec('ALTER TABLE projects ADD COLUMN source_scope_ref TEXT');
+        db.exec('ALTER TABLE projects ADD COLUMN source_scope_name TEXT');
       }
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }

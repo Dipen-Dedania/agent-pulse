@@ -159,11 +159,36 @@ export function buildQaPrompt(
 // JSON so parseScoutIssues can consume the result deterministically. Prompts go
 // over stdin, so interpolated ids/labels never touch argv.
 
+// Scan bounds (Phase 3). A busy team/project can return an issue payload large
+// enough to trip the CLI's large-tool-result offload, which balloons ONE scan
+// into many turns / minutes and blows the scout timeout (see scout-core's
+// SCOUT_SCAN_TIMEOUT_MS). Issue COUNT is the primary lever — keep the tool
+// result small so no offload happens; the description preview bounds each row
+// (and what an imported card stores). Kept generous enough that a candidate
+// card stays useful — the full issue is one click away via its webUrl.
+export const SCOUT_MAX_ISSUES = 50;
+export const SCOUT_DESC_PREVIEW_CHARS = 500;
+
+const SCOUT_BOUNDS =
+  `Return at most ${SCOUT_MAX_ISSUES} issues (the most recently updated). If the tool supports a ` +
+  `result limit or page size, request that many and do not page further; otherwise take the first ` +
+  `${SCOUT_MAX_ISSUES}. For each issue, include only the first ${SCOUT_DESC_PREVIEW_CHARS} characters ` +
+  `of its description.`;
+
+/** Cap a description to the scan preview length. Belt-and-braces: SCOUT_BOUNDS
+ *  already asks the scout to truncate, but a model may ignore it, so the parser
+ *  enforces the bound before a candidate is stored. */
+export function previewDescription(s: string): string {
+  if (s.length <= SCOUT_DESC_PREVIEW_CHARS) return s;
+  return s.slice(0, SCOUT_DESC_PREVIEW_CHARS).trimEnd() + '…';
+}
+
 const SCOUT_CONTRACT = `---
 Return ONLY a JSON array as your final message — no prose, no markdown code fences.
 Each element must be exactly:
   { "iid": <number>, "title": <string>, "description": <string>, "webUrl": <string>, "labels": <string[]> }
 Use the issue's IID (its per-project number), its web URL, and its label names.
+${SCOUT_BOUNDS}
 If there are no matching issues, return []. Call the GitLab tool at most once.`;
 
 /** Resolve a 'group/sub/project' path to its numeric GitLab id. */
@@ -199,6 +224,70 @@ export function buildScoutPrompt(projectId: number, filter: ScoutFilter): string
       `Use the GitLab MCP list_issues tool with project_id=${projectId} and state=opened.`;
   }
   return [instruction, '', SCOUT_CONTRACT].join('\n');
+}
+
+// ── Linear scout prompts (Phase 3 population) ────────────────────────────────
+// Sibling of the GitLab scout prompts. The Linear scout is a read-only
+// `claude -p` run with only the Linear MCP tools allow-listed (see
+// linear-scout.ts). Prompts go over stdin, so interpolated ids/labels never
+// touch argv. Contract verified 2026-07-30 (memory: linear-scout-contract).
+
+const LINEAR_SCOUT_CONTRACT = `---
+Return ONLY a JSON array as your final message — no prose, no markdown code fences.
+Each element must be exactly:
+  { "identifier": <string>, "title": <string>, "description": <string>, "url": <string>, "labels": <string[]> }
+The list_issues tool returns the issue's human reference (e.g. "DEV-1036") in its
+\`id\` field — map that to "identifier" in your output. If you request a field
+selection, never ask for a field named "identifier"; the tool has no such field
+and will reject the call. Use the issue's web URL and its label names.
+${SCOUT_BOUNDS}
+If there are no matching issues, return []. Call the Linear tool at most once.`;
+
+/** List the workspace's Linear teams for the link-time picker; strict JSON. */
+export function buildLinearTeamsPrompt(): string {
+  return [
+    'List my Linear teams using the Linear MCP list_teams tool.',
+    'Return ONLY a JSON array of objects with fields id and name (include key if the',
+    'tool provides one) — no prose, no notes, no code fences.',
+  ].join('\n');
+}
+
+/** List a Linear team's projects for the optional link-time narrowing step. The
+ *  list_projects tool takes a `team` param (the team id); strict JSON out. */
+export function buildLinearProjectsPrompt(teamId: string): string {
+  return [
+    `List the projects in the Linear team with id ${teamId} using the Linear MCP list_projects tool with team=${teamId}.`,
+    'Return ONLY a JSON array of objects with fields id and name — no prose, no notes, no code fences.',
+  ].join('\n');
+}
+
+/** List open issues for a Linear team per the filter mode; output is strict
+ *  JSON. When `projectId` is set, scope to that single Linear project (the
+ *  list_issues `project` filter param) instead of the whole team. */
+export function buildLinearScoutPrompt(teamId: string, filter: ScoutFilter, projectId?: string): string {
+  // Optional narrowing clause appended to every filter mode's instruction. The
+  // Linear list_issues param for a single project is `project` (NOT projectId).
+  const scope = projectId && projectId.trim().length > 0
+    ? ` Restrict to the Linear project with id ${projectId} by passing project=${projectId} to the tool.`
+    : '';
+  let instruction: string;
+  if (filter.mode === 'assigned') {
+    instruction =
+      `List the OPEN issues assigned to me in the Linear team with id ${teamId}. ` +
+      `Use the Linear MCP list_issues tool filtered to that team, assignee = me, and open (non-completed, non-canceled) states.`;
+  } else if (filter.mode === 'label') {
+    const labels = filter.labels.filter((l) => l.trim().length > 0);
+    instruction = labels.length > 0
+      ? `List the OPEN issues in the Linear team with id ${teamId} carrying the label(s) ${labels.join(', ')}. ` +
+        `Use the Linear MCP list_issues tool filtered to that team, those labels, and open states.`
+      : `List the OPEN issues in the Linear team with id ${teamId}. ` +
+        `Use the Linear MCP list_issues tool filtered to that team and open states.`;
+  } else {
+    instruction =
+      `List ALL OPEN issues in the Linear team with id ${teamId}. ` +
+      `Use the Linear MCP list_issues tool filtered to that team and open (non-completed, non-canceled) states.`;
+  }
+  return [instruction + scope, '', LINEAR_SCOUT_CONTRACT].join('\n');
 }
 
 /** Build the headless executor prompt for an execution card. */

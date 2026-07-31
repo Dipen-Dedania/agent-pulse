@@ -17,8 +17,10 @@ import {
   BacklogStatsPayload,
   BacklogStatsRange,
   BacklogTaskType,
-  GitlabCandidate,
-  GitlabIssueFilter,
+  IssueCandidate,
+  IssueFilter,
+  IssueSourceKind,
+  IssueSourceLink,
   QaProvider,
   RiskTier,
   isSafeModelId,
@@ -59,13 +61,16 @@ interface CardRow {
 
 interface ProjectRow {
   id: string; name: string; path: string; created_at: number;
-  gitlab_project_id: number | null; gitlab_host: string | null;
-  gitlab_project_path: string | null; issue_filter: string | null;
-  gitlab_last_scan_at: number | null;
+  source_kind: string | null; source_ref: string | null;
+  source_host: string | null; source_slug: string | null;
+  source_name: string | null;
+  source_scope_ref: string | null; source_scope_name: string | null;
+  issue_filter: string | null;
+  source_last_scan_at: number | null;
 }
 
-/** Persisted issue_filter JSON → validated GitlabIssueFilter (defaults on garbage). */
-function parseIssueFilter(raw: unknown): GitlabIssueFilter {
+/** Persisted issue_filter JSON → validated IssueFilter (defaults on garbage). */
+function parseIssueFilter(raw: unknown): IssueFilter {
   if (typeof raw === 'string') {
     try {
       const p = JSON.parse(raw);
@@ -81,17 +86,30 @@ function parseIssueFilter(raw: unknown): GitlabIssueFilter {
   return { mode: 'assigned', labels: [] };
 }
 
+/** Assemble the nullable IssueSourceLink from a project row (null = unlinked). */
+function rowToSource(r: ProjectRow): IssueSourceLink | null {
+  if (r.source_kind !== 'gitlab' && r.source_kind !== 'linear') return null;
+  if (r.source_ref == null) return null;
+  return {
+    kind: r.source_kind,
+    ref: r.source_ref,
+    host: r.source_host ?? null,
+    slug: r.source_slug ?? '',
+    name: r.source_name ?? r.source_slug ?? '',
+    ...(r.source_scope_ref ? { scopeRef: r.source_scope_ref } : {}),
+    ...(r.source_scope_name ? { scopeName: r.source_scope_name } : {}),
+  };
+}
+
 function rowToProject(r: ProjectRow): BacklogProject {
   return {
     id: r.id,
     name: r.name,
     path: r.path,
     createdAt: r.created_at,
-    gitlabProjectId: r.gitlab_project_id ?? null,
-    gitlabHost: r.gitlab_host ?? null,
-    gitlabProjectPath: r.gitlab_project_path ?? null,
+    source: rowToSource(r),
     issueFilter: parseIssueFilter(r.issue_filter),
-    gitlabLastScanAt: r.gitlab_last_scan_at ?? null,
+    sourceLastScanAt: r.source_last_scan_at ?? null,
   };
 }
 
@@ -294,29 +312,42 @@ export class BacklogStore {
     return { ok: true };
   }
 
-  // ── GitLab population (Phase 3) ─────────────────────────────────────────────
+  // ── Issue population (Phase 3): GitLab + Linear ─────────────────────────────
 
-  /** Cache the resolved GitLab identity on a project. Leaves issue_filter as-is
-   * (it keeps its DDL default 'assigned' on a first link; setIssueFilter edits it). */
-  setGitlabLink(projectId: string, link: { id: number; host: string; projectPath: string }): void {
+  /** Cache a resolved issue-source identity on a project. Leaves issue_filter
+   * as-is (it keeps its DDL default 'assigned' on a first link; setIssueFilter
+   * edits it). One source per project — this overwrites any prior link. */
+  setSourceLink(projectId: string, link: IssueSourceLink): void {
     this.db.prepare(
-      `UPDATE projects SET gitlab_project_id = @id, gitlab_host = @host,
-         gitlab_project_path = @projectPath WHERE id = @projectId`,
-    ).run({ projectId, id: link.id, host: link.host, projectPath: link.projectPath });
+      `UPDATE projects SET source_kind = @kind, source_ref = @ref, source_host = @host,
+         source_slug = @slug, source_name = @name,
+         source_scope_ref = @scopeRef, source_scope_name = @scopeName
+       WHERE id = @projectId`,
+    ).run({
+      projectId,
+      kind: link.kind,
+      ref: link.ref,
+      host: link.host ?? null,
+      slug: link.slug,
+      name: link.name,
+      scopeRef: link.scopeRef ?? null,
+      scopeName: link.scopeName ?? null,
+    });
   }
 
-  /** Unlink a project: clear its GitLab identity and drop its transient
+  /** Unlink a project: clear its issue-source identity and drop its transient
    * candidate/dismissed rows so a future re-link starts from a clean slate. */
-  clearGitlabLink(projectId: string): void {
+  clearSourceLink(projectId: string): void {
     this.db.prepare(
-      `UPDATE projects SET gitlab_project_id = NULL, gitlab_host = NULL,
-         gitlab_project_path = NULL, gitlab_last_scan_at = NULL WHERE id = ?`,
+      `UPDATE projects SET source_kind = NULL, source_ref = NULL, source_host = NULL,
+         source_slug = NULL, source_name = NULL, source_scope_ref = NULL,
+         source_scope_name = NULL, source_last_scan_at = NULL WHERE id = ?`,
     ).run(projectId);
-    this.db.prepare('DELETE FROM gitlab_candidates WHERE project_id = ?').run(projectId);
-    this.db.prepare('DELETE FROM gitlab_dismissed WHERE project_id = ?').run(projectId);
+    this.db.prepare('DELETE FROM issue_candidates WHERE project_id = ?').run(projectId);
+    this.db.prepare('DELETE FROM issue_dismissed WHERE project_id = ?').run(projectId);
   }
 
-  setIssueFilter(projectId: string, filter: GitlabIssueFilter): void {
+  setIssueFilter(projectId: string, filter: IssueFilter): void {
     const mode = filter.mode === 'all' || filter.mode === 'label' ? filter.mode : 'assigned';
     const labels = Array.isArray(filter.labels) ? filter.labels.filter((x) => typeof x === 'string') : [];
     this.db.prepare('UPDATE projects SET issue_filter = ? WHERE id = ?')
@@ -324,7 +355,7 @@ export class BacklogStore {
   }
 
   setLastScan(projectId: string, at: number): void {
-    this.db.prepare('UPDATE projects SET gitlab_last_scan_at = ? WHERE id = ?').run([at, projectId]);
+    this.db.prepare('UPDATE projects SET source_last_scan_at = ? WHERE id = ?').run([at, projectId]);
   }
 
   /** Dedup guard: is there ANY card (any state) already carrying this fingerprint?
@@ -333,12 +364,12 @@ export class BacklogStore {
     return !!this.db.prepare('SELECT 1 FROM cards WHERE source_fingerprint = ? LIMIT 1').get(fingerprint);
   }
 
-  // Candidates: the Review & Import picker's backing store.
+  // Candidates: the Review & Import picker's backing store (source-neutral).
 
-  upsertCandidates(rows: GitlabCandidate[]): void {
+  upsertCandidates(rows: IssueCandidate[]): void {
     const stmt = this.db.prepare(
-      `INSERT INTO gitlab_candidates (fingerprint, project_id, iid, title, description, web_url, labels, fetched_at)
-       VALUES (@fingerprint, @projectId, @iid, @title, @description, @webUrl, @labels, @fetchedAt)
+      `INSERT INTO issue_candidates (fingerprint, project_id, source_kind, ref, title, description, web_url, labels, fetched_at)
+       VALUES (@fingerprint, @projectId, @sourceKind, @ref, @title, @description, @webUrl, @labels, @fetchedAt)
        ON CONFLICT(fingerprint) DO UPDATE SET
          title = excluded.title, description = excluded.description,
          web_url = excluded.web_url, labels = excluded.labels, fetched_at = excluded.fetched_at`,
@@ -348,14 +379,15 @@ export class BacklogStore {
     }
   }
 
-  listCandidates(projectId?: string): GitlabCandidate[] {
+  listCandidates(projectId?: string): IssueCandidate[] {
     const rows = (projectId
-      ? this.db.prepare('SELECT * FROM gitlab_candidates WHERE project_id = ? ORDER BY iid DESC').all(projectId)
-      : this.db.prepare('SELECT * FROM gitlab_candidates ORDER BY fetched_at DESC, iid DESC').all()) as any[];
+      ? this.db.prepare('SELECT * FROM issue_candidates WHERE project_id = ? ORDER BY fetched_at DESC').all(projectId)
+      : this.db.prepare('SELECT * FROM issue_candidates ORDER BY fetched_at DESC').all()) as any[];
     return rows.map((r) => ({
       fingerprint: r.fingerprint,
       projectId: r.project_id,
-      iid: r.iid,
+      sourceKind: r.source_kind as IssueSourceKind,
+      ref: r.ref,
       title: r.title,
       description: r.description,
       webUrl: r.web_url,
@@ -365,31 +397,31 @@ export class BacklogStore {
   }
 
   deleteCandidates(fingerprints: string[]): void {
-    const stmt = this.db.prepare('DELETE FROM gitlab_candidates WHERE fingerprint = ?');
+    const stmt = this.db.prepare('DELETE FROM issue_candidates WHERE fingerprint = ?');
     for (const fp of fingerprints) stmt.run(fp);
   }
 
   /** Drop this project's candidates whose fingerprint the latest scan no longer returned. */
   pruneCandidatesNotIn(projectId: string, keepFingerprints: string[]): void {
     const keep = new Set(keepFingerprints);
-    const existing = this.db.prepare('SELECT fingerprint FROM gitlab_candidates WHERE project_id = ?')
+    const existing = this.db.prepare('SELECT fingerprint FROM issue_candidates WHERE project_id = ?')
       .all(projectId) as { fingerprint: string }[];
     this.deleteCandidates(existing.map((r) => r.fingerprint).filter((fp) => !keep.has(fp)));
   }
 
   // Dismissed tombstones: a rejected issue must not re-surface on the next scan.
 
-  dismiss(rows: { fingerprint: string; projectId: string }[]): void {
+  dismiss(rows: { fingerprint: string; projectId: string; sourceKind: IssueSourceKind }[]): void {
     const now = Date.now();
     const stmt = this.db.prepare(
-      `INSERT INTO gitlab_dismissed (fingerprint, project_id, dismissed_at) VALUES (?, ?, ?)
+      `INSERT INTO issue_dismissed (fingerprint, project_id, source_kind, dismissed_at) VALUES (?, ?, ?, ?)
        ON CONFLICT(fingerprint) DO NOTHING`,
     );
-    for (const r of rows) stmt.run([r.fingerprint, r.projectId, now]);
+    for (const r of rows) stmt.run([r.fingerprint, r.projectId, r.sourceKind, now]);
   }
 
   isDismissed(fingerprint: string): boolean {
-    return !!this.db.prepare('SELECT 1 FROM gitlab_dismissed WHERE fingerprint = ? LIMIT 1').get(fingerprint);
+    return !!this.db.prepare('SELECT 1 FROM issue_dismissed WHERE fingerprint = ? LIMIT 1').get(fingerprint);
   }
 
   // ── Cards ─────────────────────────────────────────────────────────────────

@@ -74,6 +74,25 @@ function displayPath(file: ParsedFile): string {
   return p === '/dev/null' ? (file.oldPath || file.newPath) : p;
 }
 
+/**
+ * Reconstruct a file's post-change content from its hunks for the copy button.
+ * We take the new side — insert + unchanged lines — so an added file yields the
+ * whole file and a modified file yields its changed regions. Deleted files fall
+ * back to the old side (there is no new content). Returns '' for binary files.
+ */
+function fileContentForCopy(file: ParsedFile): string {
+  if (file.isBinary) return '';
+  const keepDeletions = file.type === 'delete';
+  const lines: string[] = [];
+  for (const h of file.hunks ?? []) {
+    for (const c of h.changes ?? []) {
+      const drop = keepDeletions ? c.type === 'insert' : c.type === 'delete';
+      if (!drop) lines.push(c.content ?? '');
+    }
+  }
+  return lines.join('\n');
+}
+
 function fileStats(file: ParsedFile): { additions: number; deletions: number } {
   let additions = 0;
   let deletions = 0;
@@ -116,8 +135,12 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
     return (localStorage.getItem(VIEW_KEY) as ViewType) || 'split';
   });
   const [wide, setWide] = useState(true);
+  // Index of the file whose header copy button was just clicked, so it can flash
+  // a "Copied" checkmark; cleared after a moment.
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
   const fileRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { files, parseError } = useMemo(() => {
     try {
@@ -162,6 +185,20 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
 
   const scrollToFile = (i: number) => {
     fileRefs.current[i]?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
+
+  // Clean up the "Copied" flash timer on unmount.
+  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
+
+  const copyFile = async (file: ParsedFile, i: number) => {
+    try {
+      await navigator.clipboard.writeText(fileContentForCopy(file));
+      setCopiedIdx(i);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopiedIdx(null), 1500);
+    } catch (e) {
+      logger.warn('[DiffView] clipboard write failed', e);
+    }
   };
 
   if (parseError) {
@@ -266,6 +303,26 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
                   <span className='text-xs font-mono text-primary truncate flex-1'>
                     {file.type === 'rename' ? `${file.oldPath} → ${file.newPath}` : path}
                   </span>
+                  {!file.isBinary && file.hunks?.length ? (
+                    <Tooltip content={copiedIdx === i ? 'Copied!' : 'Copy file content'}>
+                      <button
+                        onClick={() => void copyFile(file, i)}
+                        aria-label='Copy file content'
+                        className='shrink-0 flex items-center justify-center w-6 h-6 rounded-md text-faint hover:text-primary hover:bg-control/50 transition-colors cursor-pointer'
+                      >
+                        {copiedIdx === i ? (
+                          <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='w-3.5 h-3.5 text-ok'>
+                            <polyline points='20 6 9 17 4 12' />
+                          </svg>
+                        ) : (
+                          <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' className='w-3.5 h-3.5'>
+                            <rect x='9' y='9' width='13' height='13' rx='2' ry='2' />
+                            <path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' />
+                          </svg>
+                        )}
+                      </button>
+                    </Tooltip>
+                  ) : null}
                   <span className='shrink-0 text-[10px] uppercase tracking-wider text-faint'>{status.label}</span>
                 </div>
                 {file.isBinary || !file.hunks?.length ? (

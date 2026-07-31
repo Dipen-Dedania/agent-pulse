@@ -30,6 +30,13 @@ describe('parseScoutIssues', () => {
     expect(parseScoutIssues('')).toEqual([]);
     expect(parseScoutIssues(null)).toEqual([]);
   });
+
+  it('truncates an over-long description to the preview length (belt-and-braces)', () => {
+    const long = 'y'.repeat(900);
+    const desc = parseScoutIssues(`[{"iid":9,"title":"t","description":"${long}"}]`)[0].description;
+    expect(desc.length).toBe(501); // 500 chars + the ellipsis
+    expect(desc.endsWith('…')).toBe(true);
+  });
 });
 
 describe('classifyConnector', () => {

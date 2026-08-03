@@ -1,41 +1,37 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { LinearProject, LinearTeam } from '../../../common/backlog-types';
+import { JiraProject, JiraSite } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { appAlert, Button, Radio } from '../Shared';
 import { SourceIcon } from './SourceIcon';
 
-// Linear link picker (Phase 3). Linear has no git remote to resolve, so the
-// user picks a team, then optionally narrows to a single Linear project. If the
-// workspace runs one project per repo, that second step scopes the board to just
-// this repo's issues instead of the whole team's backlog. Picking a project is
-// optional — "All issues in this team" stays a first-class choice.
+// JIRA link picker (Phase 3.5). JIRA has no git remote to resolve, so the user
+// picks an Atlassian site (Step 1 resolves the cloudId), then a Jira project
+// (Step 2). Unlike Linear, BOTH steps are mandatory — the project key scopes
+// every scan's JQL, so there is no "all projects" choice.
 
-type Step = 'team' | 'project';
-
-// Sentinel for the "All issues in this team" choice (no project scope).
-const ALL_ISSUES = '__all__';
+type Step = 'site' | 'project';
 
 interface Props {
   projectId: string;
   onClose: () => void;
 }
 
-export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
+export const JiraLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
   const store = useBacklogStore();
-  const [step, setStep] = useState<Step>('team');
+  const [step, setStep] = useState<Step>('site');
 
-  // Team step
+  // Site step
   const [loading, setLoading] = useState(true);
-  const [teams, setTeams] = useState<LinearTeam[]>([]);
+  const [sites, setSites] = useState<JiraSite[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
+  const [selectedSite, setSelectedSite] = useState<string | null>(null);
 
   // Project step
   const [projectsLoading, setProjectsLoading] = useState(false);
-  const [projects, setProjects] = useState<LinearProject[]>([]);
+  const [projects, setProjects] = useState<JiraProject[]>([]);
   const [projectsError, setProjectsError] = useState<string | null>(null);
-  const [selectedProject, setSelectedProject] = useState<string>(ALL_ISSUES);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
   const [linking, setLinking] = useState(false);
 
@@ -43,13 +39,13 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
     let cancelled = false;
     void (async () => {
       setLoading(true);
-      const res = await store.listLinearTeams();
+      const res = await store.listJiraSites();
       if (cancelled) return;
       if (res.ok) {
-        setTeams(res.teams);
-        if (res.teams.length === 1) setSelectedTeam(res.teams[0].id);
+        setSites(res.sites);
+        if (res.sites.length === 1) setSelectedSite(res.sites[0].cloudId);
       } else {
-        setError(res.reason ?? 'Could not list Linear teams.');
+        setError(res.reason ?? 'Could not list Atlassian sites.');
       }
       setLoading(false);
     })();
@@ -57,28 +53,32 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Advance to the project step, loading the chosen team's projects.
+  // Advance to the project step, loading the chosen site's projects.
   const goToProjects = async () => {
-    if (!selectedTeam) return;
+    if (!selectedSite) return;
     setStep('project');
     setProjectsLoading(true);
     setProjectsError(null);
     setProjects([]);
-    setSelectedProject(ALL_ISSUES);
-    const res = await store.listLinearProjects(selectedTeam);
-    if (res.ok) setProjects(res.projects);
-    else setProjectsError(res.reason ?? 'Could not list this team’s Linear projects.');
+    setSelectedProject(null);
+    const res = await store.listJiraProjects(selectedSite);
+    if (res.ok) {
+      setProjects(res.projects);
+      if (res.projects.length === 1) setSelectedProject(res.projects[0].key);
+    } else {
+      setProjectsError(res.reason ?? 'Could not list this site’s Jira projects.');
+    }
     setProjectsLoading(false);
   };
 
   const doLink = async () => {
-    const team = teams.find((t) => t.id === selectedTeam);
-    if (!team) return;
-    const project = selectedProject === ALL_ISSUES ? null : projects.find((p) => p.id === selectedProject) ?? null;
+    const site = sites.find((s) => s.cloudId === selectedSite);
+    const project = projects.find((p) => p.key === selectedProject);
+    if (!site || !project) return;
     setLinking(true);
-    const res = await store.linkLinear(projectId, team, project);
+    const res = await store.linkJira(projectId, site, project);
     setLinking(false);
-    if (!res.ok) { void appAlert(res.reason ?? 'Could not link this project to Linear.', 'Backlog'); return; }
+    if (!res.ok) { void appAlert(res.reason ?? 'Could not link this project to JIRA.', 'Backlog'); return; }
     onClose();
   };
 
@@ -98,35 +98,34 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
 
         <div>
           <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1 inline-flex items-center gap-1.5'>
-            <SourceIcon kind='linear' /> Linear
+            <SourceIcon kind='jira' /> JIRA
           </p>
-          {step === 'team' ? (
+          {step === 'site' ? (
             <>
-              <h2 className='text-lg font-bold text-strong leading-tight pr-8'>Link a Linear team</h2>
+              <h2 className='text-lg font-bold text-strong leading-tight pr-8'>Link an Atlassian site</h2>
               <p className='text-sm text-muted mt-1'>
-                Pick the team whose issues should populate this project’s board. Next you can narrow to a
-                single Linear project.
+                Pick the Atlassian site whose Jira issues should populate this project’s board. Next you’ll
+                pick a Jira project.
               </p>
             </>
           ) : (
             <>
-              <h2 className='text-lg font-bold text-strong leading-tight pr-8'>Narrow to a project</h2>
+              <h2 className='text-lg font-bold text-strong leading-tight pr-8'>Pick a Jira project</h2>
               <p className='text-sm text-muted mt-1'>
-                Optionally scope the board to one Linear project (e.g. this repo). Leave it on
-                <span className='font-medium text-body'> All issues</span> to pull the whole team. You can change the
-                issue filter after linking.
+                Choose the Jira project to pull open issues from. You can change the issue filter after
+                linking.
               </p>
             </>
           )}
         </div>
 
-        {/* ── Team step ─────────────────────────────────────────────────── */}
-        {step === 'team' && (
+        {/* ── Site step ─────────────────────────────────────────────────── */}
+        {step === 'site' && (
           <>
             {loading && (
               <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
                 <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
-                Listing your Linear teams…
+                Listing your Atlassian sites…
               </div>
             )}
 
@@ -134,34 +133,32 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
               <div className='glass-secondary p-3 text-xs text-warn'>
                 {error}
                 <span className='block mt-1 text-muted'>
-                  If Linear needs authentication, reconnect it in Claude Code (<span className='font-mono'>claude</span> →
-                  <span className='font-mono'> /mcp</span> → Linear), then try again.
+                  If Atlassian needs authentication, reconnect it in Claude Code (<span className='font-mono'>claude</span> →
+                  <span className='font-mono'> /mcp</span> → Atlassian), then try again.
                 </span>
               </div>
             )}
 
             {!loading && !error && (
               <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -m-1 p-1'>
-                {teams.length === 0 ? (
-                  <div className='glass-secondary p-6 text-center text-sm text-muted'>No Linear teams found.</div>
+                {sites.length === 0 ? (
+                  <div className='glass-secondary p-6 text-center text-sm text-muted'>No Atlassian sites found.</div>
                 ) : (
-                  teams.map((t) => {
-                    const on = selectedTeam === t.id;
+                  sites.map((s) => {
+                    const on = selectedSite === s.cloudId;
                     return (
                       <label
-                        key={t.id}
+                        key={s.cloudId}
                         className={`glass-secondary shrink-0 p-3 flex items-center gap-3 text-left transition-colors cursor-pointer ${on ? 'ring-2 ring-blue-400/70' : 'hover:bg-control/40'}`}
                       >
                         <Radio
-                          name='linear-team'
+                          name='jira-site'
                           checked={on}
-                          onChange={() => setSelectedTeam(t.id)}
-                          ariaLabel={`Select ${t.name}`}
+                          onChange={() => setSelectedSite(s.cloudId)}
+                          ariaLabel={`Select ${s.name}`}
                         />
-                        {t.key && (
-                          <span className='px-1.5 py-0.5 rounded text-[11px] bg-control/50 text-body font-mono'>{t.key}</span>
-                        )}
-                        <span className='text-sm text-strong truncate'>{t.name}</span>
+                        <span className='text-sm text-strong truncate'>{s.name}</span>
+                        {s.siteUrl && <span className='text-[11px] text-faint truncate'>{s.siteUrl}</span>}
                       </label>
                     );
                   })
@@ -170,7 +167,7 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
             )}
 
             <div className='flex items-center gap-2 pt-1'>
-              <Button variant='primary' size='sm' onClick={() => void goToProjects()} disabled={!selectedTeam}>
+              <Button variant='primary' size='sm' onClick={() => void goToProjects()} disabled={!selectedSite}>
                 Next
               </Button>
               <Button variant='ghost' size='sm' onClick={onClose} className='ml-auto'>Cancel</Button>
@@ -184,7 +181,7 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
             {projectsLoading && (
               <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
                 <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
-                Listing this team’s Linear projects…
+                Listing this site’s Jira projects…
               </div>
             )}
 
@@ -194,37 +191,25 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
 
             {!projectsLoading && !projectsError && (
               <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -m-1 p-1'>
-                {/* Always-present "whole team" choice. */}
-                <label
-                  className={`glass-secondary shrink-0 p-3 flex items-center gap-3 text-left transition-colors cursor-pointer ${selectedProject === ALL_ISSUES ? 'ring-2 ring-blue-400/70' : 'hover:bg-control/40'}`}
-                >
-                  <Radio
-                    name='linear-project'
-                    checked={selectedProject === ALL_ISSUES}
-                    onChange={() => setSelectedProject(ALL_ISSUES)}
-                    ariaLabel='All issues in this team'
-                  />
-                  <span className='text-sm text-strong'>All issues in this team</span>
-                </label>
-
                 {projects.length === 0 ? (
                   <div className='glass-secondary p-4 text-center text-xs text-muted'>
-                    This team has no projects — its issues will populate the board.
+                    No Jira projects you can browse on this site.
                   </div>
                 ) : (
                   projects.map((p) => {
-                    const on = selectedProject === p.id;
+                    const on = selectedProject === p.key;
                     return (
                       <label
-                        key={p.id}
+                        key={p.key}
                         className={`glass-secondary shrink-0 p-3 flex items-center gap-3 text-left transition-colors cursor-pointer ${on ? 'ring-2 ring-blue-400/70' : 'hover:bg-control/40'}`}
                       >
                         <Radio
-                          name='linear-project'
+                          name='jira-project'
                           checked={on}
-                          onChange={() => setSelectedProject(p.id)}
+                          onChange={() => setSelectedProject(p.key)}
                           ariaLabel={`Select ${p.name}`}
                         />
+                        <span className='px-1.5 py-0.5 rounded text-[11px] bg-control/50 text-body font-mono'>{p.key}</span>
                         <span className='text-sm text-strong truncate'>{p.name}</span>
                       </label>
                     );
@@ -234,8 +219,8 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
             )}
 
             <div className='flex items-center gap-2 pt-1'>
-              <Button variant='ghost' size='sm' onClick={() => setStep('team')} disabled={linking}>Back</Button>
-              <Button variant='primary' size='sm' onClick={() => void doLink()} disabled={linking || projectsLoading}>
+              <Button variant='ghost' size='sm' onClick={() => setStep('site')} disabled={linking}>Back</Button>
+              <Button variant='primary' size='sm' onClick={() => void doLink()} disabled={linking || projectsLoading || !selectedProject}>
                 {linking ? 'Linking…' : 'Link'}
               </Button>
               <Button variant='ghost' size='sm' onClick={onClose} className='ml-auto'>Cancel</Button>

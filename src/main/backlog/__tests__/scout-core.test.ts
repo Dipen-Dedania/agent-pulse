@@ -11,7 +11,7 @@ describe('buildScoutArgs', () => {
     expect(allowIdx).toBeGreaterThan(-1);
     expect(args[allowIdx + 1]).toBe('mcp__x__a,mcp__x__b'); // arbitrary allowlist passed through
     const disallowIdx = args.indexOf('--disallowedTools');
-    expect(args[disallowIdx + 1]).toBe('Write,Edit,Bash,NotebookEdit');
+    expect(args[disallowIdx + 1]).toBe('Write,Edit,Bash,NotebookEdit,Read,Grep,Glob,Agent,Task');
     expect(args[args.indexOf('--model') + 1]).toBe('claude-haiku-4-5');
   });
 

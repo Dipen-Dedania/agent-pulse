@@ -11,6 +11,8 @@ import {
   BacklogTemplate,
   IssueFilter,
   IssuePopulationState,
+  JiraProject,
+  JiraSite,
   LinearProject,
   LinearTeam,
   PendingAttachment,
@@ -41,6 +43,9 @@ interface BacklogStore {
   listLinearTeams: () => Promise<{ ok: boolean; teams: LinearTeam[]; reason?: string }>;
   listLinearProjects: (teamId: string) => Promise<{ ok: boolean; projects: LinearProject[]; reason?: string }>;
   linkLinear: (projectId: string, team: LinearTeam, project?: LinearProject | null) => Promise<{ ok: boolean; reason?: string }>;
+  listJiraSites: () => Promise<{ ok: boolean; sites: JiraSite[]; reason?: string }>;
+  listJiraProjects: (cloudId: string) => Promise<{ ok: boolean; projects: JiraProject[]; reason?: string }>;
+  linkJira: (projectId: string, site: JiraSite, project: JiraProject) => Promise<{ ok: boolean; reason?: string }>;
   unlinkSource: (projectId: string) => Promise<{ ok: boolean; reason?: string }>;
   setIssueFilter: (projectId: string, filter: IssueFilter) => Promise<{ ok: boolean; reason?: string }>;
   scan: (projectId?: string) => Promise<{ ok?: boolean; candidates?: number; reason?: string }>;
@@ -256,6 +261,44 @@ export const useBacklogStore = create<BacklogStore>((set, get) => ({
       return res ?? { ok: false, reason: 'unavailable' };
     } catch (e) {
       logger.error('[useBacklogStore] linkLinear failed', e);
+      return { ok: false, reason: String(e) };
+    }
+  },
+
+  // Read-only scout that lists Atlassian sites for the JIRA link Step-1 picker.
+  // No state change, so no hydrate.
+  listJiraSites: async () => {
+    try {
+      const res = await window.electron.invoke('backlog:list-jira-sites');
+      return res ?? { ok: false, sites: [], reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] listJiraSites failed', e);
+      return { ok: false, sites: [], reason: String(e) };
+    }
+  },
+
+  // Read-only scout that lists a site's Jira projects for the Step-2 picker. No
+  // state change, so no hydrate.
+  listJiraProjects: async (cloudId) => {
+    try {
+      const res = await window.electron.invoke('backlog:list-jira-projects', { cloudId });
+      return res ?? { ok: false, projects: [], reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] listJiraProjects failed', e);
+      return { ok: false, projects: [], reason: String(e) };
+    }
+  },
+
+  linkJira: async (projectId, site, project) => {
+    try {
+      const res = await window.electron.invoke('backlog:link-jira', {
+        projectId, cloudId: site.cloudId, siteUrl: site.siteUrl, siteName: site.name,
+        projectKey: project.key, projectName: project.name,
+      });
+      await get().hydrate();
+      return res ?? { ok: false, reason: 'unavailable' };
+    } catch (e) {
+      logger.error('[useBacklogStore] linkJira failed', e);
       return { ok: false, reason: String(e) };
     }
   },

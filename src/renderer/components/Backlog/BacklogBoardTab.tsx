@@ -11,6 +11,7 @@ import { ArtifactViewer } from './ArtifactViewer';
 import { IssueSourceHeaderActions, IssueSourceProjectStrip } from './IssueSourceControls';
 import { IssueImportModal } from './IssueImportModal';
 import { SOURCE_META } from './source-meta';
+import { SourceIcon } from './SourceIcon';
 import { projectColor } from './project-colors';
 import { listItem } from '../../motion';
 
@@ -391,7 +392,7 @@ export const BacklogBoardTab: React.FC = () => {
             </button>
             {store.projects.map((p) => (
               <span key={p.id} className='flex items-center'>
-                <Tooltip content={p.source ? `${p.path} · ${SOURCE_META[p.source.kind].icon} ${p.source.name}` : p.path}>
+                <Tooltip content={p.source ? `${p.path} · ${SOURCE_META[p.source.kind].label} ${p.source.name}` : p.path}>
                   <button
                     onClick={() => setProjectFilter(p.id)}
                     className={`px-3 py-1 rounded-l-lg text-xs font-medium cursor-pointer transition-colors ${
@@ -399,7 +400,7 @@ export const BacklogBoardTab: React.FC = () => {
                     }`}
                   >
                     {p.name}
-                    {p.source && <span className='ml-1 opacity-70'>{SOURCE_META[p.source.kind].icon}</span>}
+                    {p.source && <SourceIcon kind={p.source.kind} className='ml-1 w-3 h-3' />}
                   </button>
                 </Tooltip>
                 <Tooltip content={`Remove ${p.name} from the board`}>

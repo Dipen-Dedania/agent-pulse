@@ -52,7 +52,7 @@ export interface IssueFilter {
 }
 
 // Which external system a project pulls issues from. One source per project.
-export type IssueSourceKind = 'gitlab' | 'linear';
+export type IssueSourceKind = 'gitlab' | 'linear' | 'jira';
 
 // A Linear team, the unit a project links to. Surfaced by the link-time picker
 // (the Linear scout's list_teams) and passed back on link.
@@ -71,6 +71,23 @@ export interface LinearProject {
   name: string; // e.g. 'Being website rebuild'
 }
 
+// A JIRA site (Atlassian cloud instance), the Step-1 pick of the two-step link.
+// getAccessibleAtlassianResources resolves the cloudId that scopes every later
+// call (stored as source.ref); the URL is display + browse-link host (source.host).
+export interface JiraSite {
+  cloudId: string; // UUID — scopes every JIRA call; the stable link key (source.ref)
+  siteUrl: string; // e.g. 'https://acme.atlassian.net' — browse links + display (source.host)
+  name: string;    // e.g. 'acme'
+}
+
+// A JIRA project on a site — the Step-2 pick. Mandatory (unlike Linear's optional
+// project scope): the scout can't build a JQL scan without it. The key scopes the
+// JQL (`project = KEY`) and is stored as source.scopeRef.
+export interface JiraProject {
+  key: string;  // e.g. 'DSOC' — the JQL project scope + display ref prefix
+  name: string; // e.g. 'Data - Sales Ops & Category'
+}
+
 // A project's resolved link to an external issue source. `ref` is the stable
 // key (GitLab numeric project id as text; Linear team id); `slug`/`name` are
 // display-facing (GitLab 'group/sub/project'; Linear team key 'DEV' / name).
@@ -79,12 +96,12 @@ export interface LinearProject {
 // unused by GitLab. They never affect dedup (the fingerprint keys on `ref`).
 export interface IssueSourceLink {
   kind: IssueSourceKind;
-  ref: string;
-  host: string | null; // GitLab host (self-managed support); null for Linear
+  ref: string;         // GitLab numeric id (text); Linear team id; JIRA cloudId
+  host: string | null; // GitLab host / JIRA site URL; null for Linear
   slug: string;
   name: string;
-  scopeRef?: string;   // Linear project id; undefined = whole team
-  scopeName?: string;  // Linear project name (display)
+  scopeRef?: string;   // Linear project id (optional); JIRA project key (mandatory)
+  scopeName?: string;  // Linear project name / JIRA project name (display)
 }
 
 export interface BacklogProject {

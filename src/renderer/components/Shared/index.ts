@@ -14,5 +14,6 @@ export { appAlert, appConfirm, AppDialogHost, type ConfirmOptions } from './AppD
 export { TooltipOverlay } from './TooltipOverlay';
 export { Tooltip } from './Tooltip';
 export { Card } from './Card';
+export { Modal } from './Modal';
 export { Segmented } from './Segmented';
 export { AnimatedNumber } from './AnimatedNumber';

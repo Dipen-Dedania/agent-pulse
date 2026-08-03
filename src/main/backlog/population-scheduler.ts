@@ -1,7 +1,7 @@
 // Issue population orchestrator (Phase 3). Owns linking, scanning, and the
-// Review & Import lifecycle for every source (GitLab, Linear), decoupled from
-// the execution engine. A scan is a read-only scout run (see scout-core.ts /
-// gitlab-scout.ts / linear-scout.ts) that refreshes the candidate cache; cards
+// Review & Import lifecycle for every source (GitLab, Linear, JIRA), decoupled
+// from the execution engine. A scan is a read-only scout run (see scout-core.ts /
+// gitlab-scout.ts / linear-scout.ts / jira-scout.ts) that refreshes the cache; cards
 // are created only on explicit import. Scans spend real Claude window budget the
 // engine's usage latch can't see, so scanning gates on the same usage snapshot
 // the engine uses (item F). See backlog-phase3-gitlab-population-plan.md.
@@ -18,6 +18,7 @@ import { BacklogStore } from './store';
 import { parseGitRemote, readOriginRemote } from './gitlab-remote';
 import { fetchIssues as gitlabFetchIssues, resolveProjectId } from './gitlab-scout';
 import { fetchIssues as linearFetchIssues, listProjects as listLinearProjectsScout, listTeams, LinearProject, LinearTeam } from './linear-scout';
+import { fetchIssues as jiraFetchIssues, listProjects as listJiraProjectsScout, listSites, JiraProject, JiraSite } from './jira-scout';
 import { ScoutConnector } from './scout-core';
 
 // Skip a scan when the 5-hour window is at/above this utilization — a scout
@@ -43,6 +44,12 @@ export function fingerprintFor(gitlabProjectId: number, iid: number): string {
 /** Linear dedup key. teamId + the workspace-unique issue identifier. */
 export function linearFingerprintFor(teamId: string, identifier: string): string {
   return `linear:${teamId}:${identifier}`;
+}
+
+/** JIRA dedup key. cloudId + the STABLE numeric issue id (survives key changes
+ *  when an issue moves project — the human key can change, the id cannot). */
+export function jiraFingerprintFor(cloudId: string, issueId: string): string {
+  return `jira:${cloudId}:${issueId}`;
 }
 
 // Normalized candidate shape both providers reduce to before upsert.
@@ -196,6 +203,65 @@ export class PopulationScheduler {
     return { ok: true };
   }
 
+  /** List the user's accessible Atlassian sites for the JIRA link Step-1 picker. */
+  async listJiraSites(): Promise<{ ok: boolean; sites: JiraSite[]; reason?: string; connector?: ScoutConnector }> {
+    logger.info(`[Backlog/jira] listJiraSites: launching scout (model ${this.config().scoutModel})…`);
+    const res = await listSites();
+    this.setConnector(res.connector);
+    if (!res.ok) {
+      this.lastReason = res.reason ?? 'could not list Atlassian sites';
+      this.deps.broadcast();
+      return { ok: false, sites: [], reason: this.lastReason, connector: res.connector };
+    }
+    return { ok: true, sites: res.sites, connector: res.connector };
+  }
+
+  /** List a site's Jira projects for the JIRA link Step-2 picker. */
+  async listJiraProjects(cloudId: string): Promise<{ ok: boolean; projects: JiraProject[]; reason?: string; connector?: ScoutConnector }> {
+    if (typeof cloudId !== 'string' || cloudId.trim().length === 0) {
+      return { ok: false, projects: [], reason: 'an Atlassian site is required' };
+    }
+    logger.info(`[Backlog/jira] listJiraProjects: launching scout for cloudId ${cloudId}…`);
+    const res = await listJiraProjectsScout(cloudId);
+    this.setConnector(res.connector);
+    if (!res.ok) {
+      this.lastReason = res.reason ?? 'could not list Jira projects';
+      this.deps.broadcast();
+      return { ok: false, projects: [], reason: this.lastReason, connector: res.connector };
+    }
+    return { ok: true, projects: res.projects, connector: res.connector };
+  }
+
+  /** Link a project to a chosen JIRA site + project. Both are mandatory: the
+   *  project key (stored as scopeRef) scopes every scan's JQL. */
+  linkJira(
+    projectId: string,
+    site: { cloudId: string; siteUrl: string; siteName: string },
+    project: { projectKey: string; projectName: string },
+  ): { ok: boolean; reason?: string } {
+    const row = this.store.listProjects().find((p) => p.id === projectId);
+    if (!row) return { ok: false, reason: 'project not found' };
+    if (typeof site?.cloudId !== 'string' || site.cloudId.trim().length === 0) {
+      return { ok: false, reason: 'an Atlassian site is required' };
+    }
+    if (typeof project?.projectKey !== 'string' || project.projectKey.trim().length === 0) {
+      return { ok: false, reason: 'a Jira project is required' };
+    }
+    this.store.setSourceLink(projectId, {
+      kind: 'jira',
+      ref: site.cloudId,
+      host: site.siteUrl,
+      slug: project.projectKey,
+      name: project.projectName || project.projectKey,
+      scopeRef: project.projectKey,          // MANDATORY for JIRA — scopes the JQL.
+      scopeName: project.projectName || project.projectKey,
+    });
+    this.store.setIssueFilter(projectId, { mode: this.config().defaultFilterMode, labels: [] });
+    this.deps.broadcast();
+    logger.info(`[Backlog/jira] linked project ${projectId} → JIRA ${project.projectKey} on ${site.siteUrl}`);
+    return { ok: true };
+  }
+
   unlinkProject(projectId: string): { ok: boolean } {
     this.store.clearSourceLink(projectId);
     this.deps.broadcast();
@@ -221,6 +287,24 @@ export class PopulationScheduler {
       const issues = r.issues.map((i) => ({
         fingerprint: linearFingerprintFor(source.ref, i.identifier),
         ref: i.identifier,
+        title: i.title,
+        description: i.description,
+        webUrl: i.webUrl,
+        labels: i.labels,
+      }));
+      return { ok: r.ok, connector: r.connector, issues, reason: r.reason };
+    }
+    if (source.kind === 'jira') {
+      // JIRA needs a project key (source.scopeRef) — the shared model treats scope
+      // as optional, but the JQL scan can't run without it. Fail with a clear reason.
+      if (!source.scopeRef) {
+        return { ok: false, connector: this.connector === 'unknown' ? 'connected' : this.connector, issues: [], reason: 'JIRA link is missing a project key' };
+      }
+      const r = await jiraFetchIssues(source.ref /* cloudId */, source.scopeRef /* projectKey */, filter);
+      const issues = r.issues.map((i) => ({
+        // Fingerprint on the stable numeric id; display the human key (decision #3).
+        fingerprint: jiraFingerprintFor(source.ref, i.issueId),
+        ref: i.issueKey,
         title: i.title,
         description: i.description,
         webUrl: i.webUrl,

@@ -294,7 +294,7 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(got.sourceFingerprint).toBe('gitlab:1234:42');
   });
 
-  it('setSourceLink (gitlab + linear) / setIssueFilter round-trip; clearSourceLink resets', () => {
+  it('setSourceLink (gitlab + linear + jira) / setIssueFilter round-trip; clearSourceLink resets', () => {
     store.setSourceLink(projectId, { kind: 'gitlab', ref: '555', host: 'gitlab.com', slug: 'grp/proj', name: 'grp/proj' });
     store.setIssueFilter(projectId, { mode: 'label', labels: ['bug', 'p1'] });
     let p = store.listProjects().find((x) => x.id === projectId)!;
@@ -305,6 +305,18 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     store.setSourceLink(projectId, { kind: 'linear', ref: 'team-uuid', host: null, slug: 'DEV', name: 'Development' });
     p = store.listProjects().find((x) => x.id === projectId)!;
     expect(p.source).toEqual({ kind: 'linear', ref: 'team-uuid', host: null, slug: 'DEV', name: 'Development' });
+
+    // Re-linking to JIRA must survive the rowToSource read path (regression: the
+    // read allowlist once dropped any kind that wasn't gitlab/linear → null).
+    store.setSourceLink(projectId, {
+      kind: 'jira', ref: 'cloud-uuid', host: 'https://acme.atlassian.net',
+      slug: 'DSOC', name: 'Data - Sales Ops & Category', scopeRef: 'DSOC', scopeName: 'Data - Sales Ops & Category',
+    });
+    p = store.listProjects().find((x) => x.id === projectId)!;
+    expect(p.source).toEqual({
+      kind: 'jira', ref: 'cloud-uuid', host: 'https://acme.atlassian.net',
+      slug: 'DSOC', name: 'Data - Sales Ops & Category', scopeRef: 'DSOC', scopeName: 'Data - Sales Ops & Category',
+    });
 
     store.clearSourceLink(projectId);
     p = store.listProjects().find((x) => x.id === projectId)!;

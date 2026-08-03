@@ -88,7 +88,7 @@ function parseIssueFilter(raw: unknown): IssueFilter {
 
 /** Assemble the nullable IssueSourceLink from a project row (null = unlinked). */
 function rowToSource(r: ProjectRow): IssueSourceLink | null {
-  if (r.source_kind !== 'gitlab' && r.source_kind !== 'linear') return null;
+  if (r.source_kind !== 'gitlab' && r.source_kind !== 'linear' && r.source_kind !== 'jira') return null;
   if (r.source_ref == null) return null;
   return {
     kind: r.source_kind,

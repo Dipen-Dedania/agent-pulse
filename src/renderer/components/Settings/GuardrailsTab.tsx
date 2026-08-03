@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { GuardrailConfig, GuardrailEvent, GuardrailRule, GuardrailTier, GuardrailOs } from '../../../common/guardrails';
-import { Button, GlassToggle } from '../Shared';
+import { Button, GlassToggle, Segmented, Checkbox, Modal, appConfirm } from '../Shared';
+import { Field, inputCls, RuleRow, TabLoading } from './settingsShared';
 import { logger } from '../../../common/logger';
 
 // Serialized form of a GuardrailRule as it crosses IPC — RegExp doesn't
@@ -18,6 +19,14 @@ const OS_OPTIONS: { id: GuardrailOs; label: string }[] = [
   { id: 'linux', label: 'Linux' },
 ];
 
+// Regex flags that meaningfully affect command matching. `i` (case-insensitive)
+// is on by default; global/sticky/unicode don't change whether a pattern hits.
+const FLAG_OPTIONS: { id: string; label: string }[] = [
+  { id: 'i', label: 'Ignore case (i)' },
+  { id: 'm', label: 'Multiline (m)' },
+  { id: 's', label: 'Dotall (s)' },
+];
+
 const TIER_LABELS: Record<GuardrailTier, string> = {
   mustBlock: 'Block',
   warn:      'Warn',
@@ -27,6 +36,12 @@ const TIER_STYLES: Record<GuardrailTier, string> = {
   mustBlock: 'bg-red-500/15 border-red-500/30 text-danger',
   warn:      'bg-amber-500/15 border-amber-500/30 text-warn',
 };
+
+const TierBadge: React.FC<{ tier: GuardrailTier }> = ({ tier }) => (
+  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${TIER_STYLES[tier]}`}>
+    {TIER_LABELS[tier]}
+  </span>
+);
 
 export const GuardrailsTab: React.FC = () => {
   const [config, setConfig] = useState<GuardrailConfig | null>(null);
@@ -67,6 +82,13 @@ export const GuardrailsTab: React.FC = () => {
   };
 
   const removeCustomRule = async (ruleId: string) => {
+    const ok = await appConfirm({
+      title: 'Delete this guardrail?',
+      message: `“${ruleId}” will be removed permanently. Core rules can be turned off instead of deleted.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     const next = await window.electron.invoke('guardrails:remove-custom-rule', ruleId);
     setConfig(next);
   };
@@ -84,12 +106,7 @@ export const GuardrailsTab: React.FC = () => {
   }, [coreRules, config]);
 
   if (!config) {
-    return (
-      <div className='flex items-center gap-3 text-muted'>
-        <div className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
-        Loading guardrails…
-      </div>
-    );
+    return <TabLoading label='Loading guardrails…' />;
   }
 
   return (
@@ -98,7 +115,8 @@ export const GuardrailsTab: React.FC = () => {
         <div>
           <h2 className='text-xl font-bold tracking-tight'>Command Guardrails</h2>
           <p className='text-sm text-muted mt-1'>
-            Inspect shell commands before tools run them. Blocking works for tools that honour PreToolUse responses; everything else gets a warning.
+            Inspect shell commands before tools run them. Some agents (Claude Code, Codex, Grok, Antigravity)
+            can block a risky command outright; others just get a warning.
           </p>
         </div>
         <GlassToggle
@@ -109,135 +127,106 @@ export const GuardrailsTab: React.FC = () => {
         />
       </div>
 
-      {/* Rule list */}
-      <motion.div
-        whileHover={{ scale: 1.003 }}
-        transition={{ duration: 0.15, ease: 'easeOut' }}
-        className='glass-primary p-5'
-      >
-        <div className='flex items-center justify-between mb-4'>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
-            Rules ({allRules.length})
+      {!config.enabled && (
+        <div className='bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 mb-5'>
+          <p className='text-sm text-warn/90'>
+            <span className='font-semibold'>Guardrails are off.</span> Commands run without inspection —
+            nothing below is enforced until you turn guardrails back on.
           </p>
-          <Button
-            variant='primary'
-            size='sm'
-            onClick={() => setShowAdd(true)}
-          >
-            + Add rule
-          </Button>
         </div>
+      )}
 
-        <div className='flex flex-col gap-2'>
-          {allRules.map((rule) => {
-            const isDisabled = config.disabledRuleIds.includes(rule.id);
-            const isCustom = rule.source === 'user';
-            return (
-              <div
+      <div className={config.enabled ? '' : 'opacity-60 pointer-events-none'}>
+        {/* Rule list */}
+        <div className='glass-primary p-5'>
+          <div className='flex items-center justify-between mb-4'>
+            <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
+              Rules ({allRules.length})
+            </p>
+            <Button variant='primary' size='sm' onClick={() => setShowAdd(true)}>
+              + Add rule
+            </Button>
+          </div>
+
+          <div className='flex flex-col gap-2'>
+            {allRules.map((rule) => (
+              <RuleRow
                 key={rule.id}
-                className={`glass-secondary flex items-start gap-3 p-3 ${
-                  isDisabled ? 'opacity-50' : ''
-                }`}
-              >
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${TIER_STYLES[rule.tier]} shrink-0 mt-0.5`}
-                >
-                  {TIER_LABELS[rule.tier]}
-                </span>
-                <div className='flex-1 min-w-0'>
-                  <div className='flex items-center gap-2'>
-                    <code className='text-xs text-body font-mono truncate'>{rule.id}</code>
-                    <span className='text-[10px] text-faint'>
-                      {rule.os.join(', ')}
-                    </span>
-                    {isCustom && (
-                      <span className='text-[10px] text-blue-400 font-medium'>custom</span>
-                    )}
-                  </div>
-                  <p className='text-sm text-body mt-0.5'>{rule.message}</p>
-                  <code className='text-[10px] text-faint font-mono break-all'>/{rule.pattern}/{rule.flags ?? ''}</code>
-                  {rule.suggestedFix && (
-                    <p className='text-[11px] text-muted mt-1 italic'>→ {rule.suggestedFix}</p>
-                  )}
-                </div>
-                <div className='flex flex-col items-end gap-1 shrink-0'>
-                  <GlassToggle
-                    checked={!isDisabled}
-                    onChange={() => toggleRule(rule.id, !isDisabled)}
-                    size='sm'
-                    label={isDisabled ? 'Enable rule' : 'Disable rule'}
-                  />
-                  {isCustom && (
-                    <button
-                      onClick={() => removeCustomRule(rule.id)}
-                      className='text-[10px] text-faint hover:text-danger cursor-pointer transition-colors'
-                    >
-                      delete
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </motion.div>
-
-      {/* Recent events */}
-      <motion.div
-        whileHover={{ scale: 1.003 }}
-        transition={{ duration: 0.15, ease: 'easeOut' }}
-        className='glass-primary p-5 mt-5'
-      >
-        <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
-          Recent activity {events.length > 0 && `(${events.length})`}
-        </p>
-        {events.length === 0 ? (
-          <p className='text-sm text-faint italic'>No guardrail events yet.</p>
-        ) : (
-          <div className='flex flex-col gap-2 max-h-72 overflow-y-auto apple-scroll'>
-            {events.map((evt, i) => (
-              <div
-                key={`${evt.ts}-${i}`}
-                className='glass-secondary rounded-lg flex items-start gap-3 p-2.5'
-              >
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
-                    evt.decision === 'block'
-                      ? 'bg-red-500/15 border-red-500/30 text-danger'
-                      : 'bg-amber-500/15 border-amber-500/30 text-warn'
-                  }`}
-                >
-                  {evt.decision}
-                </span>
-                <div className='flex-1 min-w-0'>
-                  <div className='flex items-center gap-2 text-[10px] text-faint'>
-                    <span>{new Date(evt.ts).toLocaleTimeString()}</span>
-                    <span>·</span>
-                    <span>{evt.toolId}</span>
-                    {!evt.blockable && evt.decision === 'warn' && evt.matched.some(m => m.tier === 'mustBlock') && (
-                      <>
-                        <span>·</span>
-                        <span className='italic'>blocking not supported</span>
-                      </>
-                    )}
-                  </div>
-                  <code className='text-xs text-body font-mono break-all'>{evt.command}</code>
-                  <p className='text-[11px] text-muted mt-0.5'>
-                    {evt.matched.map(m => m.ruleId).join(', ')}
-                  </p>
-                </div>
-              </div>
+                badge={<TierBadge tier={rule.tier} />}
+                title={<code className='text-xs text-body font-mono truncate'>{rule.id}</code>}
+                meta={<span className='text-[10px] text-faint'>{rule.os.join(', ')}</span>}
+                isCustom={rule.source === 'user'}
+                message={rule.message}
+                subtext={
+                  <code className='text-[10px] text-muted font-mono break-all'>
+                    /{rule.pattern}/{rule.flags ?? ''}
+                  </code>
+                }
+                hint={rule.suggestedFix}
+                enabled={!config.disabledRuleIds.includes(rule.id)}
+                onToggle={() => toggleRule(rule.id, !config.disabledRuleIds.includes(rule.id))}
+                toggleLabel={config.disabledRuleIds.includes(rule.id) ? 'Enable rule' : 'Disable rule'}
+                onDelete={rule.source === 'user' ? () => removeCustomRule(rule.id) : undefined}
+              />
             ))}
           </div>
-        )}
-      </motion.div>
+        </div>
 
-      {showAdd && (
-        <AddRuleModal
-          onClose={() => setShowAdd(false)}
-          onSaved={(nextCfg) => { setConfig(nextCfg); setShowAdd(false); }}
-        />
-      )}
+        {/* Recent events */}
+        <div className='glass-primary p-5 mt-5'>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
+            Recent activity {events.length > 0 && `(${events.length})`}
+          </p>
+          {events.length === 0 ? (
+            <p className='text-sm text-faint italic'>No guardrail events yet.</p>
+          ) : (
+            <div className='flex flex-col gap-2 max-h-72 overflow-y-auto apple-scroll'>
+              {events.map((evt, i) => (
+                <div
+                  key={`${evt.ts}-${i}`}
+                  className='glass-secondary rounded-lg flex items-start gap-3 p-2.5'
+                >
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
+                      evt.decision === 'block'
+                        ? 'bg-red-500/15 border-red-500/30 text-danger'
+                        : 'bg-amber-500/15 border-amber-500/30 text-warn'
+                    }`}
+                  >
+                    {evt.decision === 'block' ? 'Blocked' : 'Warned'}
+                  </span>
+                  <div className='flex-1 min-w-0'>
+                    <div className='flex items-center gap-2 text-[10px] text-faint'>
+                      <span>{new Date(evt.ts).toLocaleTimeString()}</span>
+                      <span>·</span>
+                      <span>{evt.toolId}</span>
+                      {!evt.blockable && evt.decision === 'warn' && evt.matched.some(m => m.tier === 'mustBlock') && (
+                        <>
+                          <span>·</span>
+                          <span className='italic'>blocking not supported</span>
+                        </>
+                      )}
+                    </div>
+                    <code className='text-xs text-body font-mono break-all'>{evt.command}</code>
+                    <p className='text-[11px] text-muted mt-0.5'>
+                      {evt.matched.map(m => m.ruleId).join(', ')}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {showAdd && (
+          <AddRuleModal
+            onClose={() => setShowAdd(false)}
+            onSaved={(nextCfg) => { setConfig(nextCfg); setShowAdd(false); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -249,6 +238,8 @@ interface AddRuleModalProps {
   onSaved: (cfg: GuardrailConfig) => void;
 }
 
+type PatternCheck = { ok: boolean; reason?: string };
+
 const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
   const [id, setId] = useState('');
   const [pattern, setPattern] = useState('');
@@ -259,6 +250,7 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
   const [suggestedFix, setSuggestedFix] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [patternCheck, setPatternCheck] = useState<PatternCheck | null>(null);
 
   const toggleOs = (os: GuardrailOs) => {
     setOsSet((prev) => {
@@ -271,6 +263,26 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
       return next;
     });
   };
+
+  const toggleFlag = (flag: string) => {
+    setFlags((prev) => (prev.includes(flag) ? prev.replace(flag, '') : prev + flag));
+  };
+
+  // Live-validate the regex as the user types (debounced) so authoring feedback
+  // arrives at the point of input, not only on Save.
+  useEffect(() => {
+    if (!pattern.trim()) { setPatternCheck(null); return; }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const check = await window.electron.invoke('guardrails:validate-pattern', pattern);
+        if (!cancelled) setPatternCheck(check);
+      } catch {
+        if (!cancelled) setPatternCheck({ ok: false, reason: 'could not validate' });
+      }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [pattern]);
 
   const save = async () => {
     setError(null);
@@ -310,134 +322,85 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
   };
 
   return (
-    <div
-      className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm'
-      onClick={onClose}
-    >
-      <div
-        className='glass-modal apple-scroll w-full max-w-lg mx-4 p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-          aria-label='Close'
-        >
-          ✕
-        </button>
-        <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>New rule</p>
-          <h2 className='text-lg font-bold text-strong'>Custom guardrail</h2>
-        </div>
-
-        <Field label='ID'>
-          <input
-            value={id} onChange={(e) => setId(e.target.value)}
-            placeholder='e.g. block-prod-deploy'
-            className={inputCls}
-          />
-        </Field>
-
-        <Field label='Pattern (regex)'>
-          <input
-            value={pattern} onChange={(e) => setPattern(e.target.value)}
-            placeholder='e.g. \\bdeploy\\s+prod\\b'
-            className={inputCls + ' font-mono'}
-          />
-        </Field>
-
-        <Field label='Flags'>
-          <input
-            value={flags} onChange={(e) => setFlags(e.target.value)}
-            placeholder='i'
-            className={inputCls + ' font-mono w-24'}
-          />
-        </Field>
-
-        <Field label='Tier'>
-          <div className='flex gap-2'>
-            {(['mustBlock', 'warn'] as GuardrailTier[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTier(t)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors border ${
-                  tier === t ? TIER_STYLES[t] : 'border-edge text-muted hover:text-strong'
-                }`}
-              >
-                {TIER_LABELS[t]}
-              </button>
-            ))}
-          </div>
-        </Field>
-
-        <Field label='OS'>
-          <div className='flex gap-2 flex-wrap'>
-            {OS_OPTIONS.map(({ id: o, label }) => (
-              <button
-                key={o}
-                onClick={() => toggleOs(o)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors border ${
-                  osSet.has(o)
-                    ? 'bg-blue-500/15 border-blue-500/30 text-info'
-                    : 'border-edge text-muted hover:text-strong'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </Field>
-
-        <Field label='Message'>
-          <input
-            value={message} onChange={(e) => setMessage(e.target.value)}
-            placeholder='Why this command is risky.'
-            className={inputCls}
-          />
-        </Field>
-
-        <Field label='Suggested fix (optional)'>
-          <input
-            value={suggestedFix} onChange={(e) => setSuggestedFix(e.target.value)}
-            placeholder='What to do instead.'
-            className={inputCls}
-          />
-        </Field>
-
-        {error && (
-          <p className='text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2'>
-            {error}
-          </p>
-        )}
-
-        <div className='flex justify-end gap-2 mt-2'>
-          <Button
-            variant='secondary'
-            size='md'
-            onClick={onClose}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant='primary'
-            size='md'
-            onClick={save}
-            disabled={saving}
-          >
+    <Modal
+      eyebrow='New rule'
+      title='Custom guardrail'
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant='secondary' size='md' onClick={onClose}>Cancel</Button>
+          <Button variant='primary' size='md' onClick={save} disabled={saving}>
             {saving ? 'Saving…' : 'Save rule'}
           </Button>
+        </>
+      }
+    >
+      <Field label='ID'>
+        <input
+          value={id} onChange={(e) => setId(e.target.value)}
+          placeholder='e.g. block-prod-deploy'
+          className={inputCls}
+        />
+      </Field>
+
+      <Field label='Pattern (regex)'>
+        <input
+          value={pattern} onChange={(e) => setPattern(e.target.value)}
+          placeholder='e.g. \bdeploy\s+prod\b'
+          className={inputCls + ' font-mono'}
+        />
+        {patternCheck && (
+          <p className={`text-[11px] mt-1 ${patternCheck.ok ? 'text-ok' : 'text-danger'}`}>
+            {patternCheck.ok ? '✓ Valid pattern' : `✗ ${patternCheck.reason ?? 'invalid pattern'}`}
+          </p>
+        )}
+      </Field>
+
+      <Field label='Flags'>
+        <div className='flex gap-4 flex-wrap'>
+          {FLAG_OPTIONS.map(({ id: f, label }) => (
+            <Checkbox key={f} checked={flags.includes(f)} onChange={() => toggleFlag(f)} label={label} size='sm' />
+          ))}
         </div>
-      </div>
-    </div>
+      </Field>
+
+      <Field label='Tier'>
+        <Segmented
+          options={[{ value: 'mustBlock', label: 'Block' }, { value: 'warn', label: 'Warn' }]}
+          value={tier}
+          onChange={(v) => setTier(v as GuardrailTier)}
+        />
+      </Field>
+
+      <Field label='OS'>
+        <div className='flex gap-4 flex-wrap'>
+          {OS_OPTIONS.map(({ id: o, label }) => (
+            <Checkbox key={o} checked={osSet.has(o)} onChange={() => toggleOs(o)} label={label} size='sm' />
+          ))}
+        </div>
+      </Field>
+
+      <Field label='Message'>
+        <input
+          value={message} onChange={(e) => setMessage(e.target.value)}
+          placeholder='Why this command is risky.'
+          className={inputCls}
+        />
+      </Field>
+
+      <Field label='Suggested fix (optional)'>
+        <input
+          value={suggestedFix} onChange={(e) => setSuggestedFix(e.target.value)}
+          placeholder='What to do instead.'
+          className={inputCls}
+        />
+      </Field>
+
+      {error && (
+        <p className='text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2'>
+          {error}
+        </p>
+      )}
+    </Modal>
   );
 };
-
-const inputCls =
-  'glass-secondary rounded-lg w-full px-3 py-2 text-sm text-strong placeholder:text-faint focus:outline-none focus:border-blue-500/60';
-
-const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div>
-    <p className='text-xs font-semibold uppercase tracking-wider text-faint mb-1.5'>{label}</p>
-    {children}
-  </div>
-);

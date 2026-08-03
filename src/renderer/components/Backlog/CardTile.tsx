@@ -4,6 +4,7 @@ import { BacklogCard, BacklogCardState } from '../../../common/backlog-types';
 import { projectColor } from './project-colors';
 import { hoverLift } from '../../motion';
 import { Tooltip } from '../Shared';
+import { SourceIcon } from './SourceIcon';
 
 export const TIER_META: Record<BacklogCard['riskTier'], { dot: string; label: string; hint: string }> = {
   green: { dot: 'bg-emerald-400', label: 'Green', hint: 'autoruns in scheduled windows' },
@@ -185,9 +186,9 @@ export const CardTile: React.FC<Props> = ({
           <Tooltip content={`GitLab issue — open ${card.sourceUrl}`}>
             <button
               onClick={(e) => { e.stopPropagation(); void window.electron.invoke('open-external', card.sourceUrl); }}
-              className='px-1.5 py-0.5 rounded font-mono bg-orange-500/15 text-orange-300 light:text-orange-700 hover:bg-orange-500/25 cursor-pointer transition-colors'
+              className='px-1.5 py-0.5 rounded font-mono bg-orange-500/15 text-orange-300 light:text-orange-700 hover:bg-orange-500/25 cursor-pointer transition-colors inline-flex items-center gap-1'
             >
-              🦊 #{card.sourceFingerprint.split(':').pop()}
+              <SourceIcon kind='gitlab' className='w-3 h-3' /> #{card.sourceFingerprint.split(':').pop()}
             </button>
           </Tooltip>
         )}

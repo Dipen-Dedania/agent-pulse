@@ -63,7 +63,7 @@ describe('buildScoutArgs', () => {
     expect(args[allowIdx + 1]).toContain('mcp__claude_ai_Gitlab_Cloud__my_issues');
     expect(args[allowIdx + 1]).toContain('mcp__claude_ai_Gitlab_Cloud__get_project');
     const disallowIdx = args.indexOf('--disallowedTools');
-    expect(args[disallowIdx + 1]).toBe('Write,Edit,Bash,NotebookEdit');
+    expect(args[disallowIdx + 1]).toBe('Write,Edit,Bash,NotebookEdit,Read,Grep,Glob,Agent,Task');
     expect(args).toContain('--model');
     expect(args[args.indexOf('--model') + 1]).toBe('claude-haiku-4-5');
   });

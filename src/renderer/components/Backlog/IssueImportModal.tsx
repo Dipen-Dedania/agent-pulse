@@ -5,6 +5,7 @@ import { useBacklogStore } from '../../store/useBacklogStore';
 import { appAlert, Button, Checkbox, Tooltip } from '../Shared';
 import { projectColor } from './project-colors';
 import { SOURCE_META, issueRefLabel } from './source-meta';
+import { SourceIcon } from './SourceIcon';
 
 // Review & Import picker (Phase 3), source-neutral. The candidate list a scan
 // produced (GitLab or Linear). The user ticks issues to import as Refinement
@@ -130,8 +131,8 @@ export const IssueImportModal: React.FC<Props> = ({ projectFilter, onClose }) =>
               const displayTitle = c.title.trim().length > 0 ? c.title : `Issue ${ref}`;
               const sourceTip = p?.source
                 ? c.sourceKind === 'gitlab'
-                  ? `🦊 ${p.source.slug}${p.source.ref ? ` (id ${p.source.ref})` : ''}`
-                  : `▲ ${p.source.name} (${p.source.slug})`
+                  ? `${meta.label} ${p.source.slug}${p.source.ref ? ` (id ${p.source.ref})` : ''}`
+                  : `${meta.label} ${p.source.name} (${p.source.slug})`
                 : undefined;
               return (
               <label
@@ -155,9 +156,9 @@ export const IssueImportModal: React.FC<Props> = ({ projectFilter, onClose }) =>
                     <Tooltip content={c.webUrl ? `Open ${c.webUrl}` : undefined}>
                       <button
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (c.webUrl) void window.electron.invoke('open-external', c.webUrl); }}
-                        className='px-1.5 py-0.5 rounded text-[11px] bg-orange-500/15 text-orange-300 light:text-orange-700 hover:bg-orange-500/25 cursor-pointer transition-colors font-mono'
+                        className='px-1.5 py-0.5 rounded text-[11px] bg-orange-500/15 text-orange-300 light:text-orange-700 hover:bg-orange-500/25 cursor-pointer transition-colors font-mono inline-flex items-center gap-1'
                       >
-                        {meta.icon} {ref}
+                        <SourceIcon kind={c.sourceKind} className='w-3 h-3' /> {ref}
                       </button>
                     </Tooltip>
                     {c.labels.slice(0, 6).map((l) => (

@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { IssueFilterMode } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { appAlert, appConfirm, Button, Select, Tooltip } from '../Shared';
-import { SOURCE_META } from './source-meta';
+import { SourceIcon } from './SourceIcon';
 import { LinearLinkModal } from './LinearLinkModal';
+import { JiraLinkModal } from './JiraLinkModal';
 
-// Issue population controls (Phase 3), source-neutral (GitLab + Linear). Two pieces:
+// Issue population controls (Phase 3), source-neutral (GitLab + Linear + JIRA). Two pieces:
 //  - IssueSourceHeaderActions: Scan + "Review issues (N)" in the board header.
 //  - IssueSourceProjectStrip: per-project Link / filter / Unlink, shown under
 //    the project-filter pills when a single project is selected.
@@ -26,6 +27,13 @@ export const IssueSourceHeaderActions: React.FC<{ projectFilter: string; onRevie
     if (res && res.ok === false && res.reason) void appAlert(res.reason, 'Backlog');
   };
 
+  // Scan follows the active project-filter chip: 'all' scans every linked project
+  // (one scout run each, in series); a specific chip scans only that project.
+  const scanTip =
+    projectFilter === 'all'
+      ? `Scans all ${linkedCount} linked project${linkedCount === 1 ? '' : 's'} for new issues — one at a time.`
+      : `Scans only ${store.projects.find((p) => p.id === projectFilter)?.name ?? 'this project'}. Pick the “All” chip to scan every linked project.`;
+
   return (
     <>
       {needsAuth && (
@@ -33,9 +41,11 @@ export const IssueSourceHeaderActions: React.FC<{ projectFilter: string; onRevie
           <span className='px-2 py-1 rounded-lg text-xs font-medium bg-amber-500/15 text-warn'>Connector: re-auth</span>
         </Tooltip>
       )}
-      <Button variant='secondary' size='sm' onClick={() => void doScan()} disabled={scanning}>
-        {scanning ? 'Scanning…' : '↻ Scan'}
-      </Button>
+      <Tooltip content={scanTip}>
+        <Button variant='secondary' size='sm' onClick={() => void doScan()} disabled={scanning}>
+          {scanning ? 'Scanning…' : '↻ Scan'}
+        </Button>
+      </Tooltip>
       <Button variant='secondary' size='sm' onClick={onReview}>
         📥 Review issues{n > 0 ? ` (${n})` : ''}
       </Button>
@@ -68,6 +78,7 @@ export const IssueSourceProjectStrip: React.FC<{ projectId: string }> = ({ proje
   const project = store.projects.find((p) => p.id === projectId);
   const [busy, setBusy] = useState(false);
   const [linearOpen, setLinearOpen] = useState(false);
+  const [jiraOpen, setJiraOpen] = useState(false);
   if (!project) return null;
   const source = project.source;
 
@@ -93,29 +104,38 @@ export const IssueSourceProjectStrip: React.FC<{ projectId: string }> = ({ proje
       <div className='flex items-center gap-2 text-xs text-muted flex-wrap'>
         <span className='text-faint'>Issues</span>
         <Button variant='secondary' size='xs' onClick={() => void doLinkGitlab()} disabled={busy}>
-          {busy ? 'Linking…' : '🦊 Link GitLab'}
+          {busy ? 'Linking…' : <span className='inline-flex items-center gap-1.5'><SourceIcon kind='gitlab' /> Link GitLab</span>}
         </Button>
-        <Button variant='secondary' size='xs' onClick={() => setLinearOpen(true)}>▲ Link Linear</Button>
+        <Button variant='secondary' size='xs' onClick={() => setLinearOpen(true)}>
+          <span className='inline-flex items-center gap-1.5'><SourceIcon kind='linear' /> Link Linear</span>
+        </Button>
+        <Button variant='secondary' size='xs' onClick={() => setJiraOpen(true)}>
+          <span className='inline-flex items-center gap-1.5'><SourceIcon kind='jira' /> Link JIRA</span>
+        </Button>
         <span className='text-faint'>
-          GitLab reads the repo’s <span className='font-mono'>origin</span> remote; Linear links to a team you pick.
+          GitLab reads the repo’s <span className='font-mono'>origin</span> remote; Linear/JIRA link to a team or project you pick.
         </span>
         {linearOpen && <LinearLinkModal projectId={projectId} onClose={() => setLinearOpen(false)} />}
+        {jiraOpen && <JiraLinkModal projectId={projectId} onClose={() => setJiraOpen(false)} />}
       </div>
     );
   }
 
-  const meta = SOURCE_META[source.kind];
   const tooltip = source.kind === 'gitlab'
     ? `Linked to GitLab id ${source.ref}`
-    : source.scopeName
-      ? `Linked to Linear team ${source.slug}, scoped to project “${source.scopeName}”`
-      : `Linked to Linear team ${source.slug}`;
+    : source.kind === 'jira'
+      ? `Linked to JIRA project ${source.slug} on ${source.host}`
+      : source.scopeName
+        ? `Linked to Linear team ${source.slug}, scoped to project “${source.scopeName}”`
+        : `Linked to Linear team ${source.slug}`;
   return (
     <div className='flex items-center gap-2 text-xs text-muted flex-wrap'>
       <Tooltip content={tooltip}>
-        <span className='text-body'>
-          {meta.icon} {source.name}
-          {source.scopeName && <span className='text-faint'> › {source.scopeName}</span>}
+        <span className='text-body inline-flex items-center gap-1.5'>
+          <SourceIcon kind={source.kind} /> {source.name}
+          {source.scopeName && source.scopeName !== source.name && (
+            <span className='text-faint'> › {source.scopeName}</span>
+          )}
         </span>
       </Tooltip>
       <span className='text-faint'>·</span>

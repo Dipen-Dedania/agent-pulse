@@ -14,8 +14,13 @@ import { isSafeModelId } from '../../common/backlog-types';
 import { buildCmdShimArgs, resolveClaudeBin, resetClaudeBinCache } from '../scheduler/opener';
 import { parseClaudeJsonOutput, classifyNonZeroExit } from './runner';
 
-// Read-only by construction; belt-and-braces alongside the narrow allowlist.
-export const SCOUT_DISALLOWED_TOOLS = 'Write,Edit,Bash,NotebookEdit';
+// Read-only by construction; belt-and-braces alongside the narrow allowlist. Also denies
+// the local filesystem / agent tools (Read, Grep, Glob, Agent, Task): a scout only calls
+// its provider MCP and formats the result from context, so it never needs them. Denying
+// them stops the failure mode where a JIRA search result is offloaded to a file and the
+// model burns the whole timeout trying to Read/Grep/sub-agent that file — instead it must
+// return the data inline or emit the OFFLOADED sentinel, and the runner reads the file.
+export const SCOUT_DISALLOWED_TOOLS = 'Write,Edit,Bash,NotebookEdit,Read,Grep,Glob,Agent,Task';
 // Default (list_teams / project-id resolve): small, fast calls.
 const SCOUT_TIMEOUT_MS = 120_000;
 // Issue scans can return a larger payload (see prompt's SCOUT_BOUNDS) and take
@@ -38,6 +43,10 @@ export interface ScoutRunResult {
   report?: string;
   reason?: string;
   costUsd: number | null;
+  // The claude `session_id` for the run, when it produced JSON output. Lets a caller
+  // locate that run's offloaded tool-result files (JIRA: a large search result the
+  // model can't consume is saved under …/<sessionId>/tool-results/). Null on timeout.
+  sessionId?: string | null;
 }
 
 /** Connector verdict from a run: only an auth-shaped failure flips to needs-auth. */
@@ -125,11 +134,11 @@ export function runScout(
       }
       const parsed = parseClaudeJsonOutput(stdout);
       if (parsed.ok) {
-        settle({ ok: true, connector: 'connected', report: parsed.report, costUsd: parsed.costUsd });
+        settle({ ok: true, connector: 'connected', report: parsed.report, costUsd: parsed.costUsd, sessionId: parsed.sessionId });
         return;
       }
       const reason = code !== 0 ? classifyNonZeroExit(code, stdout, stderr).reason : (parsed.reason ?? 'scout produced no result');
-      settle({ ok: false, connector: classifyConnector(false, reason), reason, costUsd: parsed.costUsd });
+      settle({ ok: false, connector: classifyConnector(false, reason), reason, costUsd: parsed.costUsd, sessionId: parsed.sessionId });
     });
 
     proc.stdin?.on('error', () => { /* EPIPE if the child died early */ });

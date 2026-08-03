@@ -158,7 +158,7 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     return res;
   });
 
-  // ── Issue population (Phase 3): GitLab + Linear ────────────────────────────
+  // ── Issue population (Phase 3): GitLab + Linear + JIRA ─────────────────────
   // link/unlink/set-filter/scan/import/dismiss all delegate to the population
   // scheduler, which broadcasts `backlog:changed` (the hydrate carries the
   // population slice). projectId always references a registered project row.
@@ -191,6 +191,30 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
         args?.projectId,
         { teamId: args?.teamId, teamKey: args?.teamKey, teamName: args?.teamName },
         scope,
+      );
+    },
+  );
+
+  // List the user's accessible Atlassian sites for the JIRA link Step-1 picker (read-only scout).
+  ipcMain.handle('backlog:list-jira-sites', async () => {
+    if (!store || !population) return { ok: false, sites: [], reason: 'backlog storage unavailable' };
+    return population.listJiraSites();
+  });
+
+  // List a site's Jira projects for the JIRA link Step-2 picker (read-only scout).
+  ipcMain.handle('backlog:list-jira-projects', async (_e, args: { cloudId: string }) => {
+    if (!store || !population) return { ok: false, projects: [], reason: 'backlog storage unavailable' };
+    return population.listJiraProjects(args?.cloudId);
+  });
+
+  ipcMain.handle(
+    'backlog:link-jira',
+    (_e, args: { projectId: string; cloudId: string; siteUrl: string; siteName: string; projectKey: string; projectName: string }) => {
+      if (!store || !population) return { ok: false, reason: 'backlog storage unavailable' };
+      return population.linkJira(
+        args?.projectId,
+        { cloudId: args?.cloudId, siteUrl: args?.siteUrl, siteName: args?.siteName },
+        { projectKey: args?.projectKey, projectName: args?.projectName },
       );
     },
   );

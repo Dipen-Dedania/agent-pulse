@@ -10,6 +10,7 @@
 // See backlog-phase3-gitlab-population-plan.md (D1, D2, D10, WS3).
 
 import { buildScoutArgs as coreBuildScoutArgs, classifyConnector, runScout, ScoutConnector, SCOUT_SCAN_TIMEOUT_MS } from './scout-core';
+import { extractJsonArray, str, stringArray } from './scout-parse';
 import { buildScoutPrompt, buildScoutResolvePrompt, previewDescription, ScoutFilter } from './prompt';
 
 // The normalized tool prefix a spawned CLI exposes for the server named
@@ -32,40 +33,28 @@ export interface ScoutIssue {
 }
 
 /**
- * Parse the scout's final message into issues. Tolerates a ```json fence and
- * leading prose; drops malformed rows rather than throwing. Pure + tested.
+ * Parse the scout's final message into issues via the shared extractor (```json
+ * fence / prose / object-wrapper tolerant, robust to brackets inside strings);
+ * drops malformed rows rather than throwing. Pure + tested.
  */
 export function parseScoutIssues(report: string | undefined | null): ScoutIssue[] {
-  if (!report) return [];
-  let text = report.trim();
-  const fence = /^```[a-z]*\s*([\s\S]*?)\s*```$/i.exec(text);
-  if (fence) text = fence[1].trim();
-  if (!text.startsWith('[')) {
-    const i = text.indexOf('[');
-    const j = text.lastIndexOf(']');
-    if (i >= 0 && j > i) text = text.slice(i, j + 1);
-  }
-  let arr: unknown;
-  try {
-    arr = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(arr)) return [];
+  const arr = extractJsonArray(report);
+  if (!arr) return [];
   const out: ScoutIssue[] = [];
   for (const r of arr as any[]) {
     if (!r || typeof r !== 'object') continue;
+    // iid is GitLab's per-project issue number — accept a number or a numeric string.
     const iid = typeof r.iid === 'number'
       ? r.iid
-      : typeof r.iid === 'string' && /^\d+$/.test(r.iid) ? Number(r.iid) : null;
-    const title = typeof r.title === 'string' ? r.title.trim() : '';
+      : typeof r.iid === 'string' && /^\d+$/.test(r.iid.trim()) ? Number(r.iid.trim()) : null;
+    const title = str(r.title);
     if (iid == null || title.length === 0) continue;
     out.push({
       iid,
       title,
       description: previewDescription(typeof r.description === 'string' ? r.description : ''),
-      webUrl: typeof r.webUrl === 'string' ? r.webUrl : typeof r.web_url === 'string' ? r.web_url : '',
-      labels: Array.isArray(r.labels) ? r.labels.filter((x: unknown): x is string => typeof x === 'string') : [],
+      webUrl: str(r.webUrl) || str(r.web_url),
+      labels: stringArray(r.labels),
     });
   }
   return out;

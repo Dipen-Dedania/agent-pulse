@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { IssueFilterMode } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { appAlert, appConfirm, Button, Select, Tooltip } from '../Shared';
@@ -115,8 +116,10 @@ export const IssueSourceProjectStrip: React.FC<{ projectId: string }> = ({ proje
         <span className='text-faint'>
           GitLab reads the repo’s <span className='font-mono'>origin</span> remote; Linear/JIRA link to a team or project you pick.
         </span>
-        {linearOpen && <LinearLinkModal projectId={projectId} onClose={() => setLinearOpen(false)} />}
-        {jiraOpen && <JiraLinkModal projectId={projectId} onClose={() => setJiraOpen(false)} />}
+        <AnimatePresence>
+          {linearOpen && <LinearLinkModal key='linear' projectId={projectId} onClose={() => setLinearOpen(false)} />}
+          {jiraOpen && <JiraLinkModal key='jira' projectId={projectId} onClose={() => setJiraOpen(false)} />}
+        </AnimatePresence>
       </div>
     );
   }

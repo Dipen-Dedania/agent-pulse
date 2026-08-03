@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { openBacklogDb, Database } from '../db';
+import { openBacklogDb, Database, SCHEMA_VERSION } from '../db';
 import { BacklogStore } from '../store';
 import { ATTACHMENT_MAX_COUNT, ATTACHMENT_MAX_FILE_BYTES } from '../../../common/backlog-types';
 
@@ -610,7 +610,7 @@ describe.skipIf(!dbAvailable)('backlog schema migration v2 → v9', () => {
       expect(card.appliedAutorun).toBe(false);
       expect(card.appliedAdditions).toBeNull();
       const version = migrated.prepare('SELECT version FROM schema_version').get() as { version: number };
-      expect(version.version).toBe(9);
+      expect(version.version).toBe(SCHEMA_VERSION);
       // v4: the attachments table exists and is usable on a migrated board.
       expect(store.listAttachments('c1')).toEqual([]);
       store.setCardAttachments('c1', { keepIds: [], add: [{ filename: 'note.md', content: 'hi', bytes: 2 }] });
@@ -689,7 +689,7 @@ describe.skipIf(!dbAvailable)('backlog schema migration v8 → v9 (GitLab → so
       const store = new BacklogStore(migrated);
 
       // Version advanced, and the GitLab link backfilled onto the source shape.
-      expect((migrated.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(9);
+      expect((migrated.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(SCHEMA_VERSION);
       const project = store.listProjects().find((p) => p.id === 'p1')!;
       expect(project.source).toEqual({ kind: 'gitlab', ref: '4242', host: 'gitlab.com', slug: 'grp/demo', name: 'grp/demo' });
       expect(project.sourceLastScanAt).toBe(999);

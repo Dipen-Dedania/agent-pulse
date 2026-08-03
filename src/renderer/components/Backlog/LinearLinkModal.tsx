@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { LinearProject, LinearTeam } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, Button, Radio } from '../Shared';
+import { appAlert, Button, Modal } from '../Shared';
+import { RadioCardList, RadioCardOption } from './RadioCardList';
 import { SourceIcon } from './SourceIcon';
 
 // Linear link picker (Phase 3). Linear has no git remote to resolve, so the
@@ -82,168 +82,111 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
     onClose();
   };
 
-  return createPortal(
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
-      <div
-        className='apple-scroll relative w-full mx-4 max-w-md max-h-[85vh] bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 overflow-hidden'
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-          aria-label='Close'
-        >
-          ✕
-        </button>
+  const teamOptions: RadioCardOption[] = teams.map((t) => ({ id: t.id, label: t.name, badge: t.key }));
+  const projectOptions: RadioCardOption[] = projects.map((p) => ({ id: p.id, label: p.name }));
 
-        <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1 inline-flex items-center gap-1.5'>
-            <SourceIcon kind='linear' /> Linear
+  const eyebrow = <span className='inline-flex items-center gap-1.5'><SourceIcon kind='linear' /> Linear</span>;
+
+  const footer = step === 'team' ? (
+    <>
+      <Button variant='ghost' size='sm' onClick={onClose}>Cancel</Button>
+      <Button variant='primary' size='sm' onClick={() => void goToProjects()} disabled={!selectedTeam}>Next</Button>
+    </>
+  ) : (
+    <>
+      <Button variant='ghost' size='sm' onClick={() => setStep('team')} disabled={linking}>Back</Button>
+      <Button variant='ghost' size='sm' onClick={onClose}>Cancel</Button>
+      <Button variant='primary' size='sm' onClick={() => void doLink()} disabled={linking || projectsLoading}>
+        {linking ? 'Linking…' : 'Link'}
+      </Button>
+    </>
+  );
+
+  return (
+    <Modal
+      portal
+      eyebrow={eyebrow}
+      title={step === 'team' ? 'Link a Linear team' : 'Narrow to a project'}
+      onClose={onClose}
+      footer={footer}
+      maxWidthClass='max-w-md'
+    >
+      {/* ── Team step ─────────────────────────────────────────────────── */}
+      {step === 'team' && (
+        <>
+          <p className='text-sm text-muted -mt-2'>
+            Pick the team whose issues should populate this project’s board. Next you can narrow to a
+            single Linear project.
           </p>
-          {step === 'team' ? (
+
+          {loading && (
+            <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
+              <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+              Listing your Linear teams…
+            </div>
+          )}
+
+          {!loading && error && (
+            <div className='glass-secondary p-3 text-xs text-warn'>
+              {error}
+              <span className='block mt-1 text-muted'>
+                If Linear needs authentication, reconnect it in Claude Code (<span className='font-mono'>claude</span> →
+                <span className='font-mono'> /mcp</span> → Linear), then try again.
+              </span>
+            </div>
+          )}
+
+          {!loading && !error && (
+            <RadioCardList
+              name='linear-team'
+              options={teamOptions}
+              selected={selectedTeam}
+              onSelect={setSelectedTeam}
+              emptyText='No Linear teams found.'
+            />
+          )}
+        </>
+      )}
+
+      {/* ── Project step ──────────────────────────────────────────────── */}
+      {step === 'project' && (
+        <>
+          <p className='text-sm text-muted -mt-2'>
+            Optionally scope the board to one Linear project (e.g. this repo). Leave it on
+            <span className='font-medium text-body'> All issues</span> to pull the whole team. You can change the
+            issue filter after linking.
+          </p>
+
+          {projectsLoading && (
+            <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
+              <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+              Listing this team’s Linear projects…
+            </div>
+          )}
+
+          {!projectsLoading && projectsError && (
+            <div className='glass-secondary p-3 text-xs text-warn'>{projectsError}</div>
+          )}
+
+          {!projectsLoading && !projectsError && (
             <>
-              <h2 className='text-lg font-bold text-strong leading-tight pr-8'>Link a Linear team</h2>
-              <p className='text-sm text-muted mt-1'>
-                Pick the team whose issues should populate this project’s board. Next you can narrow to a
-                single Linear project.
-              </p>
-            </>
-          ) : (
-            <>
-              <h2 className='text-lg font-bold text-strong leading-tight pr-8'>Narrow to a project</h2>
-              <p className='text-sm text-muted mt-1'>
-                Optionally scope the board to one Linear project (e.g. this repo). Leave it on
-                <span className='font-medium text-body'> All issues</span> to pull the whole team. You can change the
-                issue filter after linking.
-              </p>
+              <RadioCardList
+                name='linear-project'
+                options={projectOptions}
+                selected={selectedProject}
+                onSelect={setSelectedProject}
+                leadingOption={{ id: ALL_ISSUES, label: 'All issues in this team' }}
+                emptyText=''
+              />
+              {projects.length === 0 && (
+                <div className='glass-secondary p-4 text-center text-xs text-muted'>
+                  This team has no projects — its issues will populate the board.
+                </div>
+              )}
             </>
           )}
-        </div>
-
-        {/* ── Team step ─────────────────────────────────────────────────── */}
-        {step === 'team' && (
-          <>
-            {loading && (
-              <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
-                <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
-                Listing your Linear teams…
-              </div>
-            )}
-
-            {!loading && error && (
-              <div className='glass-secondary p-3 text-xs text-warn'>
-                {error}
-                <span className='block mt-1 text-muted'>
-                  If Linear needs authentication, reconnect it in Claude Code (<span className='font-mono'>claude</span> →
-                  <span className='font-mono'> /mcp</span> → Linear), then try again.
-                </span>
-              </div>
-            )}
-
-            {!loading && !error && (
-              <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -m-1 p-1'>
-                {teams.length === 0 ? (
-                  <div className='glass-secondary p-6 text-center text-sm text-muted'>No Linear teams found.</div>
-                ) : (
-                  teams.map((t) => {
-                    const on = selectedTeam === t.id;
-                    return (
-                      <label
-                        key={t.id}
-                        className={`glass-secondary shrink-0 p-3 flex items-center gap-3 text-left transition-colors cursor-pointer ${on ? 'ring-2 ring-blue-400/70' : 'hover:bg-control/40'}`}
-                      >
-                        <Radio
-                          name='linear-team'
-                          checked={on}
-                          onChange={() => setSelectedTeam(t.id)}
-                          ariaLabel={`Select ${t.name}`}
-                        />
-                        {t.key && (
-                          <span className='px-1.5 py-0.5 rounded text-[11px] bg-control/50 text-body font-mono'>{t.key}</span>
-                        )}
-                        <span className='text-sm text-strong truncate'>{t.name}</span>
-                      </label>
-                    );
-                  })
-                )}
-              </div>
-            )}
-
-            <div className='flex items-center gap-2 pt-1'>
-              <Button variant='primary' size='sm' onClick={() => void goToProjects()} disabled={!selectedTeam}>
-                Next
-              </Button>
-              <Button variant='ghost' size='sm' onClick={onClose} className='ml-auto'>Cancel</Button>
-            </div>
-          </>
-        )}
-
-        {/* ── Project step ──────────────────────────────────────────────── */}
-        {step === 'project' && (
-          <>
-            {projectsLoading && (
-              <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
-                <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
-                Listing this team’s Linear projects…
-              </div>
-            )}
-
-            {!projectsLoading && projectsError && (
-              <div className='glass-secondary p-3 text-xs text-warn'>{projectsError}</div>
-            )}
-
-            {!projectsLoading && !projectsError && (
-              <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -m-1 p-1'>
-                {/* Always-present "whole team" choice. */}
-                <label
-                  className={`glass-secondary shrink-0 p-3 flex items-center gap-3 text-left transition-colors cursor-pointer ${selectedProject === ALL_ISSUES ? 'ring-2 ring-blue-400/70' : 'hover:bg-control/40'}`}
-                >
-                  <Radio
-                    name='linear-project'
-                    checked={selectedProject === ALL_ISSUES}
-                    onChange={() => setSelectedProject(ALL_ISSUES)}
-                    ariaLabel='All issues in this team'
-                  />
-                  <span className='text-sm text-strong'>All issues in this team</span>
-                </label>
-
-                {projects.length === 0 ? (
-                  <div className='glass-secondary p-4 text-center text-xs text-muted'>
-                    This team has no projects — its issues will populate the board.
-                  </div>
-                ) : (
-                  projects.map((p) => {
-                    const on = selectedProject === p.id;
-                    return (
-                      <label
-                        key={p.id}
-                        className={`glass-secondary shrink-0 p-3 flex items-center gap-3 text-left transition-colors cursor-pointer ${on ? 'ring-2 ring-blue-400/70' : 'hover:bg-control/40'}`}
-                      >
-                        <Radio
-                          name='linear-project'
-                          checked={on}
-                          onChange={() => setSelectedProject(p.id)}
-                          ariaLabel={`Select ${p.name}`}
-                        />
-                        <span className='text-sm text-strong truncate'>{p.name}</span>
-                      </label>
-                    );
-                  })
-                )}
-              </div>
-            )}
-
-            <div className='flex items-center gap-2 pt-1'>
-              <Button variant='ghost' size='sm' onClick={() => setStep('team')} disabled={linking}>Back</Button>
-              <Button variant='primary' size='sm' onClick={() => void doLink()} disabled={linking || projectsLoading}>
-                {linking ? 'Linking…' : 'Link'}
-              </Button>
-              <Button variant='ghost' size='sm' onClick={onClose} className='ml-auto'>Cancel</Button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>,
-    document.body,
+        </>
+      )}
+    </Modal>
   );
 };

@@ -486,7 +486,9 @@ export const BacklogBoardTab: React.FC = () => {
         />
       )}
       {detailCard && <ArtifactViewer card={detailCard} onClose={() => setDetailCard(null)} />}
-      {importOpen && <IssueImportModal projectFilter={projectFilter} onClose={() => setImportOpen(false)} />}
+      <AnimatePresence>
+        {importOpen && <IssueImportModal projectFilter={projectFilter} onClose={() => setImportOpen(false)} />}
+      </AnimatePresence>
     </div>
   );
 };

@@ -52,7 +52,7 @@ type DatabaseConstructor = new (path: string) => Database;
 //     a source link. For Linear, the chosen project's id + name scope scans to
 //     one project instead of the whole team; unused by GitLab. Dedup is
 //     unaffected (the fingerprint still keys on source_ref = team id).
-const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 10;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (

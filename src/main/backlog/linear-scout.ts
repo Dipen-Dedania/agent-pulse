@@ -17,6 +17,7 @@
 import { LinearProject, LinearTeam } from '../../common/backlog-types';
 import { logger } from '../../common/logger';
 import { runScout, ScoutConnector, SCOUT_SCAN_TIMEOUT_MS } from './scout-core';
+import { extractJsonArray, str, stringArray } from './scout-parse';
 import { buildLinearProjectsPrompt, buildLinearScoutPrompt, buildLinearTeamsPrompt, previewDescription, ScoutFilter } from './prompt';
 
 const LINEAR_TOOL_PREFIX = 'mcp__claude_ai_Linear__';
@@ -35,51 +36,10 @@ export interface LinearIssue {
   labels: string[];
 }
 
-/** Pull the array out of a parsed JSON value: the value itself if it's an
- *  array, else the first array-valued property of an object wrapper the agent
- *  sometimes emits ({ teams: [...] }, { data: [...] }, { results: [...] }). */
-function arrayFrom(value: unknown): unknown[] | null {
-  if (Array.isArray(value)) return value;
-  if (value && typeof value === 'object') {
-    for (const v of Object.values(value as Record<string, unknown>)) {
-      if (Array.isArray(v)) return v;
-    }
-  }
-  return null;
-}
-
-/** Extract a JSON array from a scout report (```json fence / prose / object
- *  wrapper tolerant). Returns null only when no JSON at all could be parsed. */
-function extractJsonArray(report: string | undefined | null): unknown[] | null {
-  if (!report) return null;
-  let text = report.trim();
-  const fence = /^```[a-z]*\s*([\s\S]*?)\s*```$/i.exec(text);
-  if (fence) text = fence[1].trim();
-  // Prefer the outermost array; fall back to an object wrapper ({ teams: [...] }).
-  const ai = text.indexOf('[');
-  const aj = text.lastIndexOf(']');
-  const oi = text.indexOf('{');
-  const oj = text.lastIndexOf('}');
-  const candidates: string[] = [];
-  if (ai >= 0 && aj > ai) candidates.push(text.slice(ai, aj + 1));
-  if (oi >= 0 && oj > oi) candidates.push(text.slice(oi, oj + 1));
-  if (candidates.length === 0) candidates.push(text);
-  for (const c of candidates) {
-    try {
-      const arr = arrayFrom(JSON.parse(c));
-      if (arr) return arr;
-    } catch {
-      /* try the next candidate */
-    }
-  }
-  return null;
-}
-
 /** Parse a list_teams report into teams; drops rows missing an id or key. */
 export function parseLinearTeams(report: string | undefined | null): LinearTeam[] {
   const arr = extractJsonArray(report);
   if (!arr) return [];
-  const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const out: LinearTeam[] = [];
   for (const r of arr as any[]) {
     if (!r || typeof r !== 'object') continue;
@@ -99,7 +59,6 @@ export function parseLinearTeams(report: string | undefined | null): LinearTeam[
 export function parseLinearProjects(report: string | undefined | null): LinearProject[] {
   const arr = extractJsonArray(report);
   if (!arr) return [];
-  const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const out: LinearProject[] = [];
   for (const r of arr as any[]) {
     if (!r || typeof r !== 'object') continue;
@@ -137,7 +96,7 @@ export function parseLinearIssues(report: string | undefined | null): LinearIssu
       title,
       description: previewDescription(typeof r.description === 'string' ? r.description : ''),
       webUrl: typeof r.url === 'string' ? r.url : typeof r.webUrl === 'string' ? r.webUrl : '',
-      labels: Array.isArray(r.labels) ? r.labels.filter((x: unknown): x is string => typeof x === 'string') : [],
+      labels: stringArray(r.labels),
     });
   }
   return out;

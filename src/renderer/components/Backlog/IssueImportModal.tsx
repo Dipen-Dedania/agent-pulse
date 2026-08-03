@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { createPortal } from 'react-dom';
 import { IssueCandidate } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, Button, Checkbox, Tooltip } from '../Shared';
+import { appAlert, Button, Checkbox, Modal, Tooltip } from '../Shared';
 import { projectColor } from './project-colors';
 import { SOURCE_META, issueRefLabel } from './source-meta';
 import { SourceIcon } from './SourceIcon';
@@ -68,29 +67,32 @@ export const IssueImportModal: React.FC<Props> = ({ projectFilter, onClose }) =>
     if (res && res.ok === false && res.reason) void appAlert(res.reason, 'Backlog');
   };
 
-  return createPortal(
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
-      <div
-        className='apple-scroll relative w-full mx-4 max-w-2xl max-h-[85vh] bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 overflow-hidden'
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-          aria-label='Close'
-        >
-          ✕
-        </button>
+  const footer = (
+    <>
+      <Button variant='primary' size='sm' onClick={() => void doImport()} disabled={busy || count === 0}>
+        Import selected{count > 0 ? ` (${count})` : ''}
+      </Button>
+      <Button variant='ghost' size='sm' onClick={() => void doDismiss()} disabled={busy || count === 0}>
+        Dismiss selected{count > 0 ? ` (${count})` : ''}
+      </Button>
+      <Button variant='ghost' size='sm' onClick={onClose}>Close</Button>
+    </>
+  );
 
-        <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>Issues</p>
-          <h2 className='text-lg font-bold text-strong leading-tight pr-8'>Review &amp; import</h2>
-          <p className='text-sm text-muted mt-1'>
-            Tick the issues to add as Refinement cards. Dismissed issues won’t come back on the next scan.
-          </p>
-        </div>
+  return (
+    <Modal
+      portal
+      eyebrow='Issues'
+      title='Review & import'
+      onClose={onClose}
+      footer={footer}
+      maxWidthClass='max-w-2xl'
+    >
+      <p className='text-sm text-muted -mt-2'>
+        Tick the issues to add as Refinement cards. Dismissed issues won’t come back on the next scan.
+      </p>
 
-        {needsAuth && (
+      {needsAuth && (
           <div className='glass-secondary p-3 text-xs text-warn'>
             The issue connector needs re-authentication — reconnect it in Claude Code (<span className='font-mono'>claude</span> →
             <span className='font-mono'> /mcp</span>), then Rescan.
@@ -118,7 +120,7 @@ export const IssueImportModal: React.FC<Props> = ({ projectFilter, onClose }) =>
           </div>
         </div>
 
-        <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -mx-1 px-1'>
+      <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -mx-1 px-1'>
           {candidates.length === 0 ? (
             <div className='glass-secondary p-6 text-center text-sm text-muted'>
               No new issues. Rescan to check again.
@@ -170,19 +172,7 @@ export const IssueImportModal: React.FC<Props> = ({ projectFilter, onClose }) =>
               );
             })
           )}
-        </div>
-
-        <div className='flex items-center gap-2 pt-1'>
-          <Button variant='primary' size='sm' onClick={() => void doImport()} disabled={busy || count === 0}>
-            Import selected{count > 0 ? ` (${count})` : ''}
-          </Button>
-          <Button variant='ghost' size='sm' onClick={() => void doDismiss()} disabled={busy || count === 0}>
-            Dismiss selected{count > 0 ? ` (${count})` : ''}
-          </Button>
-          <Button variant='ghost' size='sm' onClick={onClose} className='ml-auto'>Close</Button>
-        </div>
       </div>
-    </div>,
-    document.body,
+    </Modal>
   );
 };

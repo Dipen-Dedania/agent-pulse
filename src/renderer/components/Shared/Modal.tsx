@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { gentle } from '../../motion';
 
@@ -14,12 +15,20 @@ import { gentle } from '../../motion';
  */
 interface ModalProps {
   title: string;
-  eyebrow?: string;
+  eyebrow?: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
   /** Tailwind max-width class for the panel. Defaults to `max-w-lg`. */
   maxWidthClass?: string;
+  /**
+   * Render into a portal on `document.body` instead of inline. Needed when the
+   * caller sits inside a `transform`/`filter` ancestor (e.g. a Framer-Motion
+   * board column), which would otherwise become the containing block for the
+   * `position: fixed` overlay and mis-position it. Off by default so existing
+   * callers are unaffected.
+   */
+  portal?: boolean;
 }
 
 const FOCUSABLE =
@@ -32,6 +41,7 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   footer,
   maxWidthClass = 'max-w-lg',
+  portal = false,
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -67,7 +77,7 @@ export const Modal: React.FC<ModalProps> = ({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return (
+  const tree = (
     <motion.div
       className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm'
       initial={{ opacity: 0 }}
@@ -106,4 +116,6 @@ export const Modal: React.FC<ModalProps> = ({
       </motion.div>
     </motion.div>
   );
+
+  return portal ? createPortal(tree, document.body) : tree;
 };

@@ -37,6 +37,22 @@ describe('parseScoutIssues', () => {
     expect(desc.length).toBe(501); // 500 chars + the ellipsis
     expect(desc.endsWith('…')).toBe(true);
   });
+
+  // Regression: the old naive indexOf('[')/lastIndexOf(']') slice silently
+  // returned [] when a chatty model added a prose bracket or a ] in a
+  // description. The shared extractor is bracket-aware.
+  it('extracts the array past a prose preamble containing a [bracket]', () => {
+    const report = 'I searched [the project] and found 1 issue:\n' + one;
+    expect(parseScoutIssues(report)).toHaveLength(1);
+  });
+
+  it('parses an issue whose description contains ] and markdown [links]', () => {
+    const report = '[{"iid":5,"title":"t","description":"see [run](https://x/[y]) and [done]","webUrl":"u","labels":[]}]';
+    const out = parseScoutIssues(report);
+    expect(out).toHaveLength(1);
+    expect(out[0].iid).toBe(5);
+    expect(out[0].description).toBe('see [run](https://x/[y]) and [done]');
+  });
 });
 
 describe('classifyConnector', () => {

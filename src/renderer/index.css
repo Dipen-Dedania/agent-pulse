@@ -339,6 +339,40 @@ input[type='range']:disabled::-webkit-slider-thumb {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
   }
 
+  /* Checkbox box — liquid glass matching the toggle's material rather than flat
+     paint. OFF is the same frosted translucency as .toggle-glass-off (plus a
+     light blur so it reads as glass, not a hole); ON is a blued-glass fill with
+     a top-edge sheen and a soft outer glow so the tick sits on liquid. */
+  .checkbox-glass-off {
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    backdrop-filter: blur(6px) saturate(140%);
+    -webkit-backdrop-filter: blur(6px) saturate(140%);
+  }
+  [data-theme='light'] .checkbox-glass-off {
+    background: rgba(0, 0, 0, 0.06);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  }
+  .checkbox-glass-on {
+    background: linear-gradient(
+      155deg,
+      rgba(96, 165, 250, 0.95) 0%,
+      rgba(37, 99, 235, 0.98) 100%
+    );
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.55),
+      inset 0 -1px 2px rgba(30, 58, 138, 0.5),
+      0 2px 6px -1px rgba(37, 99, 235, 0.55);
+    backdrop-filter: blur(6px) saturate(160%);
+    -webkit-backdrop-filter: blur(6px) saturate(160%);
+  }
+  [data-theme='light'] .checkbox-glass-on {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.6),
+      inset 0 -1px 2px rgba(30, 58, 138, 0.35),
+      0 2px 6px -1px rgba(37, 99, 235, 0.45);
+  }
+
   /* Active tab pill — a raised frosted-glass chip instead of a flat solid
      fill, so the selected tab reads as glass sitting on the glass tab bar.
      Top rim highlight + a soft lift shadow do the work. */

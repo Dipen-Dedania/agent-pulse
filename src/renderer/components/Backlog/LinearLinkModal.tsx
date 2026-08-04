@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { LinearProject, LinearTeam } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, Button, Modal } from '../Shared';
+import { appAlert, Button, Modal, Spinner } from '../Shared';
 import { RadioCardList, RadioCardOption } from './RadioCardList';
 import { SourceIcon } from './SourceIcon';
 
@@ -121,7 +121,7 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
 
           {loading && (
             <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
-              <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+              <Spinner size='md' />
               Listing your Linear teams…
             </div>
           )}
@@ -159,7 +159,7 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
 
           {projectsLoading && (
             <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
-              <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+              <Spinner size='md' />
               Listing this team’s Linear projects…
             </div>
           )}
@@ -177,6 +177,7 @@ export const LinearLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
                 onSelect={setSelectedProject}
                 leadingOption={{ id: ALL_ISSUES, label: 'All issues in this team' }}
                 emptyText=''
+                searchPlaceholder='Filter projects…'
               />
               {projects.length === 0 && (
                 <div className='glass-secondary p-4 text-center text-xs text-muted'>

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { JiraProject, JiraSite } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, Button, Modal } from '../Shared';
+import { appAlert, Button, Modal, Spinner } from '../Shared';
 import { RadioCardList, RadioCardOption } from './RadioCardList';
 import { SourceIcon } from './SourceIcon';
 
@@ -121,7 +121,7 @@ export const JiraLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
 
           {loading && (
             <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
-              <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+              <Spinner size='md' />
               Listing your Atlassian sites…
             </div>
           )}
@@ -158,7 +158,7 @@ export const JiraLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
 
           {projectsLoading && (
             <div className='glass-secondary p-6 flex items-center justify-center gap-2 text-sm text-muted'>
-              <span className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+              <Spinner size='md' />
               Listing this site’s Jira projects…
             </div>
           )}
@@ -174,6 +174,7 @@ export const JiraLinkModal: React.FC<Props> = ({ projectId, onClose }) => {
               selected={selectedProject}
               onSelect={setSelectedProject}
               emptyText='No Jira projects you can browse on this site.'
+              searchPlaceholder='Filter projects…'
             />
           )}
         </>

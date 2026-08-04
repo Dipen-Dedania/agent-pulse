@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CostBreakdown, formatUsd } from '../../../../common/pricing';
+import { Badge } from '../../Shared';
 
 export function formatDuration(ms: number): string {
   if (!ms || ms < 0) return '0m';
@@ -24,16 +25,11 @@ export function formatCompactNumber(n: number): string {
 export { Card } from '../../Shared/Card';
 export { Segmented } from '../../Shared/Segmented';
 
-export const InfoPill: React.FC<{ children: React.ReactNode; tone?: 'info' | 'warn' }> = ({ children, tone = 'info' }) => {
-  const cls = tone === 'warn'
-    ? 'bg-amber-500/15 border-amber-500/30 text-warn'
-    : 'bg-blue-500/10 border-blue-500/30 text-info';
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border ${cls} text-[11px]`}>
-      {children}
-    </span>
-  );
-};
+// Thin wrapper over the shared Badge (variant='tag'). Kept as a named export so
+// the analytics cards keep importing `InfoPill` from './shared'.
+export const InfoPill: React.FC<{ children: React.ReactNode; tone?: 'info' | 'warn' }> = ({ children, tone = 'info' }) => (
+  <Badge tone={tone} variant='tag' size='sm'>{children}</Badge>
+);
 
 // A small "i" icon that reveals a glass popover on hover/focus. The popover is
 // rendered in a portal with fixed positioning and clamped to the viewport, so
@@ -235,9 +231,10 @@ export const CostBreakdownContent: React.FC<{
   </div>
 );
 
-export const EmptyState: React.FC<{ message: string }> = ({ message }) => (
-  <div className='flex items-center justify-center py-8 text-sm text-faint'>{message}</div>
-);
+// EmptyState is an app-wide primitive — its definition now lives in
+// components/Shared. Re-exported here so the analytics cards keep importing it
+// from './shared' alongside the chart-only helpers.
+export { EmptyState } from '../../Shared/EmptyState';
 
 export const SkeletonLine: React.FC<{ width?: string; height?: string }> = ({ width = '100%', height = '0.75rem' }) => (
   <div className='bg-control/40 rounded animate-pulse' style={{ width, height }} />

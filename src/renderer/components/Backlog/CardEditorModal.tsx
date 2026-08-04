@@ -3,10 +3,12 @@ import {
   AttachmentIntent, BacklogAttachment, BacklogCard, BacklogProject, BacklogTaskType,
   BacklogTemplate, PendingAttachment, QaProvider, RiskTier, isSafeModelId,
 } from '../../../common/backlog-types';
+import { buildPreviewPrompt, PromptAttachment } from '../../../common/backlog-prompt';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, Button, Checkbox, Select, Tooltip } from '../Shared';
+import { appAlert, Button, Checkbox, Segmented, Select, Tooltip } from '../Shared';
 import { TIER_META } from './CardTile';
 import { TemplateManagerModal } from './TemplateManagerModal';
+import { PromptPreviewModal } from './PromptPreviewModal';
 
 function formatBytes(n: number): string {
   return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
@@ -103,6 +105,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   );
   const [projectDefaultModel, setProjectDefaultModel] = useState<string | null>(null);
   const [managingTemplates, setManagingTemplates] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   // Attachments: existing rows (edit mode) minus any the user removed, plus
   // newly-picked files not yet persisted. The final set is sent on save.
@@ -194,6 +197,18 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
     keepIds: keptExisting.map((a) => a.id),
     add: pendingAttachments,
   });
+
+  // Attachments as the prompt builder sees them. Newly-picked files carry their
+  // content; already-saved files hold only a filename/size in the editor (the
+  // body lives in the DB and is inlined at run time), so the preview stands in a
+  // labeled placeholder for them rather than fetching the content.
+  const previewAttachments = (): PromptAttachment[] => [
+    ...keptExisting.map((a) => ({
+      filename: a.filename,
+      content: `«file contents inlined when the card runs — ${formatBytes(a.bytes)}»`,
+    })),
+    ...pendingAttachments.map((a) => ({ filename: a.filename, content: a.content })),
+  ];
 
   // Resolve what "Project default" means for the selected project (its
   // .claude/settings.json chain) so the picker's default option says which
@@ -423,60 +438,44 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
 
           <div className='flex flex-col gap-1.5'>
             <span className={labelClass}>Task type</span>
-            <div className='flex gap-1 p-1 bg-glass/50 border border-edge/60 rounded-xl w-fit'>
-              {([
+            <Segmented
+              options={[
                 { value: 'research', label: 'Research', hint: 'Read-only — the agent produces a report.' },
                 { value: 'execution', label: 'Execution', hint: 'Edits files in an isolated worktree — delivers a diff + report.' },
                 { value: 'qa', label: 'QA', hint: 'Read-only — opens the running app in a headless browser and checks each acceptance criterion. Delivers a report + screenshots.' },
-              ] as { value: BacklogTaskType; label: string; hint: string }[]).map((t) => (
-                <Tooltip key={t.value} content={t.hint}>
-                  <button
-                    onClick={() => setTaskType(t.value)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-                      taskType === t.value ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                </Tooltip>
-              ))}
-            </div>
+              ]}
+              value={taskType}
+              onChange={(v) => setTaskType(v as BacklogTaskType)}
+            />
           </div>
 
           <div className='flex flex-col gap-1.5'>
             <span className={labelClass}>Risk tier</span>
-            <div className='flex gap-1 p-1 bg-glass/50 border border-edge/60 rounded-xl w-fit'>
-              {(Object.keys(TIER_META) as RiskTier[]).map((tier) => (
-                <Tooltip key={tier} content={TIER_META[tier].hint}>
-                  <button
-                    onClick={() => setRiskTier(tier)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 ${
-                      riskTier === tier ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
-                    }`}
-                  >
-                    <span className={`w-2 h-2 rounded-full ${TIER_META[tier].dot}`} />
-                    {TIER_META[tier].label}
-                  </button>
-                </Tooltip>
-              ))}
-            </div>
+            <Segmented
+              options={(Object.keys(TIER_META) as RiskTier[]).map((tier) => ({
+                value: tier,
+                label: TIER_META[tier].label,
+                hint: TIER_META[tier].hint,
+                dot: TIER_META[tier].dot,
+              }))}
+              value={riskTier}
+              onChange={(v) => setRiskTier(v as RiskTier)}
+            />
           </div>
 
           <label className='flex flex-col gap-1.5 sm:col-span-2'>
             <span className={labelClass}>Model</span>
-            <select
+            <Select
               value={modelChoice}
-              onChange={(e) => setModelChoice(e.target.value)}
-              className={`${inputClass} cursor-pointer`}
-            >
-              <option value=''>
-                Project default{projectDefaultModel ? ` (${projectDefaultModel})` : ''}
-              </option>
-              {MODEL_PRESETS.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-              <option value='custom'>Custom model id…</option>
-            </select>
+              onChange={setModelChoice}
+              className='w-full px-3 py-1.5 text-sm'
+              ariaLabel='Model'
+              options={[
+                { value: '', label: `Project default${projectDefaultModel ? ` (${projectDefaultModel})` : ''}` },
+                ...MODEL_PRESETS,
+                { value: 'custom', label: 'Custom model id…' },
+              ]}
+            />
             {modelChoice === 'custom' && (
               <>
                 <input
@@ -570,16 +569,16 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
 
             <label className='flex flex-col gap-1.5'>
               <span className={labelClass}>QA provider</span>
-              <select
+              <Select
                 value={qaProvider}
-                onChange={(e) => setQaProvider(e.target.value as QaProvider)}
-                className={`${inputClass} cursor-pointer w-full sm:w-56`}
-              >
-                {QA_PROVIDERS.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
-                <option value='browser' disabled>Browser — coming later</option>
-              </select>
+                onChange={(v) => setQaProvider(v as QaProvider)}
+                className='w-full sm:w-56 px-3 py-1.5 text-sm'
+                ariaLabel='QA provider'
+                options={[
+                  ...QA_PROVIDERS.map((p) => ({ value: p.value, label: p.label })),
+                  { value: 'browser' as QaProvider, label: 'Browser — coming later', disabled: true },
+                ]}
+              />
               <span className='text-[11px] text-faint'>
                 {QA_PROVIDERS.find((p) => p.value === qaProvider)?.hint}
               </span>
@@ -647,6 +646,9 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         )}
 
         <div className='flex items-center gap-2 justify-end'>
+          <Button variant='secondary' onClick={() => setPreviewing(true)} className='mr-auto'>
+            Preview prompt
+          </Button>
           <Button variant='secondary' onClick={onClose}>
             Cancel
           </Button>
@@ -677,6 +679,22 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         </div>
 
         {managingTemplates && <TemplateManagerModal onClose={() => setManagingTemplates(false)} />}
+        {previewing && (
+          <PromptPreviewModal
+            taskType={taskType}
+            prompt={buildPreviewPrompt(
+              {
+                title: title.trim(),
+                description,
+                taskType,
+                acceptanceCriteria: buildInput().acceptanceCriteria,
+                qaUrl: buildInput().qaUrl,
+              },
+              previewAttachments(),
+            )}
+            onClose={() => setPreviewing(false)}
+          />
+        )}
       </div>
     </div>
   );

@@ -10,6 +10,8 @@ export interface SelectOption<T extends string = string> {
   value: T;
   label: string;
   swatch?: string; // optional color dot shown before the label (e.g. color pickers)
+  disabled?: boolean; // non-selectable placeholder (e.g. "coming later")
+  group?: string; // optional section header; consecutive same-group options render under one header
 }
 
 interface SelectProps<T extends string> {
@@ -126,36 +128,51 @@ export function Select<T extends string>({ value, options, onChange, className =
           }}
           className='apple-scroll py-1 max-h-64 overflow-y-auto bg-overlay/95 backdrop-blur-md border border-edge-strong/60 rounded-lg shadow-2xl'
         >
-          {options.map((opt) => {
+          {options.map((opt, i) => {
             const active = opt.value === value;
+            // Group header: shown when this option starts a new named group.
+            const header = opt.group && opt.group !== options[i - 1]?.group ? opt.group : null;
             return (
-              <button
-                key={opt.value}
-                type='button'
-                role='option'
-                aria-selected={active}
-                onClick={() => {
-                  onChange(opt.value);
-                  setOpen(false);
-                }}
-                className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs cursor-pointer transition-colors ${
-                  active ? 'bg-blue-500/20 text-strong light:bg-blue-500/25' : 'text-body hover:bg-control/60'
-                }`}
-              >
-                {opt.swatch && (
-                  <span className='w-2.5 h-2.5 rounded-full shrink-0' style={{ background: opt.swatch }} />
+              <React.Fragment key={opt.value}>
+                {header && (
+                  <div className='px-3 pt-2 pb-1 text-[10px] uppercase tracking-widest text-faint font-semibold'>
+                    {header}
+                  </div>
                 )}
-                <span className='truncate'>{opt.label}</span>
-                {active && (
-                  <svg viewBox='0 0 20 20' fill='currentColor' className='w-3.5 h-3.5 ml-auto text-info shrink-0'>
-                    <path
-                      fillRule='evenodd'
-                      d='M16.704 5.29a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06 0l-3.5-3.5a.75.75 0 111.06-1.06l2.97 2.97 6.97-6.97a.75.75 0 011.06 0z'
-                      clipRule='evenodd'
-                    />
-                  </svg>
-                )}
-              </button>
+                <button
+                  type='button'
+                  role='option'
+                  aria-selected={active}
+                  aria-disabled={opt.disabled}
+                  disabled={opt.disabled}
+                  onClick={() => {
+                    if (opt.disabled) return;
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+                    opt.disabled
+                      ? 'text-faint cursor-not-allowed'
+                      : active
+                        ? 'bg-blue-500/20 text-strong light:bg-blue-500/25 cursor-pointer'
+                        : 'text-body hover:bg-control/60 cursor-pointer'
+                  }`}
+                >
+                  {opt.swatch && (
+                    <span className='w-2.5 h-2.5 rounded-full shrink-0' style={{ background: opt.swatch }} />
+                  )}
+                  <span className='truncate'>{opt.label}</span>
+                  {active && (
+                    <svg viewBox='0 0 20 20' fill='currentColor' className='w-3.5 h-3.5 ml-auto text-info shrink-0'>
+                      <path
+                        fillRule='evenodd'
+                        d='M16.704 5.29a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06 0l-3.5-3.5a.75.75 0 111.06-1.06l2.97 2.97 6.97-6.97a.75.75 0 011.06 0z'
+                        clipRule='evenodd'
+                      />
+                    </svg>
+                  )}
+                </button>
+              </React.Fragment>
             );
           })}
         </div>,

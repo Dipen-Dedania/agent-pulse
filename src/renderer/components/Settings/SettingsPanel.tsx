@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { snappy, smooth, tabContent, tabContentTransition } from '../../motion';
+import { smooth, tabContent, tabContentTransition } from '../../motion';
 import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, ThemeMode, AppearanceConfig } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
@@ -15,7 +15,7 @@ import { SchedulerSection, SchedulerConfigUI } from './SchedulerSection';
 import { BubbleSection } from './BubbleSection';
 import { AttentionSection } from './AttentionSection';
 import { StatusLineSection } from './StatusLineSection';
-import { GlassToggle, Tooltip, Button } from '../Shared';
+import { GlassToggle, Tooltip, Button, Spinner, Segmented, Tabs } from '../Shared';
 import { GuardrailsTab } from './GuardrailsTab';
 import { SecretProtectionTab } from './SecretProtectionTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
@@ -198,28 +198,14 @@ const HookInfoModal: React.FC<{
         </div>
 
         {/* Tabs */}
-        <div className='glass-secondary flex gap-1 p-1 w-fit'>
-          <button
-            onClick={() => setTab('install')}
-            className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-              tab === 'install'
-                ? 'bg-control text-strong'
-                : 'text-muted hover:text-strong'
-            }`}
-          >
-            Install
-          </button>
-          <button
-            onClick={() => setTab('troubleshoot')}
-            className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-              tab === 'troubleshoot'
-                ? 'bg-control text-strong'
-                : 'text-muted hover:text-strong'
-            }`}
-          >
-            Troubleshoot
-          </button>
-        </div>
+        <Segmented
+          options={[
+            { value: 'install', label: 'Install' },
+            { value: 'troubleshoot', label: 'Troubleshoot' },
+          ]}
+          value={tab}
+          onChange={(v) => setTab(v as 'install' | 'troubleshoot')}
+        />
 
         {tab === 'install' ? (
           <>
@@ -276,45 +262,20 @@ const GuardrailsParent: React.FC = () => {
   const [sub, setSub] = useState<'commands' | 'secrets'>('commands');
   return (
     <div className='mt-8'>
-      <div className='glass-secondary inline-flex gap-1 p-1 mb-6'>
-        <SubTabPill group='guardrails' active={sub === 'commands'} onClick={() => setSub('commands')}>
-          Command Guardrails
-        </SubTabPill>
-        <SubTabPill group='guardrails' active={sub === 'secrets'} onClick={() => setSub('secrets')}>
-          Secret Protection
-        </SubTabPill>
-      </div>
+      <Tabs
+        className='glass-secondary mb-6 w-fit'
+        tone='blue'
+        tabs={[
+          { value: 'commands', label: 'Command Guardrails' },
+          { value: 'secrets', label: 'Secret Protection' },
+        ]}
+        value={sub}
+        onChange={(v) => setSub(v as 'commands' | 'secrets')}
+      />
       {sub === 'commands' ? <GuardrailsTab /> : <SecretProtectionTab />}
     </div>
   );
 };
-
-// `group` scopes the sliding indicator so pills in different rows (usage vs.
-// guardrails) don't animate into one another.
-const SubTabPill: React.FC<{
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  group?: string;
-}> = ({ active, onClick, children, group = 'subtab' }) => (
-  <motion.button
-    onClick={onClick}
-    whileTap={{ scale: 0.97 }}
-    transition={snappy}
-    className={`relative px-4 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-      active ? 'text-white' : 'text-muted hover:text-strong'
-    }`}
-  >
-    {active && (
-      <motion.span
-        layoutId={`subTabPill-${group}`}
-        className='absolute inset-0 rounded-lg bg-blue-600 shadow'
-        transition={snappy}
-      />
-    )}
-    <span className='relative z-10'>{children}</span>
-  </motion.button>
-);
 
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
@@ -781,35 +742,14 @@ export const SettingsPanel: React.FC = () => {
       </div>
 
       {/* Tab navigation */}
-      <div
-        role='tablist'
-        aria-label='Settings sections'
-        className='glass-primary rounded-xl mb-8 flex gap-1 p-1 w-fit'
-      >
-        {TABS.map((tab) => {
-          const isActive = tab.id === activeTab;
-          return (
-            <button
-              key={tab.id}
-              role='tab'
-              aria-selected={isActive}
-              onClick={() => setActiveTab(tab.id)}
-              className={`relative px-4 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
-                isActive ? 'text-strong' : 'text-muted hover:text-strong'
-              }`}
-            >
-              {isActive && (
-                <motion.span
-                  layoutId='activeTabPill'
-                  className='glass-tab-active absolute inset-0 rounded-lg'
-                  transition={snappy}
-                />
-              )}
-              <span className='relative z-10'>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <Tabs
+        className='glass-primary rounded-xl mb-8 w-fit'
+        ariaLabel='Settings sections'
+        tone='glass'
+        tabs={TABS.map((t) => ({ value: t.id, label: t.label }))}
+        value={activeTab}
+        onChange={(v) => setActiveTab(v as TabId)}
+      />
 
       {/* Tab body — cross-fades on tab switch (settle-in from below). Modals
           below stay outside so they aren't torn down when the tab changes. */}
@@ -824,7 +764,7 @@ export const SettingsPanel: React.FC = () => {
         >
       {activeTab === 'hooks' && (loading ? (
         <div className='flex items-center gap-3 text-muted'>
-          <div className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+          <Spinner size='md' />
           Detecting tools…
         </div>
       ) : (
@@ -999,14 +939,12 @@ export const SettingsPanel: React.FC = () => {
 
         return (
           <div>
-            <div className='glass-secondary inline-flex flex-wrap gap-1 p-1 mb-2'>
-              {available.map((p) => (
-                <SubTabPill
-                  key={p.toolId}
-                  group='usage'
-                  active={active === p.toolId}
-                  onClick={() => setUsageSubTab(p.toolId)}
-                >
+            <Tabs
+              className='glass-secondary flex-wrap mb-2 w-fit'
+              tone='blue'
+              tabs={available.map((p) => ({
+                value: p.toolId,
+                label: (
                   <span className='flex items-center gap-2'>
                     <img
                       src={TOOL_META[p.toolId].icon}
@@ -1015,9 +953,11 @@ export const SettingsPanel: React.FC = () => {
                     />
                     {TOOL_META[p.toolId].label}
                   </span>
-                </SubTabPill>
-              ))}
-            </div>
+                ),
+              }))}
+              value={active}
+              onChange={(v) => setUsageSubTab(v as ToolId)}
+            />
 
             {active === 'claude-code' && (
               <>

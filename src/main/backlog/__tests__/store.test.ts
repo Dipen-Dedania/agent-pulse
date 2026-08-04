@@ -461,6 +461,15 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(s.perProject).toEqual([{ projectId, name: 'demo', shipped: 3 }]);
     // Per-day buckets are gap-filled across the range; their ship totals sum to shipped.
     expect(s.perDay.reduce((n, d) => n + d.autorun + d.manual, 0)).toBe(3);
+    // Task mix: 5 execution cards ran in-window (3 shipped + already-present +
+    // the out-of-range-by-applied seed, all with an in-range attempt); the
+    // never-run `pending` card is excluded. No research cards ran.
+    expect(s.taskMix.research.count).toBe(0);
+    expect(s.taskMix.execution.count).toBe(5);
+    expect(s.taskMix.shipped.count).toBe(3);
+    expect(s.taskMix.execution.costUsd).toBeCloseTo(0.85);
+    expect(s.taskMix.shipped.costUsd).toBeCloseTo(0.85);
+    expect(s.taskMix.totalCostUsd).toBeCloseTo(0.85);
   });
 
   it('a manual mark counts as a real ship, and clearApply reverts it', () => {
@@ -499,6 +508,26 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(s.shipRatePct).toBe(0);
     expect(s.perProject).toEqual([]);
     expect(s.costUsdLanded).toBe(0);
+    // No attempt was ever run on the research card, so it isn't in the mix.
+    expect(s.taskMix.research.count).toBe(0);
+    expect(s.taskMix.execution.count).toBe(0);
+    expect(s.taskMix.totalCostUsd).toBe(0);
+  });
+
+  it('getShippedStats counts a run research card in the task mix (never shipped)', () => {
+    const now = Date.now();
+    const card = store.createCard({ title: 'investigate', projectId, taskType: 'research' });
+    const attempt = store.insertAttempt(card.id, false);
+    store.finishAttempt(attempt.id, { outcome: 'success', costUsd: 0.4 });
+    store.setCardState(card.id, 'done');
+
+    const s = store.getShippedStats('7d', now);
+    expect(s.shipped).toBe(0);                          // research never ships
+    expect(s.taskMix.research.count).toBe(1);
+    expect(s.taskMix.research.costUsd).toBeCloseTo(0.4);
+    expect(s.taskMix.execution.count).toBe(0);
+    expect(s.taskMix.shipped.count).toBe(0);
+    expect(s.taskMix.totalCostUsd).toBeCloseTo(0.4);
   });
 });
 

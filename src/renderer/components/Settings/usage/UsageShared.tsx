@@ -1,7 +1,7 @@
 import React, { useId, useState } from 'react';
 import { motion } from 'framer-motion';
 import { UsageState } from '../../../../common/types';
-import { GlassToggle, Button } from '../../Shared';
+import { GlassToggle, Button, Badge, type BadgeTone } from '../../Shared';
 import { smooth } from '../../../motion';
 
 // ── Shared usage-panel primitives ───────────────────────────────────────────
@@ -29,23 +29,16 @@ export const DEFAULT_STATE_LABEL: Record<UsageState, string> = {
   'network-error': 'Network error',
 };
 
-const STATE_PILL_CLASS: Record<UsageState, string> = {
-  ok: 'bg-emerald-500/15 text-ok border-emerald-500/30',
-  unknown: 'bg-control/40 text-body border-edge-strong/60',
-  unauthenticated: 'bg-amber-500/15 text-warn border-amber-500/40',
-  unavailable: 'bg-amber-500/15 text-warn border-amber-500/40',
-  'rate-limited': 'bg-amber-500/15 text-warn border-amber-500/40',
-  'network-error': 'bg-red-500/15 text-danger border-red-500/40',
-};
-
-// A small status dot per state so the pill isn't hue-only (colour-blind safe).
-const STATE_DOT_CLASS: Record<UsageState, string> = {
-  ok: 'bg-ok',
-  unknown: 'bg-faint',
-  unauthenticated: 'bg-warn',
-  unavailable: 'bg-warn',
-  'rate-limited': 'bg-warn',
-  'network-error': 'bg-danger',
+// Each state maps to a shared Badge tone (which carries both the pill colour and
+// the colour-blind-safe status dot). Kept as a map so the pill stays pixel-stable
+// against the hand-rolled version it replaced.
+const STATE_TONE: Record<UsageState, BadgeTone> = {
+  ok: 'ok',
+  unknown: 'neutral',
+  unauthenticated: 'warn',
+  unavailable: 'warn',
+  'rate-limited': 'warn',
+  'network-error': 'danger',
 };
 
 export function formatRelativeReset(targetMs: number | undefined): string {
@@ -78,14 +71,9 @@ export const StatePill: React.FC<{
 }> = ({ state, labels }) => {
   const label = labels?.[state] ?? DEFAULT_STATE_LABEL[state];
   return (
-    <span
-      role='status'
-      aria-live='polite'
-      className={`inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded-full border ${STATE_PILL_CLASS[state]}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${STATE_DOT_CLASS[state]}`} aria-hidden />
+    <Badge tone={STATE_TONE[state]} variant='pill' dot uppercase size='xs' role='status' aria-live='polite'>
       {label}
-    </span>
+    </Badge>
   );
 };
 

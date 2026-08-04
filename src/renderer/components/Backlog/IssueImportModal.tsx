@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { IssueCandidate } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, Button, Checkbox, Modal, Tooltip } from '../Shared';
+import { appAlert, Button, Checkbox, EmptyState, Modal, Spinner, Tooltip } from '../Shared';
 import { projectColor } from './project-colors';
 import { SOURCE_META, issueRefLabel } from './source-meta';
 import { SourceIcon } from './SourceIcon';
@@ -110,7 +110,7 @@ export const IssueImportModal: React.FC<Props> = ({ projectFilter, onClose }) =>
           <div className='ml-auto flex items-center gap-2'>
             {scanning && (
               <span className='flex items-center gap-1.5 text-xs text-muted'>
-                <span className='w-3 h-3 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+                <Spinner size='xs' />
                 Scanning…
               </span>
             )}
@@ -122,9 +122,7 @@ export const IssueImportModal: React.FC<Props> = ({ projectFilter, onClose }) =>
 
       <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -mx-1 px-1'>
           {candidates.length === 0 ? (
-            <div className='glass-secondary p-6 text-center text-sm text-muted'>
-              No new issues. Rescan to check again.
-            </div>
+            <EmptyState boxed>No new issues. Rescan to check again.</EmptyState>
           ) : (
             candidates.map((c) => {
               const p = project(c.projectId);

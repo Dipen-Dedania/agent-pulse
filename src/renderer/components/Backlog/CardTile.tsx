@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { BacklogCard, BacklogCardState } from '../../../common/backlog-types';
 import { projectColor } from './project-colors';
 import { hoverLift } from '../../motion';
-import { Tooltip } from '../Shared';
+import { Spinner, Tooltip } from '../Shared';
 import { SourceIcon } from './SourceIcon';
 
 export const TIER_META: Record<BacklogCard['riskTier'], { dot: string; label: string; hint: string }> = {
@@ -157,7 +157,11 @@ export const CardTile: React.FC<Props> = ({
         <p className='flex-1 min-w-0 text-sm font-medium text-strong leading-snug break-words'>{card.title}</p>
         {isRunning && (
           <Tooltip content='Running'>
-            <span className='w-3.5 h-3.5 mt-0.5 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin shrink-0' />
+            {/* Wrapper span is the tooltip trigger — Tooltip clones DOM-element
+                handlers onto its child, which a Spinner component wouldn't forward. */}
+            <span className='mt-0.5 shrink-0 inline-flex'>
+              <Spinner size='sm' ariaLabel='Running' />
+            </span>
           </Tooltip>
         )}
       </div>

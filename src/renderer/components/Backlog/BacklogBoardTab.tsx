@@ -1,12 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BacklogCard, BacklogCardState, countUnmetPrereqs } from '../../../common/backlog-types';
+import { BacklogCard, BacklogCardState, countUnmetPrereqs, isAwaitingReview } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { logger } from '../../../common/logger';
 import { BoardColumn } from './BoardColumn';
-import { appAlert, appConfirm, Button, Tooltip } from '../Shared';
+import {
+  BOARD_RANGE_LABEL, BOARD_RANGE_OPTIONS, BoardRange, boardRangeCutoff,
+  DONE_FILTER_META, DONE_FILTER_ORDER, DONE_FILTER_PREDICATES, DoneFilter,
+  passesViewFilters,
+} from './board-filters';
+import { appAlert, appConfirm, Button, Segmented, Spinner, Tooltip } from '../Shared';
 import { CardTile } from './CardTile';
 import { CardEditorModal } from './CardEditorModal';
+import { BacklogSearchPalette } from './BacklogSearchPalette';
 import { ArtifactViewer } from './ArtifactViewer';
 import { IssueSourceHeaderActions, IssueSourceProjectStrip } from './IssueSourceControls';
 import { IssueImportModal } from './IssueImportModal';
@@ -19,10 +25,13 @@ import { listItem } from '../../motion';
 // card labelled by project and filterable down to one. The Todo column is the
 // autorun queue for the Backlog Scheduler (Settings → Usage → Claude Code).
 
-const FLOW_COLUMNS: { state: BacklogCardState; title: string; hint?: string }[] = [
+const FLOW_COLUMNS: { state: BacklogCardState; title: string; hint?: string; accent?: string }[] = [
   { state: 'refinement', title: 'Refinement', hint: 'raw ideas' },
   { state: 'todo', title: 'Todo', hint: 'autorun queue' },
   { state: 'in-progress', title: 'In Progress' },
+  // Blocked sits in the flow (before Done) rather than the attention rail so it
+  // reads as a stage of the pipeline; still never a drop target (see DROP_TARGETS).
+  { state: 'blocked', title: 'Blocked', hint: 'needs your attention', accent: 'text-danger' },
   { state: 'done', title: 'Done', hint: 'report attached' },
 ];
 
@@ -30,9 +39,71 @@ const FLOW_COLUMNS: { state: BacklogCardState; title: string; hint?: string }[] 
 // rejects it in main), so it never lights up as a drop target.
 const DROP_TARGETS: BacklogCardState[] = ['refinement', 'todo', 'done'];
 
+// Shortcut hint shown on the search trigger. Mac users press ⌘, everyone else Ctrl.
+const SEARCH_SHORTCUT = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘K' : 'Ctrl K';
+
+// Tiles rendered per flow column before the "+N more" expander. Bounds both the
+// scroll length and the number of layout-animated tiles on screen.
+const MAX_VISIBLE_PER_COLUMN = 15;
+
+// Renderer-only view preferences (which cards you're looking at), so they live
+// in localStorage rather than user-config — same posture as DiffView's split
+// setting. Never read by main; they must not influence what the engine runs.
+const RANGE_KEY = 'pulse.board.historyRange';
+const DONE_FILTER_KEY = 'pulse.board.doneFilter';
+
+function loadPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key) as T | null;
+    return raw && allowed.includes(raw) ? raw : fallback;
+  } catch {
+    return fallback; // private mode
+  }
+}
+
+function savePref(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* private mode */ }
+}
+
 function formatClock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
+
+// Done isn't one thing: an unreviewed diff wants you, a shipped one is history,
+// a research report is neither. These chips split it so the actionable few stop
+// hiding behind the many.
+const DoneFilterChips: React.FC<{
+  value: DoneFilter;
+  counts: Record<DoneFilter, number>;
+  onChange: (next: DoneFilter) => void;
+}> = ({ value, counts, onChange }) => (
+  <div className='flex items-center gap-1 flex-wrap'>
+    {DONE_FILTER_ORDER.map((f) => {
+      const meta = DONE_FILTER_META[f];
+      const active = f === value;
+      // An unreviewed diff is the only actionable Done category — keep it
+      // legible even while another chip is selected.
+      const urgent = !active && f === 'needs-review' && counts[f] > 0;
+      return (
+        <Tooltip key={f} content={meta.hint}>
+          <button
+            onClick={() => onChange(f)}
+            className={`px-2 py-0.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors ${
+              active
+                ? 'bg-control text-strong shadow-inner'
+                : urgent
+                  ? 'bg-amber-500/15 text-warn hover:bg-amber-500/25'
+                  : 'text-muted hover:text-strong hover:bg-control/50'
+            }`}
+          >
+            {meta.label}
+            <span className={`ml-1 tabular-nums ${active ? 'text-muted' : 'text-faint'}`}>{counts[f]}</span>
+          </button>
+        </Tooltip>
+      );
+    })}
+  </div>
+);
 
 // Sync (hydrate + broadcast subscription) lives in SettingsPanel via
 // useBacklogSync so the scheduler section's glance stays live even when this
@@ -41,9 +112,21 @@ export const BacklogBoardTab: React.FC = () => {
   const store = useBacklogStore();
 
   const [projectFilter, setProjectFilter] = useState<string>('all');
+  // History window — global (one control scopes the board) but applied only to
+  // log-like columns; see RANGE_FILTERED_STATES. Deliberately NOT wired to the
+  // Analytics range: changing what the board shows must not move the stats.
+  const [range, setRange] = useState<BoardRange>(() =>
+    loadPref(RANGE_KEY, BOARD_RANGE_OPTIONS.map((o) => o.value), '30d'),
+  );
+  // Done splits into categories that want different attention. Defaults to
+  // 'all' rather than 'needs-review' so a research-only board never looks empty.
+  const [doneFilter, setDoneFilter] = useState<DoneFilter>(() =>
+    loadPref(DONE_FILTER_KEY, DONE_FILTER_ORDER, 'all'),
+  );
   const [editor, setEditor] = useState<{ open: boolean; card: BacklogCard | null }>({ open: false, card: null });
   const [detailCard, setDetailCard] = useState<BacklogCard | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [dragCardId, setDragCardId] = useState<string | null>(null);
   // projectId → default model from its .claude/settings.json chain, so tiles
   // can show what a card without an override would actually run with.
@@ -68,10 +151,23 @@ export const BacklogBoardTab: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- projects array identity churns on every hydrate
   }, [projectIdsKey]);
 
+  // ⌘K / Ctrl-K opens the find-cards palette. Scoped to this tab's lifetime, so
+  // it only binds while the Backlog board is mounted.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   if (!store.loaded) {
     return (
       <div className='flex items-center gap-3 text-muted'>
-        <div className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+        <Spinner size='md' />
         Loading board…
       </div>
     );
@@ -88,10 +184,35 @@ export const BacklogBoardTab: React.FC = () => {
 
   const projectName = (id: string) => store.projects.find((p) => p.id === id)?.name ?? 'unknown';
   const visibleCards = store.cards.filter((c) => projectFilter === 'all' || c.projectId === projectFilter);
+  const rangeCutoff = boardRangeCutoff(range, Date.now());
+
+  // Raw column membership, before any view filter. 'claimed' is transient and
+  // belongs with In Progress.
+  const inState = (card: BacklogCard, state: BacklogCardState) =>
+    state === 'in-progress' ? card.state === 'in-progress' || card.state === 'claimed' : card.state === state;
+
+  // View filters (Done chips + history window, each scoped) live in
+  // board-filters so the "unreviewed never ages out" rule is unit-tested.
   const byState = (state: BacklogCardState) =>
     visibleCards
-      .filter((c) => (state === 'in-progress' ? c.state === 'in-progress' || c.state === 'claimed' : c.state === state))
+      .filter((c) => inState(c, state) && passesViewFilters(c, state, { doneFilter, rangeCutoff }))
       .sort((a, b) => (state === 'todo' ? a.sortOrder - b.sortOrder : b.updatedAt - a.updatedAt));
+
+  // Unfiltered size of a column, so the header can say "4 of 327" instead of
+  // quietly dropping cards.
+  const totalInState = (state: BacklogCardState) => visibleCards.filter((c) => inState(c, state)).length;
+
+  // Chip counts reflect what clicking would actually show — same window rule,
+  // including the awaiting-review exemption.
+  const doneInWindow = visibleCards.filter(
+    (c) => c.state === 'done' && (c.updatedAt >= rangeCutoff || isAwaitingReview(c)),
+  );
+  const doneCounts = Object.fromEntries(
+    DONE_FILTER_ORDER.map((f) => [f, doneInWindow.filter(DONE_FILTER_PREDICATES[f]).length]),
+  ) as Record<DoneFilter, number>;
+
+  const pickRange = (next: BoardRange) => { setRange(next); savePref(RANGE_KEY, next); };
+  const pickDoneFilter = (next: DoneFilter) => { setDoneFilter(next); savePref(DONE_FILTER_KEY, next); };
 
   const todoCards = byState('todo');
 
@@ -342,7 +463,6 @@ export const BacklogBoardTab: React.FC = () => {
     );
   };
 
-  const blocked = byState('blocked');
   const rework = byState('rework');
   const paused = byState('paused');
 
@@ -364,6 +484,24 @@ export const BacklogBoardTab: React.FC = () => {
               </p>
             )}
           </div>
+          {/* Styled to read as a search field, not just another button, so the
+              palette is discoverable without knowing the keyboard shortcut. */}
+          <Tooltip content='Find a card by title, description, or project'>
+            <button
+              onClick={() => setPaletteOpen(true)}
+              aria-label='Search cards'
+              className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-glass/60 border border-edge/70 text-sm text-muted hover:text-strong hover:border-edge-strong cursor-pointer transition-colors'
+            >
+              <svg viewBox='0 0 20 20' fill='none' stroke='currentColor' strokeWidth={2} className='w-3.5 h-3.5 shrink-0' aria-hidden='true'>
+                <circle cx='9' cy='9' r='6' />
+                <path d='M14 14l4 4' strokeLinecap='round' />
+              </svg>
+              <span>Search cards…</span>
+              <kbd className='ml-1 px-1.5 py-0.5 rounded bg-control/60 border border-edge/60 text-[10px] leading-none text-faint'>
+                {SEARCH_SHORTCUT}
+              </kbd>
+            </button>
+          </Tooltip>
           <Button variant='secondary' size='sm' onClick={handleAddProject}>
             + Add project
           </Button>
@@ -414,6 +552,20 @@ export const BacklogBoardTab: React.FC = () => {
                 </Tooltip>
               </span>
             ))}
+
+            {/* History window — scopes the board's log-like columns (Done).
+                Work queues ignore it, so the Todo order always matches what the
+                engine will run. */}
+            <span className='ml-auto flex items-center gap-2 pl-2'>
+              <Tooltip content='How far back the Done column reaches. Work queues (Refinement, Todo, In Progress) and cards needing attention are never hidden by it. Separate from the Analytics tab’s range.'>
+                <span className='text-[11px] uppercase tracking-widest text-muted font-semibold'>History</span>
+              </Tooltip>
+              <Segmented
+                options={BOARD_RANGE_OPTIONS}
+                value={range}
+                onChange={(v) => pickRange(v as BoardRange)}
+              />
+            </span>
           </div>
         )}
 
@@ -432,16 +584,28 @@ export const BacklogBoardTab: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* Main flow — flex-1 + auto-rows-fr stretch the columns to fill the tab */}
-          <div className='flex-1 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 auto-rows-fr gap-4'>
+          {/* Main flow — flex-1 + auto-rows-fr stretch the columns to fill the tab.
+              Five columns (Blocked joins the flow), so big screens go 5-up. */}
+          <div className='flex-1 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 auto-rows-fr gap-4'>
             {FLOW_COLUMNS.map((col) => {
               const cards = byState(col.state);
+              const isDone = col.state === 'done';
               return (
                 <BoardColumn
                   key={col.state}
                   title={col.title}
-                  hint={col.hint}
+                  accent={col.accent}
+                  // Done advertises the active window instead of a static hint,
+                  // so a filtered column always explains itself.
+                  hint={isDone && range !== 'all' ? BOARD_RANGE_LABEL[range] : col.hint}
                   count={cards.length}
+                  total={totalInState(col.state)}
+                  maxVisible={MAX_VISIBLE_PER_COLUMN}
+                  filters={
+                    isDone ? (
+                      <DoneFilterChips value={doneFilter} counts={doneCounts} onChange={pickDoneFilter} />
+                    ) : undefined
+                  }
                   droppable={columnDroppable(col.state)}
                   onDropCard={() => void handleDropOnColumn(col.state)}
                 >
@@ -451,15 +615,11 @@ export const BacklogBoardTab: React.FC = () => {
             })}
           </div>
 
-          {/* Attention rail — only when something needs it. Blocked / Rework /
-              Paused cards are never drop targets (see DROP_TARGETS above). */}
-          {(blocked.length > 0 || rework.length > 0 || paused.length > 0) && (
-            <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
-              {blocked.length > 0 && (
-                <BoardColumn title='Blocked' count={blocked.length} accent='text-danger' hint='needs your attention'>
-                  {blocked.map(renderTile)}
-                </BoardColumn>
-              )}
+          {/* Attention rail — only when something needs it. Rework / Paused
+              cards are never drop targets (see DROP_TARGETS above). Blocked now
+              lives in the flow row. */}
+          {(rework.length > 0 || paused.length > 0) && (
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
               {rework.length > 0 && (
                 <BoardColumn title='Rework' count={rework.length} accent='text-orange-300 light:text-orange-700' hint='QA failed — retries once, then blocks'>
                   {rework.map(renderTile)}
@@ -488,6 +648,16 @@ export const BacklogBoardTab: React.FC = () => {
       {detailCard && <ArtifactViewer card={detailCard} onClose={() => setDetailCard(null)} />}
       <AnimatePresence>
         {importOpen && <IssueImportModal projectFilter={projectFilter} onClose={() => setImportOpen(false)} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {paletteOpen && (
+          <BacklogSearchPalette
+            cards={store.cards}
+            projects={store.projects}
+            onPick={(card) => { setPaletteOpen(false); setEditor({ open: true, card }); }}
+            onClose={() => setPaletteOpen(false)}
+          />
+        )}
       </AnimatePresence>
     </div>
   );

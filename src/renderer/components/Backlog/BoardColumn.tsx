@@ -5,16 +5,41 @@ import { Tooltip } from '../Shared';
 
 interface Props {
   title: string;
+  /** Cards actually rendered into this column (after any filtering). */
   count: number;
+  /**
+   * Cards in this state before filtering. Pass only when it can exceed `count`
+   * — the header then reads "4 of 327" so a filter never hides work silently.
+   */
+  total?: number;
+  /**
+   * Cap on tiles rendered before a "+N more" expander. Keeps a long column
+   * short and, just as importantly, keeps Framer Motion off hundreds of tiles.
+   */
+  maxVisible?: number;
   hint?: string;
   accent?: string; // tailwind text color for the count chip
+  /** Filter controls rendered under the header (the Done column's chips). */
+  filters?: React.ReactNode;
   droppable?: boolean; // a drag is in flight and this column accepts it
   onDropCard?: () => void;
   children: React.ReactNode;
 }
 
-export const BoardColumn: React.FC<Props> = ({ title, count, hint, accent, droppable, onDropCard, children }) => {
+export const BoardColumn: React.FC<Props> = ({
+  title, count, total, maxVisible, hint, accent, filters, droppable, onDropCard, children,
+}) => {
   const [dragOver, setDragOver] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  // Cap the rendered tiles. Drive off the real child array rather than `count`
+  // so the expander can never disagree with what's on screen.
+  const items = React.Children.toArray(children);
+  const shown = maxVisible != null && !expanded ? items.slice(0, maxVisible) : items;
+  const hidden = items.length - shown.length;
+  // A filter is hiding cards (as opposed to the column genuinely being empty).
+  const filteredOut = total != null && total > count;
+
   return (
     // `layout` on the column lets the grid settle smoothly when the attention
     // rail appears/disappears. `initial/animate` fade the column in on mount.
@@ -35,13 +60,19 @@ export const BoardColumn: React.FC<Props> = ({ title, count, hint, accent, dropp
     >
       <div className='flex items-center gap-2'>
         <p className='text-xs uppercase tracking-widest text-muted font-semibold'>{title}</p>
-        <span className={`text-[11px] px-1.5 py-0.5 rounded-md bg-control/60 ${accent ?? 'text-body'}`}>{count}</span>
+        <Tooltip content={filteredOut ? `${count} shown of ${total} in this column` : undefined}>
+          <span className={`text-[11px] px-1.5 py-0.5 rounded-md bg-control/60 ${accent ?? 'text-body'}`}>
+            {filteredOut ? `${count} of ${total}` : count}
+          </span>
+        </Tooltip>
         {hint && (
           <Tooltip content={hint}>
             <span className='text-[11px] text-faint truncate'>{hint}</span>
           </Tooltip>
         )}
       </div>
+
+      {filters}
 
       {/* Staggered card list — AnimatePresence enables enter/exit animations
           for cards added or removed from this column. listContainer staggers
@@ -53,7 +84,7 @@ export const BoardColumn: React.FC<Props> = ({ title, count, hint, accent, dropp
         animate='animate'
       >
         <AnimatePresence initial={false}>
-          {count === 0 ? (
+          {items.length === 0 ? (
             <motion.p
               key='__empty'
               initial={{ opacity: 0 }}
@@ -62,11 +93,29 @@ export const BoardColumn: React.FC<Props> = ({ title, count, hint, accent, dropp
               transition={{ duration: 0.15 }}
               className='text-xs text-faint'
             >
-              Empty
+              {/* "Empty" would read as data loss when a filter is what emptied it. */}
+              {filteredOut ? `No cards match — ${total} hidden by this filter` : 'Empty'}
             </motion.p>
-          ) : children}
+          ) : shown}
         </AnimatePresence>
       </motion.div>
+
+      {hidden > 0 && (
+        <button
+          onClick={() => setExpanded(true)}
+          className='self-start text-[11px] px-2 py-1 rounded-md bg-control/50 text-muted hover:bg-control-strong hover:text-strong cursor-pointer transition-colors'
+        >
+          + {hidden} more
+        </button>
+      )}
+      {expanded && maxVisible != null && items.length > maxVisible && (
+        <button
+          onClick={() => setExpanded(false)}
+          className='self-start text-[11px] px-2 py-1 rounded-md bg-control/50 text-muted hover:bg-control-strong hover:text-strong cursor-pointer transition-colors'
+        >
+          Show fewer
+        </button>
+      )}
     </motion.div>
   );
 };

@@ -22,12 +22,98 @@ const Stat: React.FC<{ label: string; value: string; hint?: React.ReactNode; ton
   </div>
 );
 
+// Task-mix palette — reused for donut arcs and legend swatches so the colors
+// stay in lock-step. Emerald == shipped everywhere on this card.
+const MIX = {
+  research: 'rgb(167 139 250)', // violet-400
+  execution: 'rgb(56 189 248)', // sky-400
+  shipped: 'rgb(52 211 153)',   // emerald-400
+} as const;
+
+// One arc of the donut. `start`/`len` are fractions of the full circle (0–1);
+// the circle is rotated so 0 sits at 12 o'clock and arcs run clockwise.
+const Arc: React.FC<{
+  r: number; width: number; start: number; len: number; color: string; opacity?: number;
+  tip?: ReturnType<ReturnType<typeof useChartTip>['tipHandlers']>;
+}> = ({ r, width, start, len, color, opacity = 1, tip }) => {
+  if (len <= 0) return null;
+  const c = 2 * Math.PI * r;
+  return (
+    <circle
+      cx={50} cy={50} r={r} fill='none'
+      stroke={color} strokeWidth={width} strokeOpacity={opacity} strokeLinecap='butt'
+      strokeDasharray={`${len * c} ${c}`}
+      transform={`rotate(${start * 360 - 90} 50 50)`}
+      style={{ cursor: tip ? 'default' : undefined }}
+      {...tip}
+    />
+  );
+};
+
+// Research vs Execution as a donut, with the shipped share of execution drawn
+// as an emerald inner arc directly under the execution slice. Total estimated
+// cost sits in the hole; per-slice cost shows on hover.
+const TaskMixDonut: React.FC<{
+  mix: import('../../../../common/backlog-types').BacklogTaskMix;
+  tipHandlers: ReturnType<typeof useChartTip>['tipHandlers'];
+}> = ({ mix, tipHandlers }) => {
+  const { research, execution, shipped } = mix;
+  const total = research.count + execution.count;
+  if (total === 0) return null;
+
+  const researchFrac = research.count / total;
+  const executionFrac = execution.count / total;
+  const shippedFrac = shipped.count / total; // ⊆ executionFrac (clamped in store)
+
+  return (
+    <div className='flex items-center gap-5'>
+      <div className='relative shrink-0' style={{ width: 128, height: 128 }}>
+        <svg viewBox='0 0 100 100' width={128} height={128} className='-rotate-0'>
+          {/* faint full track so a lopsided mix still reads as a ring */}
+          <circle cx={50} cy={50} r={40} fill='none' stroke='currentColor' strokeWidth={11} className='text-edge/40' />
+          {/* outer: research vs execution */}
+          <Arc r={40} width={11} start={0} len={researchFrac} color={MIX.research}
+            tip={tipHandlers(<span><span className='font-semibold text-strong'>{research.count} research</span><span className='text-muted'> · ≈{formatUsd(research.costUsd)}</span></span>)} />
+          <Arc r={40} width={11} start={researchFrac} len={executionFrac} color={MIX.execution}
+            tip={tipHandlers(<span><span className='font-semibold text-strong'>{execution.count} execution</span><span className='text-muted'> · ≈{formatUsd(execution.costUsd)}</span></span>)} />
+          {/* inner: shipped share of execution (unshipped remainder stays faint) */}
+          <Arc r={28} width={5} start={researchFrac} len={executionFrac - shippedFrac} color='rgb(148 163 184)' opacity={0.3} />
+          <Arc r={28} width={5} start={researchFrac} len={shippedFrac} color={MIX.shipped}
+            tip={tipHandlers(<span><span className='font-semibold text-strong'>{shipped.count} shipped</span><span className='text-muted'> of {execution.count} · ≈{formatUsd(shipped.costUsd)}</span></span>)} />
+        </svg>
+        <div className='pointer-events-none absolute inset-0 flex flex-col items-center justify-center'>
+          <span className='text-base font-semibold tabular-nums text-strong leading-none'>≈{formatUsd(mix.totalCostUsd)}</span>
+          <span className='mt-0.5 text-[9px] uppercase tracking-wider text-faint'>est. cost</span>
+        </div>
+      </div>
+      {/* Legend */}
+      <div className='flex flex-col gap-2 text-[12px]'>
+        <div className='flex items-center gap-2'>
+          <span className='w-2.5 h-2.5 rounded-sm' style={{ background: MIX.research }} />
+          <span className='text-body'>Research</span>
+          <span className='font-mono tabular-nums text-muted'>{research.count}</span>
+        </div>
+        <div className='flex items-center gap-2'>
+          <span className='w-2.5 h-2.5 rounded-sm' style={{ background: MIX.execution }} />
+          <span className='text-body'>Execution</span>
+          <span className='font-mono tabular-nums text-muted'>{execution.count}</span>
+        </div>
+        <div className='flex items-center gap-2 pl-[18px]'>
+          <span className='w-2 h-2 rounded-full' style={{ background: MIX.shipped }} />
+          <span className='text-faint'>{shipped.count} shipped</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const BacklogShippedCard: React.FC = () => {
   const range = useGlobalRange();
   const { data, loading } = useBacklogStats(range);
   const { tipHandlers, tipOverlay } = useChartTip();
 
-  const hasData = data && (data.shipped > 0 || data.alreadyPresent > 0 || data.doneWithDiff > 0 || data.awaitingReview > 0);
+  const hasData = data && (data.shipped > 0 || data.alreadyPresent > 0 || data.doneWithDiff > 0 || data.awaitingReview > 0
+    || data.taskMix.research.count > 0 || data.taskMix.execution.count > 0);
   const dayMax = data ? Math.max(...data.perDay.map((d) => d.autorun + d.manual), 1) : 1;
   const projMax = data ? Math.max(...data.perProject.map((p) => p.shipped), 1) : 1;
   const autonomousPct = data && data.shipped > 0 ? Math.round((data.fromAutorun / data.shipped) * 100) : 0;
@@ -72,6 +158,21 @@ export const BacklogShippedCard: React.FC = () => {
               </InfoTooltip>
             } />
           </div>
+
+          {/* Task mix — research vs execution donut with shipped inner arc + est. cost */}
+          {(data!.taskMix.research.count > 0 || data!.taskMix.execution.count > 0) && (
+            <div>
+              <div className='flex items-center gap-1 mb-2'>
+                <p className='text-[11px] text-muted'>Task mix</p>
+                <InfoTooltip label='What the task mix shows'>
+                  Research vs execution cards the planner worked on in this window. The emerald inner arc is the
+                  share of execution that shipped. Center is total estimated API-list-price cost — an estimate,
+                  not your plan billing.
+                </InfoTooltip>
+              </div>
+              <TaskMixDonut mix={data!.taskMix} tipHandlers={tipHandlers} />
+            </div>
+          )}
 
           {/* Shipped per period — stacked autorun / manual bars */}
           <div>

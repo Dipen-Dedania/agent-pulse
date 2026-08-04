@@ -745,11 +745,41 @@ export class BacklogStore {
       .map(([projectId, s]) => ({ projectId, name: projectNames.get(projectId) ?? 'Unknown project', shipped: s }))
       .sort((a, b) => b.shipped - a.shipped);
 
+    // Task-type mix for the donut. Population = cards the planner actually
+    // worked on in this window (≥1 attempt started in range); per-group cost =
+    // estimated attempt spend within the window. Shipped stays as computed
+    // above (applied_at in range), and we clamp execution ≥ shipped so the
+    // inner "shipped" arc is always a subset of the execution slice — even in
+    // the rare case a shipped card's only run predates the window.
+    const mixRows = this.db.prepare(
+      `SELECT c.task_type AS tt,
+              COUNT(DISTINCT c.id) AS n,
+              COALESCE(SUM(a.cost_usd), 0) AS cost
+         FROM cards c
+         JOIN attempts a ON a.card_id = c.id AND a.started_at >= ?
+        WHERE c.task_type IN ('research', 'execution')
+        GROUP BY c.task_type`,
+    ).all(cutoff) as { tt: string; n: number; cost: number }[];
+
+    let researchCount = 0, researchCost = 0, executionCount = 0, executionCost = 0;
+    for (const r of mixRows) {
+      if (r.tt === 'research') { researchCount = r.n; researchCost = r.cost; }
+      else if (r.tt === 'execution') { executionCount = r.n; executionCost = r.cost; }
+    }
+    executionCount = Math.max(executionCount, shipped);
+
+    const taskMix = {
+      research: { count: researchCount, costUsd: researchCost },
+      execution: { count: executionCount, costUsd: executionCost },
+      shipped: { count: shipped, costUsd: costUsdLanded },
+      totalCostUsd: researchCost + executionCost,
+    };
+
     return {
       range, shipped, fromAutorun, fromManual, alreadyPresent,
       doneWithDiff, awaitingReview, shipRatePct,
       minutesLanded, costUsdLanded, additions, deletions, filesTouched,
-      methodBreakdown, perDay, perProject, queriedAt: nowMs,
+      methodBreakdown, perDay, perProject, taskMix, queriedAt: nowMs,
     };
   }
 

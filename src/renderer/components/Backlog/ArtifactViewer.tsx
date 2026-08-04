@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { BacklogArtifact, BacklogArtifactKind, BacklogAttempt, BacklogCard } from '../../../common/backlog-types';
 import { logger } from '../../../common/logger';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, appConfirm, Button, Tooltip } from '../Shared';
+import { appAlert, appConfirm, Button, Select, Tooltip } from '../Shared';
 import { DiffView } from './DiffView';
 import { Markdown } from './Markdown';
 
@@ -425,26 +425,22 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                     </span>
                   )}
                   {artifacts.length > 1 && (
-                    <select
+                    <Select
                       value={selected?.id ?? ''}
-                      onChange={(e) => setSelected(artifacts.find((x) => x.id === e.target.value) ?? null)}
-                      className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong cursor-pointer focus:outline-none'
-                    >
-                      {KIND_ORDER.map((kind) => {
-                        const inKind = artifacts.filter((x) => x.kind === kind);
-                        if (inKind.length === 0) return null;
-                        return (
-                          <optgroup key={kind} label={KIND_LABEL[kind]}>
-                            {inKind.map((x) => (
-                              <option key={x.id} value={x.id}>
-                                {/* screenshots share a timestamp per attempt — the filename tells them apart */}
-                                {x.kind === 'screenshot' ? x.preview : formatWhen(x.createdAt)}
-                              </option>
-                            ))}
-                          </optgroup>
-                        );
-                      })}
-                    </select>
+                      onChange={(id) => setSelected(artifacts.find((x) => x.id === id) ?? null)}
+                      className='px-2 py-1 text-xs'
+                      ariaLabel='Select artifact'
+                      options={KIND_ORDER.flatMap((kind) =>
+                        artifacts
+                          .filter((x) => x.kind === kind)
+                          .map((x) => ({
+                            value: x.id,
+                            // screenshots share a timestamp per attempt — the filename tells them apart
+                            label: x.kind === 'screenshot' ? x.preview : formatWhen(x.createdAt),
+                            group: KIND_LABEL[kind],
+                          })),
+                      )}
+                    />
                   )}
                   <Button
                     variant='secondary'

@@ -183,6 +183,26 @@ export function countUnmetPrereqs(
   return card.prereqIds.filter((id) => stateById.has(id) && stateById.get(id) !== 'done').length;
 }
 
+/**
+ * A Done execution card whose diff hasn't landed on the project yet — the only
+ * Done cards that still want a human. Drives the board's "Needs review" Done
+ * filter, and is the predicate the range window exempts so an unreviewed card
+ * can never age out of sight.
+ *
+ * Mirrors the `awaitingReview` SQL in main's store.getShippedStats (which can't
+ * call this, being a query) — keep the two in step.
+ */
+export function isAwaitingReview(
+  card: Pick<BacklogCard, 'taskType' | 'state' | 'worktreePath' | 'appliedAt'>,
+): boolean {
+  return (
+    card.taskType === 'execution' &&
+    card.state === 'done' &&
+    card.worktreePath != null &&
+    card.appliedAt == null
+  );
+}
+
 // 'qa-failed': the run itself succeeded but the QA command failed — distinct
 // from 'failed' so the QA-fail escalation streak never mixes with run failures,
 // and from 'killed' so it never trips the budget-kill escalation.
@@ -384,6 +404,22 @@ export interface BacklogShippedProjectBucket {
   shipped: number;
 }
 
+// Task-type mix for the donut: research vs execution card counts, with the
+// shipped subset of execution called out as an inner arc. Basis = cards the
+// planner actually worked on in the window (≥1 attempt started in range), so
+// counts and per-slice cost describe the same population. Costs are ESTIMATED
+// attempt spend, never plan billing. `shipped` is always ⊆ `execution`.
+export interface BacklogTaskMixGroup {
+  count: number;    // cards of this kind worked on in range
+  costUsd: number;  // estimated attempt spend attributed to them
+}
+export interface BacklogTaskMix {
+  research: BacklogTaskMixGroup;
+  execution: BacklogTaskMixGroup;  // ALL execution cards in window (shipped ⊆ this)
+  shipped: BacklogTaskMixGroup;    // applied execution cards (subset of execution)
+  totalCostUsd: number;            // research.costUsd + execution.costUsd (donut center)
+}
+
 export interface BacklogStatsPayload {
   range: BacklogStatsRange;
   shipped: number;            // applied execution cards in range (excludes already-present)
@@ -401,6 +437,7 @@ export interface BacklogStatsPayload {
   methodBreakdown: { clean: number; threeWay: number; stashed: number; alreadyPresent: number; manual: number };
   perDay: BacklogShippedDayBucket[];       // ascending by date, gap-filled
   perProject: BacklogShippedProjectBucket[]; // descending by shipped
+  taskMix: BacklogTaskMix;                 // research vs execution (donut), shipped inner arc
   queriedAt: number;
 }
 

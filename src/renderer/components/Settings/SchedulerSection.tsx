@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SchedulerStatus } from '../../../common/types';
 import { estimateCost, formatUsd } from '../../../common/pricing';
-import { Button, GlassToggle, Tooltip } from '../Shared';
+import { Button, GlassToggle, Segmented, Tooltip } from '../Shared';
 
 // Mirrors SchedulerConfig in src/main/user-config.ts (kept structural so the
 // renderer needn't import main-process modules).
@@ -166,19 +166,13 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
       </div>
 
       {/* Mode switch */}
-      <div className='mt-5 flex gap-1 p-1 bg-glass/50 border border-edge/60 rounded-xl w-fit'>
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            onClick={() => setMode(m.id)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
-              config.mode === m.id ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
-            }`}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        className='mt-5'
+        size='md'
+        options={MODES.map((m) => ({ value: m.id, label: m.label }))}
+        value={config.mode}
+        onChange={(v) => setMode(v as SchedulerConfigUI['mode'])}
+      />
 
       {/* Status glance */}
       <div className='mt-4 glass-secondary px-4 py-3'>

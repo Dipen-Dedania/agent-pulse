@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, GlassToggle } from '../Shared';
+import { Button, GlassToggle, Spinner } from '../Shared';
 
 // Shared building blocks for the Guardrails and Secret Protection sub-tabs.
 // The two surfaces were near-verbatim copies (rule row, add-rule form fields,
@@ -10,7 +10,7 @@ import { Button, GlassToggle } from '../Shared';
 /** Spinner + label shown while a tab's config is still loading over IPC. */
 export const TabLoading: React.FC<{ label: string }> = ({ label }) => (
   <div className='flex items-center gap-3 text-muted'>
-    <div className='w-4 h-4 border-2 border-edge-strong border-t-blue-400 rounded-full animate-spin' />
+    <Spinner size='md' />
     {label}
   </div>
 );

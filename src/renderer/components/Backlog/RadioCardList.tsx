@@ -1,5 +1,5 @@
-import React from 'react';
-import { Radio } from '../Shared';
+import React, { useState } from 'react';
+import { EmptyState, Radio } from '../Shared';
 
 // Single-select glass radio-card list used by the source-link pickers
 // (LinearLinkModal, JiraLinkModal). Each option is a whole-card <label> with a
@@ -28,9 +28,29 @@ interface Props {
   leadingOption?: RadioCardOption;
   /** Shown when `options` is empty and there is no leadingOption. */
   emptyText: string;
+  /**
+   * Show a filter box above the list. Defaults to on once the list is long
+   * enough to be awkward (a real Jira account can list 30+ projects). The
+   * `leadingOption` is never filtered — it stays pinned.
+   */
+  searchable?: boolean;
+  /** Placeholder for the filter box (e.g. "Filter projects…"). */
+  searchPlaceholder?: string;
 }
 
-export const RadioCardList: React.FC<Props> = ({ name, options, selected, onSelect, leadingOption, emptyText }) => {
+export const RadioCardList: React.FC<Props> = ({
+  name, options, selected, onSelect, leadingOption, emptyText, searchable, searchPlaceholder,
+}) => {
+  const [filter, setFilter] = useState('');
+  const showSearch = searchable ?? options.length > 8;
+  const q = filter.trim().toLowerCase();
+  const filtered = q === ''
+    ? options
+    : options.filter((o) =>
+        o.label.toLowerCase().includes(q) ||
+        (o.badge?.toLowerCase().includes(q) ?? false) ||
+        (o.sub?.toLowerCase().includes(q) ?? false));
+
   const row = (opt: RadioCardOption) => {
     const on = selected === opt.id;
     return (
@@ -49,13 +69,24 @@ export const RadioCardList: React.FC<Props> = ({ name, options, selected, onSele
   };
 
   return (
-    <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -m-1 p-1'>
-      {leadingOption && row(leadingOption)}
-      {options.length === 0 && !leadingOption ? (
-        <div className='glass-secondary p-6 text-center text-sm text-muted'>{emptyText}</div>
-      ) : (
-        options.map(row)
+    <div className='flex-1 min-h-0 flex flex-col gap-2'>
+      {showSearch && (
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder={searchPlaceholder ?? 'Filter…'}
+          aria-label={searchPlaceholder ?? 'Filter list'}
+          className='bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
+        />
       )}
+      <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -m-1 p-1'>
+        {leadingOption && row(leadingOption)}
+        {filtered.length === 0 && !leadingOption ? (
+          <EmptyState boxed>{q ? `No matches for “${filter.trim()}”` : emptyText}</EmptyState>
+        ) : (
+          filtered.map(row)
+        )}
+      </div>
     </div>
   );
 };

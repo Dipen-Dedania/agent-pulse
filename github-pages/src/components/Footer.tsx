@@ -24,7 +24,9 @@ const columns: LinkColumn[] = [
     heading: 'Product',
     links: [
       { label: 'Features', href: '#features' },
+      { label: 'Compare', href: '#comparison' },
       { label: 'Download', href: '#download' },
+      { label: "What's new", href: '#changelog' },
       { label: 'Releases ↗', href: RELEASES_URL, external: true },
     ],
   },
@@ -32,6 +34,7 @@ const columns: LinkColumn[] = [
     heading: 'Project',
     links: [
       { label: 'GitHub ↗', href: REPO_URL, external: true },
+      { label: 'Community & press', href: '#community' },
       { label: 'Issues ↗', href: ISSUES_URL, external: true },
       { label: 'License ↗', href: LICENSE_URL, external: true },
     ],

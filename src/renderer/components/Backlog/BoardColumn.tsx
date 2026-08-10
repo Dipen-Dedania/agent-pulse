@@ -23,11 +23,13 @@ interface Props {
   filters?: React.ReactNode;
   droppable?: boolean; // a drag is in flight and this column accepts it
   onDropCard?: () => void;
+  /** data-tour anchor id on the header, for the Backlog guided tour to spotlight. */
+  dataTour?: string;
   children: React.ReactNode;
 }
 
 export const BoardColumn: React.FC<Props> = ({
-  title, count, total, maxVisible, hint, accent, filters, droppable, onDropCard, children,
+  title, count, total, maxVisible, hint, accent, filters, droppable, onDropCard, dataTour, children,
 }) => {
   const [dragOver, setDragOver] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -58,7 +60,7 @@ export const BoardColumn: React.FC<Props> = ({
         droppable && dragOver ? 'border-blue-400/70 bg-control/60' : ''
       }`}
     >
-      <div className='flex items-center gap-2'>
+      <div className='flex items-center gap-2' data-tour={dataTour}>
         <p className='text-xs uppercase tracking-widest text-muted font-semibold'>{title}</p>
         <Tooltip content={filteredOut ? `${count} shown of ${total} in this column` : undefined}>
           <span className={`text-[11px] px-1.5 py-0.5 rounded-md bg-control/60 ${accent ?? 'text-body'}`}>

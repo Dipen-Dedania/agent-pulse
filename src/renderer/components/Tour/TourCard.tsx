@@ -56,6 +56,19 @@ const CARD_WIDTH = 296;
 // shadow isn't clipped at the window edge. Included in the measured size.
 const SHADOW_PAD = 14;
 
+// The settings "liquid" backdrop, inlined so this floating card (which lives in
+// its own transparent window, not over the settings surface) has the same base
+// to refract as the in-app Backlog tour. Without an opaque base behind it, the
+// shared .glass-modal material would be near-invisible over the desktop. Mirrors
+// `.settings-liquid-bg` in index.css so both tours read as the same material.
+const TOUR_LIQUID_DARK =
+  'radial-gradient(ellipse at 20% 10%, oklch(30% 0.08 265) 0%, oklch(20% 0.04 260) 40%, oklch(13% 0.02 258) 100%)';
+const TOUR_LIQUID_LIGHT =
+  'radial-gradient(ellipse at 12% 0%, #dbeafe 0%, transparent 45%),' +
+  'radial-gradient(ellipse at 88% 12%, #ece9fe 0%, transparent 48%),' +
+  'radial-gradient(ellipse at 60% 108%, #fce7f3 0%, transparent 52%),' +
+  'linear-gradient(160deg, #eef2ff 0%, #f6f8ff 60%, #ffffff 100%)';
+
 export const TourCard: React.FC = () => {
   const [index, setIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -115,16 +128,12 @@ export const TourCard: React.FC = () => {
         initial={{ opacity: 0, y: 10, scale: 0.96 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: 'spring', stiffness: 300, damping: 26 }}
-        className='rounded-2xl overflow-hidden'
-        style={{
-          width: CARD_WIDTH,
-          background: isDark ? 'rgba(17,17,24,0.88)' : 'rgba(255,255,255,0.92)',
-          backdropFilter: 'blur(18px)',
-          WebkitBackdropFilter: 'blur(18px)',
-          border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.10)',
-          boxShadow: isDark ? '0 8px 28px rgba(0,0,0,0.55)' : '0 8px 28px rgba(0,0,0,0.12)',
-        }}
+        className='rounded-2xl overflow-hidden shadow-2xl'
+        style={{ width: CARD_WIDTH, background: isDark ? TOUR_LIQUID_DARK : TOUR_LIQUID_LIGHT }}
       >
+        {/* The shared liquid-glass material (same .glass-modal as the in-app
+            Backlog tour), frosting the liquid base above so both tours match. */}
+        <div className='glass-modal !rounded-2xl'>
         <div className='p-5'>
           {/* Narrator + step copy, cross-faded per step */}
           <AnimatePresence mode='wait'>
@@ -185,6 +194,7 @@ export const TourCard: React.FC = () => {
               {isLast ? 'Set up my tools' : 'Next'}
             </Button>
           </div>
+        </div>
         </div>
       </motion.div>
     </div>

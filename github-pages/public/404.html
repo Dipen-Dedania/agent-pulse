@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Page not found — Agent Pulse</title>
+    <meta name="robots" content="noindex" />
+    <link rel="icon" type="image/x-icon" href="/agent-pulse/favicon/favicon.ico" />
+    <style>
+      :root {
+        --navy: #0b3558;
+        --blue: #006bff;
+        --slate: #476788;
+        --mist: #f8f9fb;
+        --border: #d4e0ed;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        padding: 24px;
+        text-align: center;
+        background: var(--mist);
+        color: var(--navy);
+        font-family:
+          'Manrope', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+          Roboto, sans-serif;
+      }
+      img {
+        width: 56px;
+        height: 56px;
+        object-fit: contain;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(64px, 12vw, 96px);
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+      p {
+        margin: 0;
+        max-width: 32rem;
+        font-size: 18px;
+        line-height: 1.6;
+        color: var(--slate);
+      }
+      .lead {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--navy);
+      }
+      a.button {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        padding: 12px 24px;
+        border-radius: 4px;
+        background: var(--blue);
+        color: #fff;
+        font-weight: 600;
+        font-size: 16px;
+        text-decoration: none;
+        box-shadow:
+          rgba(71, 103, 136, 0.04) 0 4px 5px 0,
+          rgba(71, 103, 136, 0.06) 0 15px 30px 0;
+      }
+      a.button:hover {
+        background: #0055d4;
+      }
+      a.ghost {
+        color: var(--slate);
+        font-size: 14px;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <img src="/agent-pulse/assets/logo-transparent.png" alt="Agent Pulse logo" />
+    <h1>404</h1>
+    <p class="lead">This page floated off-screen.</p>
+    <p>
+      The link may be broken or the page may have moved. Let&rsquo;s get you back to your AI coding
+      agents, at a glance.
+    </p>
+    <a class="button" href="/agent-pulse/">Back to Agent Pulse</a>
+    <a class="ghost" href="https://github.com/Dipen-Dedania/agent-pulse">Or visit the project on GitHub ↗</a>
+  </body>
+</html>

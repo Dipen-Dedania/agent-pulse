@@ -29,7 +29,7 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
   }, [config.scoutModel]);
 
   return (
-    <section className='mt-6 glass-primary p-6'>
+    <section className='mt-6 glass-primary p-6' data-tour='backlog-population'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
           <h2 className='text-lg font-bold text-strong'>Issue population</h2>

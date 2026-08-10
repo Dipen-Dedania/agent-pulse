@@ -846,6 +846,22 @@ class AgentPulseApp {
       return this.projectTourState();
     });
 
+    // Backlog planner tour: flips once the in-panel spotlight walk finishes or
+    // is skipped, so it never auto-reruns; the board keeps a manual re-run.
+    ipcMain.handle('backlog-tour:set-seen', (_event, seen: boolean) => {
+      this.userConfig.tour = { ...this.userConfig.tour, hasSeenBacklogTour: !!seen };
+      saveConfig(this.userConfig);
+      this.broadcastTourState();
+      return this.projectTourState();
+    });
+
+    ipcMain.handle('backlog-tour:set-setup-dismissed', (_event, dismissed: boolean) => {
+      this.userConfig.tour = { ...this.userConfig.tour, backlogSetupDismissed: !!dismissed };
+      saveConfig(this.userConfig);
+      this.broadcastTourState();
+      return this.projectTourState();
+    });
+
     // ── Auto-launch IPC ───────────────────────────────────────────────────
     ipcMain.handle('auto-launch:get', () => ({
       enabled: this.userConfig.autoLaunch,
@@ -877,6 +893,8 @@ class AgentPulseApp {
       hasSeenTour: t.hasSeenTour,
       firstEventAt: t.firstEventAt,
       setupDismissed: t.setupDismissed,
+      hasSeenBacklogTour: t.hasSeenBacklogTour,
+      backlogSetupDismissed: t.backlogSetupDismissed,
     };
   }
 

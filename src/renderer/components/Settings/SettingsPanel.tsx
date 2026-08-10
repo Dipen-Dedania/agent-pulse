@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { smooth, tabContent, tabContentTransition } from '../../motion';
-import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, ThemeMode, AppearanceConfig } from '../../../common/types';
+import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, ThemeMode, AppearanceConfig, TourState } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
@@ -20,6 +20,7 @@ import { GuardrailsTab } from './GuardrailsTab';
 import { SecretProtectionTab } from './SecretProtectionTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
 import { BacklogBoardTab } from '../Backlog/BacklogBoardTab';
+import { BacklogTour } from '../Backlog/BacklogTour';
 import { BacklogSchedulerSection } from './BacklogSchedulerSection';
 import { BacklogPopulationSection } from './BacklogPopulationSection';
 import { BacklogSchedulerConfig, BacklogPopulationConfig } from '../../../common/backlog-types';
@@ -279,7 +280,7 @@ const GuardrailsParent: React.FC = () => {
 
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
-type TabId = 'hooks' | 'bubble' | 'usage' | 'backlog' | 'analytics' | 'guardrails' | 'updates';
+export type TabId = 'hooks' | 'bubble' | 'usage' | 'backlog' | 'analytics' | 'guardrails' | 'updates';
 
 const TABS: { id: TabId; label: string; description: string }[] = [
   { id: 'hooks',      label: 'Hooks',      description: 'Manage which AI tools show a status bubble.' },
@@ -333,6 +334,51 @@ export const SettingsPanel: React.FC = () => {
   // main-process broadcasts.
   useBacklogSync();
   const backlogStatus = useBacklogStore((s) => s.status);
+  const backlogProjectCount = useBacklogStore((s) => s.projects.length);
+
+  // ── Backlog planner guided tour ───────────────────────────────────────────
+  // The controller lives here (SettingsPanel level) so the spotlight overlay is
+  // a sibling of the tab <AnimatePresence> and survives tab swaps — it drives
+  // both activeTab and usageSubTab to walk into Usage → Claude Code.
+  const [backlogTourActive, setBacklogTourActive] = useState(false);
+  const [tourState, setTourState] = useState<TourState | null>(null);
+  const backlogAutoRanRef = React.useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.electron
+      .invoke('tour:get-state')
+      .then((s: TourState) => { if (!cancelled) setTourState(s); })
+      .catch((e: unknown) => logger.debug('[SettingsPanel] tour:get-state failed', e));
+    const handler = (_e: unknown, s: TourState) => setTourState(s);
+    window.electron.on('tour:state-updated', handler);
+    return () => {
+      cancelled = true;
+      window.electron.off('tour:state-updated', handler);
+    };
+  }, []);
+
+  const startBacklogTour = React.useCallback(() => {
+    backlogAutoRanRef.current = true; // a manual run also satisfies the auto-run-once guard
+    setBacklogTourActive(true);
+  }, []);
+
+  const finishBacklogTour = React.useCallback(() => {
+    setBacklogTourActive(false);
+    window.electron
+      .invoke('backlog-tour:set-seen', true)
+      .catch((e: unknown) => logger.warn('[SettingsPanel] backlog-tour:set-seen failed', e));
+  }, []);
+
+  // Auto-run once on the first Backlog-tab visit — but only after the first-run
+  // bubble tour is done (guard against overlap) and only once per install.
+  useEffect(() => {
+    if (activeTab !== 'backlog') return;
+    if (backlogAutoRanRef.current || backlogTourActive) return;
+    if (!tourState || !tourState.hasSeenTour || tourState.hasSeenBacklogTour) return;
+    backlogAutoRanRef.current = true;
+    setBacklogTourActive(true);
+  }, [activeTab, tourState, backlogTourActive]);
 
   const getBubbleStates = React.useCallback(async (
     config?: { enabledBubbles?: Partial<Record<ToolId, boolean>> },
@@ -1042,7 +1088,7 @@ export const SettingsPanel: React.FC = () => {
         );
       })()}
 
-      {activeTab === 'backlog' && <BacklogBoardTab />}
+      {activeTab === 'backlog' && <BacklogBoardTab onStartTour={startBacklogTour} />}
 
       {activeTab === 'analytics' && <AnalyticsTabContainer />}
 
@@ -1051,6 +1097,18 @@ export const SettingsPanel: React.FC = () => {
       {activeTab === 'updates' && <UpdatesTab />}
         </motion.div>
       </AnimatePresence>
+
+      {/* Backlog planner guided tour — hoisted out of the tab AnimatePresence so
+          the spotlight survives the walk into Usage → Claude Code. */}
+      <BacklogTour
+        active={backlogTourActive}
+        projectCount={backlogProjectCount}
+        activeTab={activeTab}
+        usageSubTab={usageSubTab}
+        setActiveTab={setActiveTab}
+        setUsageSubTab={setUsageSubTab}
+        onFinish={finishBacklogTour}
+      />
 
       {activeInfo && (
         <HookInfoModal

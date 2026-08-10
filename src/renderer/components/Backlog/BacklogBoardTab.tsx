@@ -19,6 +19,7 @@ import { IssueImportModal } from './IssueImportModal';
 import { SOURCE_META } from './source-meta';
 import { SourceIcon } from './SourceIcon';
 import { projectColor } from './project-colors';
+import { BacklogSetupChecklist } from './BacklogSetupChecklist';
 import { listItem } from '../../motion';
 
 // Global Kanban board (backlog.md Phase 1): all projects on one board, every
@@ -38,6 +39,15 @@ const FLOW_COLUMNS: { state: BacklogCardState; title: string; hint?: string; acc
 // Columns a card can be dragged into. In Progress is engine-only (moveCard
 // rejects it in main), so it never lights up as a drop target.
 const DROP_TARGETS: BacklogCardState[] = ['refinement', 'todo', 'done'];
+
+// data-tour anchor ids per flow column, for the Backlog guided tour to spotlight.
+const COLUMN_TOUR: Partial<Record<BacklogCardState, string>> = {
+  refinement: 'backlog-col-refinement',
+  todo: 'backlog-col-todo',
+  'in-progress': 'backlog-col-inprogress',
+  blocked: 'backlog-col-blocked',
+  done: 'backlog-col-done',
+};
 
 // Shortcut hint shown on the search trigger. Mac users press ⌘, everyone else Ctrl.
 const SEARCH_SHORTCUT = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘K' : 'Ctrl K';
@@ -108,7 +118,12 @@ const DoneFilterChips: React.FC<{
 // Sync (hydrate + broadcast subscription) lives in SettingsPanel via
 // useBacklogSync so the scheduler section's glance stays live even when this
 // tab isn't mounted.
-export const BacklogBoardTab: React.FC = () => {
+interface BacklogBoardTabProps {
+  /** Launches the in-panel guided tour (owned by SettingsPanel). */
+  onStartTour?: () => void;
+}
+
+export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour }) => {
   const store = useBacklogStore();
 
   const [projectFilter, setProjectFilter] = useState<string>('all');
@@ -408,7 +423,10 @@ export const BacklogBoardTab: React.FC = () => {
       : 'Backlog autorun off — run cards with "Run now", or enable windows in Usage → Claude Code';
   })();
 
-  const renderTile = (card: BacklogCard) => {
+  // `tourAnchor` marks a single tile as the guided tour's card anchor (the first
+  // card of the first non-empty flow column). getBoundingClientRect needs a real
+  // box, so it rides on the tile's own motion.div.
+  const renderTile = (card: BacklogCard, tourAnchor = false) => {
     const todoIndex = todoCards.findIndex((c) => c.id === card.id);
     const draggable = card.state !== 'in-progress' && card.state !== 'claimed';
     // Todo tiles double as drop slots: dropping on one inserts the dragged
@@ -421,6 +439,7 @@ export const BacklogBoardTab: React.FC = () => {
     return (
       <motion.div
         key={card.id}
+        data-tour={tourAnchor ? 'backlog-first-card' : undefined}
         layout={isDragging ? false : 'position'}
         variants={listItem}
         draggable={draggable}
@@ -466,6 +485,18 @@ export const BacklogBoardTab: React.FC = () => {
   const rework = byState('rework');
   const paused = byState('paused');
 
+  // The guided tour spotlights one real card so it can teach ▶ Run / ✨ Refine:
+  // the first card of the first non-empty flow column (Refinement preferred, as
+  // it leads FLOW_COLUMNS and carries the ✨ Refine action).
+  const anchorCardColumn = FLOW_COLUMNS.find((c) => byState(c.state).length > 0)?.state ?? null;
+
+  // Board setup checklist state (real completion, not tour progress). "Ran one"
+  // = anything that has left the planning columns, or a recorded engine run.
+  const hasProject = store.projects.length > 0;
+  const hasCard = store.cards.length > 0;
+  const ranOne = status?.lastRun != null
+    || store.cards.some((c) => c.state !== 'refinement' && c.state !== 'todo');
+
   return (
     // min-h fills the viewport below the panel header/tabs so the columns
     // stretch instead of hugging the top of a maximized window.
@@ -473,7 +504,7 @@ export const BacklogBoardTab: React.FC = () => {
       {/* Header: glance + project filter + actions */}
       <div className='glass-primary p-4 flex flex-col gap-3'>
         <div className='flex items-center gap-3 flex-wrap'>
-          <div className='flex-1 min-w-48'>
+          <div className='flex-1 min-w-48' data-tour='backlog-glance'>
             {glance && <p className='text-sm text-strong'>{glance}</p>}
             {status?.lastRun && (
               <p className='text-xs text-muted mt-0.5'>
@@ -502,7 +533,7 @@ export const BacklogBoardTab: React.FC = () => {
               </kbd>
             </button>
           </Tooltip>
-          <Button variant='secondary' size='sm' onClick={handleAddProject}>
+          <Button variant='secondary' size='sm' onClick={handleAddProject} data-tour='backlog-add-project'>
             + Add project
           </Button>
           <Tooltip content={store.projects.length === 0 ? 'Register a project folder first' : undefined}>
@@ -511,11 +542,30 @@ export const BacklogBoardTab: React.FC = () => {
               size='sm'
               onClick={() => setEditor({ open: true, card: null })}
               disabled={store.projects.length === 0}
+              data-tour='backlog-new-card'
             >
               + New card
             </Button>
           </Tooltip>
           <IssueSourceHeaderActions projectFilter={projectFilter} onReview={() => setImportOpen(true)} />
+          {onStartTour && (
+            <Tooltip content='Replay the guided tour'>
+              <button
+                onClick={onStartTour}
+                aria-label='Replay the guided tour'
+                className='w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors cursor-pointer shrink-0'
+              >
+                <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={1.75} className='w-3.5 h-3.5' aria-hidden='true'>
+                  <circle cx='12' cy='12' r='9' strokeLinecap='round' strokeLinejoin='round' />
+                  <polygon
+                    points='15.5 8.5 13.2 13.2 8.5 15.5 10.8 10.8'
+                    fill='currentColor'
+                    strokeLinejoin='round'
+                  />
+                </svg>
+              </button>
+            </Tooltip>
+          )}
         </div>
 
         {store.projects.length > 0 && (
@@ -573,14 +623,35 @@ export const BacklogBoardTab: React.FC = () => {
         {projectFilter !== 'all' && <IssueSourceProjectStrip projectId={projectFilter} />}
       </div>
 
+      {onStartTour && (
+        <BacklogSetupChecklist
+          hasProject={hasProject}
+          hasCard={hasCard}
+          ranOne={ranOne}
+          onStartTour={onStartTour}
+          onAddProject={() => void handleAddProject()}
+          onNewCard={() => setEditor({ open: true, card: null })}
+        />
+      )}
+
       {store.projects.length === 0 ? (
         <div className='glass-primary p-6'>
           <h2 className='text-lg font-bold text-strong'>Add your first project</h2>
           <p className='text-sm text-muted mt-2 max-w-xl'>
             Cards belong to a project (a repo folder — the agent runs there). Register one, queue research
-            cards, and the Backlog Scheduler executes them during your idle windows — turning unused
-            5-hour-window credit into reports waiting for you in the morning.
+            cards, and the night session of Claude Code works through them during your idle windows —
+            so reports are waiting for you in the morning.
           </p>
+          <div className='mt-4 flex items-center gap-2 flex-wrap'>
+            <Button variant='primary' size='sm' onClick={() => void handleAddProject()}>
+              + Add your first project
+            </Button>
+            {onStartTour && (
+              <Button variant='secondary' size='sm' onClick={onStartTour}>
+                Take the tour
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <>
@@ -590,11 +661,13 @@ export const BacklogBoardTab: React.FC = () => {
             {FLOW_COLUMNS.map((col) => {
               const cards = byState(col.state);
               const isDone = col.state === 'done';
+              const anchorHere = col.state === anchorCardColumn;
               return (
                 <BoardColumn
                   key={col.state}
                   title={col.title}
                   accent={col.accent}
+                  dataTour={COLUMN_TOUR[col.state]}
                   // Done advertises the active window instead of a static hint,
                   // so a filtered column always explains itself.
                   hint={isDone && range !== 'all' ? BOARD_RANGE_LABEL[range] : col.hint}
@@ -609,7 +682,7 @@ export const BacklogBoardTab: React.FC = () => {
                   droppable={columnDroppable(col.state)}
                   onDropCard={() => void handleDropOnColumn(col.state)}
                 >
-                  {cards.map(renderTile)}
+                  {cards.map((c, i) => renderTile(c, anchorHere && i === 0))}
                 </BoardColumn>
               );
             })}
@@ -622,12 +695,12 @@ export const BacklogBoardTab: React.FC = () => {
             <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
               {rework.length > 0 && (
                 <BoardColumn title='Rework' count={rework.length} accent='text-orange-300 light:text-orange-700' hint='QA failed — retries once, then blocks'>
-                  {rework.map(renderTile)}
+                  {rework.map((c) => renderTile(c))}
                 </BoardColumn>
               )}
               {paused.length > 0 && (
                 <BoardColumn title='Paused' count={paused.length} accent='text-warn' hint='resumes next window'>
-                  {paused.map(renderTile)}
+                  {paused.map((c) => renderTile(c))}
                 </BoardColumn>
               )}
             </div>

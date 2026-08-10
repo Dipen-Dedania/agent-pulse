@@ -5,10 +5,14 @@ import StatsBar from './components/StatsBar';
 import VideoShowcase from './components/VideoShowcase';
 import FeatureSection from './components/FeatureSection';
 import FeatureGrid from './components/FeatureGrid';
+import Gallery from './components/Gallery';
 import HowItWorks from './components/HowItWorks';
+import Comparison from './components/Comparison';
 import PrivacyBand from './components/PrivacyBand';
 import DownloadSection from './components/DownloadSection';
+import Changelog from './components/Changelog';
 import FAQ from './components/FAQ';
+import Community from './components/Community';
 import Footer from './components/Footer';
 import { featureSections } from './data/features';
 
@@ -27,10 +31,14 @@ export default function App() {
           ))}
         </div>
         <FeatureGrid />
+        <Gallery />
         <HowItWorks />
+        <Comparison />
         <PrivacyBand />
         <DownloadSection />
+        <Changelog />
         <FAQ />
+        <Community />
       </main>
       <Footer />
     </>

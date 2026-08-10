@@ -136,6 +136,7 @@ export const SecretProtectionTab: React.FC = () => {
               const installed = !!info?.installed;
               const hooked = !!info?.hookInstalled;
               const label = TOOL_META[toolId]?.label ?? toolId;
+              const icon = TOOL_META[toolId]?.icon;
               return (
                 <Tooltip key={toolId} content={installed ? (hooked ? 'Hook installed' : 'Detected — hook not installed') : 'Not installed'}>
                   <div
@@ -143,6 +144,9 @@ export const SecretProtectionTab: React.FC = () => {
                       installed ? '' : 'opacity-50'
                     }`}
                   >
+                    {icon && (
+                      <img src={icon} alt='' className='w-5 h-5 object-contain shrink-0' />
+                    )}
                     <span className='text-sm text-primary flex-1 truncate'>
                       {label}
                       {!installed && <span className='text-[10px] text-faint ml-2'>not installed</span>}

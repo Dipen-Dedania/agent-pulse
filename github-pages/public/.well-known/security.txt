@@ -1,0 +1,7 @@
+# Agent Pulse security policy — https://github.com/Dipen-Dedania/agent-pulse/blob/main/SECURITY.md
+# NOTE: renew "Expires" before the date below (RFC 9116 requires a future date).
+Contact: mailto:dipen27891@gmail.com
+Policy: https://github.com/Dipen-Dedania/agent-pulse/blob/main/SECURITY.md
+Expires: 2027-08-05T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://dipen-dedania.github.io/agent-pulse/.well-known/security.txt

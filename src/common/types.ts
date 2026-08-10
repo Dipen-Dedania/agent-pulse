@@ -118,6 +118,10 @@ export interface TourState {
   hasSeenTour: boolean;
   firstEventAt: number | null;
   setupDismissed: boolean;
+  // Backlog planner tour: auto-runs once on first Backlog-tab visit; the board's
+  // own setup checklist derives its dismissal from backlogSetupDismissed.
+  hasSeenBacklogTour: boolean;
+  backlogSetupDismissed: boolean;
 }
 
 // One demo-bubble pose during the tour: the coach card drives these into the

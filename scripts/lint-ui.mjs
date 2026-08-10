@@ -25,8 +25,10 @@ const SKIP_SEGMENTS = ['__tests__'];
 const HARD_RULES = [
   {
     id: 'no-native-select',
-    // native <select> element (not a comment mentioning it — see stripComments)
-    test: (line) => /<select[\s/>]/.test(line),
+    // native <select> element (not a comment mentioning it — see stripComments).
+    // `(?![\w-])` so a bare `<select` at end of a line (attributes on the next
+    // line) is still caught, while `<Select`/`<selectFoo` are not.
+    test: (line) => /<select(?![\w-])/.test(line),
     hint: 'Use <Select> from components/Shared instead of a native <select>.',
   },
   {
@@ -39,6 +41,14 @@ const HARD_RULES = [
     test: (line) => /role=['"]switch['"]/.test(line),
     hint: 'Use <GlassToggle> from components/Shared instead of a hand-rolled switch.',
   },
+  {
+    id: 'no-native-checkbox',
+    // `type='checkbox'` may sit on its own line (JSX attr), so match the attr
+    // rather than requiring <input on the same line. Shared/ is skipped, so the
+    // Checkbox primitive's own native input never trips this.
+    test: (line) => /type=['"]checkbox['"]/.test(line),
+    hint: 'Use <Checkbox> from components/Shared instead of a native checkbox.',
+  },
 ];
 
 // Soft rules print a warning but do not fail (known tech debt / judgment calls).
@@ -47,6 +57,14 @@ const SOFT_RULES = [
     id: 'handrolled-glass',
     test: (line) => /backdrop-blur-md/.test(line) && /(bg-glass|rounded-2xl)/.test(line),
     hint: 'Prefer the <Card> component or the .glass-primary/secondary/modal utilities.',
+  },
+  {
+    id: 'handrolled-segmented',
+    // A `layoutId` sliding indicator outside Shared/ is the signature of a
+    // hand-rolled segmented control or tab row. The only legitimate ones live
+    // in Shared/Segmented + Shared/Tabs (which this scan skips).
+    test: (line) => /layoutId=/.test(line),
+    hint: 'Sliding pill/tab indicator — use <Segmented> or <Tabs> from components/Shared.',
   },
 ];
 

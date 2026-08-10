@@ -22,7 +22,10 @@ export default function ToolsStrip() {
           {tools.map((tool) => (
             <li
               key={tool.name}
-              className="flex flex-col items-center gap-2 group"
+              id={tool.id}
+              title={tool.blurb}
+              /* scroll-mt offsets the 68px sticky nav when deep-linked */
+              className="flex flex-col items-center gap-2 group scroll-mt-24"
             >
               <img
                 src={tool.logo}

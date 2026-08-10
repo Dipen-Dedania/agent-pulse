@@ -121,6 +121,11 @@ export interface TourConfig {
   completedAt: number | null;    // null when skipped rather than finished
   firstEventAt: number | null;
   setupDismissed: boolean;       // user closed the Hooks-tab setup checklist
+  // Backlog planner guided tour — a separate in-panel spotlight walk from the
+  // first-run bubble tour above. Auto-runs once on first Backlog-tab visit
+  // (only after the first-run tour is done), stays re-runnable from the board.
+  hasSeenBacklogTour: boolean;
+  backlogSetupDismissed: boolean; // user closed the Backlog-board setup checklist
 }
 
 export interface UserConfig {
@@ -229,7 +234,7 @@ const DEFAULTS: UserConfig = {
     writeIgnoreFiles: true,
     hookBlocking: true,
   },
-  autoLaunch: false,
+  autoLaunch: true,
   analytics: {
     redactTaskText: false,
     idleGapMinutes: 5,
@@ -243,6 +248,8 @@ const DEFAULTS: UserConfig = {
     completedAt: null,
     firstEventAt: null,
     setupDismissed: false,
+    hasSeenBacklogTour: false,
+    backlogSetupDismissed: false,
   },
   scheduler: {
     mode: 'off',
@@ -629,6 +636,10 @@ function migrateTour(raw: unknown): TourConfig {
     completedAt: ts(t.completedAt),
     firstEventAt: ts(t.firstEventAt),
     setupDismissed: typeof t.setupDismissed === 'boolean' ? t.setupDismissed : d.setupDismissed,
+    hasSeenBacklogTour:
+      typeof t.hasSeenBacklogTour === 'boolean' ? t.hasSeenBacklogTour : d.hasSeenBacklogTour,
+    backlogSetupDismissed:
+      typeof t.backlogSetupDismissed === 'boolean' ? t.backlogSetupDismissed : d.backlogSetupDismissed,
   };
 }
 

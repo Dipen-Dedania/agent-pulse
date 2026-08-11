@@ -31,6 +31,7 @@ import { launchResumeTerminal } from './resume-terminal';
 import { launchPlanTerminal } from './refine-terminal';
 import { readPlanFromTranscript } from './plan-transcript';
 import { startPlanWatch, stopPlanWatch } from './refine-watch';
+import { getMcpInstallStatus, installMcpServer, uninstallMcpServer, McpInstallStatus } from '../mcp/install';
 
 // The refinement plan lands as a single well-known attachment; re-imports and
 // live auto-updates overwrite it while leaving the user's other attachments.
@@ -576,5 +577,25 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     const attachments = store.setCardAttachments(args.cardId, args.intent ?? { keepIds: [], add: [] });
     broadcastChanged();
     return { attachments };
+  });
+
+  // ── Claude Code MCP capture ────────────────────────────────────────────────
+  // Registering the stdio server in ~/.claude.json is what lets a terminal chat
+  // say "add that to my backlog". Status is read fresh each time: the user can
+  // also add/remove the server with `claude mcp`, and an app update moves the
+  // script path out from under a previously written entry.
+
+  ipcMain.handle('backlog:mcp-status', (): McpInstallStatus => getMcpInstallStatus());
+
+  ipcMain.handle('backlog:mcp-install', (): { ok: boolean; reason?: string } => {
+    const res = installMcpServer();
+    logger.info(`[Backlog/MCP] install ${res.ok ? 'ok' : `failed: ${res.reason}`}`);
+    return res;
+  });
+
+  ipcMain.handle('backlog:mcp-uninstall', (): { ok: boolean; reason?: string } => {
+    const res = uninstallMcpServer();
+    logger.info(`[Backlog/MCP] uninstall ${res.ok ? 'ok' : `failed: ${res.reason}`}`);
+    return res;
   });
 }

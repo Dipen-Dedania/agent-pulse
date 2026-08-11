@@ -33,6 +33,9 @@ export function Select<T extends string>({ value, options, onChange, className =
   const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
 
   const selected = options.find((o) => o.value === value);
+  // When only some options carry a swatch (e.g. a statusline "auto" colour),
+  // keep the dot column reserved so every label shares one left edge.
+  const swatchColumn = options.some((o) => o.swatch);
 
   const reposition = useCallback(() => {
     const trigger = triggerRef.current;
@@ -97,9 +100,11 @@ export function Select<T extends string>({ value, options, onChange, className =
         } ${className}`}
       >
         <span className='flex items-center gap-1.5 min-w-0'>
-          {selected?.swatch && (
+          {selected?.swatch ? (
             <span className='w-2.5 h-2.5 rounded-full shrink-0' style={{ background: selected.swatch }} />
-          )}
+          ) : swatchColumn ? (
+            <span aria-hidden className='w-2.5 shrink-0' />
+          ) : null}
           <span className='truncate'>{selected?.label ?? value}</span>
         </span>
         <svg
@@ -158,9 +163,11 @@ export function Select<T extends string>({ value, options, onChange, className =
                         : 'text-body hover:bg-control/60 cursor-pointer'
                   }`}
                 >
-                  {opt.swatch && (
+                  {opt.swatch ? (
                     <span className='w-2.5 h-2.5 rounded-full shrink-0' style={{ background: opt.swatch }} />
-                  )}
+                  ) : swatchColumn ? (
+                    <span aria-hidden className='w-2.5 shrink-0' />
+                  ) : null}
                   <span className='truncate'>{opt.label}</span>
                   {active && (
                     <svg viewBox='0 0 20 20' fill='currentColor' className='w-3.5 h-3.5 ml-auto text-info shrink-0'>

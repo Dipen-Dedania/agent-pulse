@@ -19,6 +19,17 @@ import {
   readBody,
   redactTranscriptPath,
 } from './security';
+import { tokensMatch } from '../mcp/connection';
+import type { McpCardRequest, McpCardResult } from '../backlog/mcp-intake';
+
+// Backlog capture from a Claude Code terminal chat. The MCP server
+// (main/mcp/server.ts) runs in its own process and reaches the board through
+// these two routes; main/index.ts supplies the implementation once the store
+// has booted (it boots after the bridge, hence the getter).
+export interface BacklogMcpApi {
+  listProjects: () => { id: string; name: string; path: string }[];
+  createCard: (req: McpCardRequest) => McpCardResult;
+}
 
 export interface BridgeOptions {
   getGuardrailConfig?: () => GuardrailConfig;
@@ -26,6 +37,11 @@ export interface BridgeOptions {
   // Secret Protection (separate guardrail family — gates file *reads*).
   getSecretProtectionConfig?: () => SecretProtectionConfig;
   onSecretAccessEvent?: (event: SecretAccessEvent) => void;
+  // Shared secret published to ~/.agent-pulse/mcp.json; gates the /backlog
+  // routes. Null while the connection file couldn't be written — the routes
+  // then reject everything, which is the safe direction.
+  getMcpToken?: () => string | null;
+  getBacklogMcpApi?: () => BacklogMcpApi | null;
   // Called when the bridge cannot bind its port after exhausting retries.
   // Lets the main process surface a clean notification instead of letting the
   // listen error escape as a fatal uncaught exception ("A JavaScript error
@@ -242,10 +258,69 @@ export class StatusBridgeServer {
       }
     } else if (req.url === '/mcp') {
       await this.handleMcp(req, res);
+    } else if (req.url === '/backlog/card' || req.url === '/backlog/projects') {
+      await this.handleBacklogMcp(req, res);
     } else {
       res.writeHead(404);
       res.end();
     }
+  }
+
+  /**
+   * Backlog capture routes for the Claude Code MCP server. Unlike /event these
+   * are token-gated: a card in To-Do is work the overnight scheduler will
+   * actually execute, so a drive-by POST from a web page must not be able to
+   * queue one. The custom header also forces a CORS preflight that this server
+   * doesn't answer, so browsers never reach the handler at all.
+   */
+  private async handleBacklogMcp(req: http.IncomingMessage, res: http.ServerResponse) {
+    const sendJson = (status: number, body: unknown) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+
+    const header = req.headers['x-pulse-token'];
+    const provided = Array.isArray(header) ? header[0] : header;
+    if (!tokensMatch(this.options.getMcpToken?.() ?? null, provided)) {
+      logger.warn('[Bridge/Backlog] rejected request with missing or invalid token');
+      sendJson(401, { ok: false, reason: 'unauthorized' });
+      return;
+    }
+
+    const api = this.options.getBacklogMcpApi?.() ?? null;
+    if (!api) {
+      sendJson(503, { ok: false, reason: 'backlog storage unavailable' });
+      return;
+    }
+
+    if (req.method === 'GET' && req.url === '/backlog/projects') {
+      sendJson(200, { ok: true, projects: api.listProjects() });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/backlog/card') {
+      const body = await readBody(req);
+      if (!body.ok) {
+        sendJson(body.reason === 'too-large' ? 413 : 400, { ok: false, reason: `could not read request body (${body.reason})` });
+        return;
+      }
+      let parsed: McpCardRequest;
+      try {
+        parsed = JSON.parse(body.body.charCodeAt(0) === 0xFEFF ? body.body.slice(1) : body.body);
+      } catch {
+        sendJson(400, { ok: false, reason: 'invalid JSON body' });
+        return;
+      }
+      const result = api.createCard(parsed);
+      logger.info(
+        `[Bridge/Backlog] card intake ${result.ok ? (result.duplicate ? 'duplicate' : 'created') : 'rejected'}` +
+        `${result.ok ? ` — ${JSON.stringify(result.card.title)}` : `: ${result.reason}`}`,
+      );
+      sendJson(result.ok ? 200 : 400, result);
+      return;
+    }
+
+    sendJson(405, { ok: false, reason: 'method not allowed' });
   }
 
   /**

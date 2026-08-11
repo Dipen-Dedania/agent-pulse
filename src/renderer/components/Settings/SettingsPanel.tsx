@@ -23,6 +23,7 @@ import { BacklogBoardTab } from '../Backlog/BacklogBoardTab';
 import { BacklogTour } from '../Backlog/BacklogTour';
 import { BacklogSchedulerSection } from './BacklogSchedulerSection';
 import { BacklogPopulationSection } from './BacklogPopulationSection';
+import { BacklogMcpSection } from './BacklogMcpSection';
 import { BacklogSchedulerConfig, BacklogPopulationConfig } from '../../../common/backlog-types';
 import { useBacklogStore, useBacklogSync } from '../../store/useBacklogStore';
 import { AppDialogHost, appAlert } from '../Shared';
@@ -1036,6 +1037,7 @@ export const SettingsPanel: React.FC = () => {
                     onChange={handleBacklogPopulationConfigChange}
                   />
                 )}
+                <BacklogMcpSection />
                 {statusLineConfig && statusLineDetect && (
                   <StatusLineSection
                     config={statusLineConfig}

@@ -18,6 +18,10 @@ import { BacklogEngine } from './backlog/engine';
 import { PopulationScheduler } from './backlog/population-scheduler';
 import { registerBacklogIpc } from './backlog/ipc';
 import { stopAllPlanWatches } from './backlog/refine-watch';
+import { intakeCard } from './backlog/mcp-intake';
+import { writeConnectionFile, McpConnection } from './mcp/connection';
+import { BRIDGE_PORT } from './bridge/config';
+import type { BacklogMcpApi } from './bridge/server';
 import { ToolId, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, DisplayInfo, TourState, AppearanceConfig } from '../common/types';
 import { GuardrailConfig, GuardrailRule } from '../common/guardrails';
 import { CORE_RULES } from './guardrails/rules.core';
@@ -76,6 +80,8 @@ class AgentPulseApp {
   private backlogPopulation: PopulationScheduler | null = null;
   private timeline: TimelineHandle | null = null;
   private updater!: UpdaterHandle;
+  // Bridge port + shared secret published for the Claude Code MCP server.
+  private mcpConnection: McpConnection | null = null;
 
   // Most-recent guardrail events kept in memory so a Settings window opened
   // after the fact still sees what happened. Capped at GUARDRAIL_LOG_SIZE.
@@ -94,12 +100,20 @@ class AgentPulseApp {
   constructor() {
     this.stateManager = new StatusStateManager();
     this.userConfig = loadConfig();
+    // Publish the bridge port + a shared secret for the Claude Code MCP server
+    // (a separate process) to authenticate with. Null if the file can't be
+    // written — the /backlog routes then reject everything, which is the safe
+    // direction, and Settings reports MCP capture as unavailable.
+    this.mcpConnection = writeConnectionFile(BRIDGE_PORT);
     this.bridgeServer = new StatusBridgeServer(this.stateManager, {
       getGuardrailConfig: () => this.userConfig.guardrails,
       onGuardrailEvent: (event) => this.handleGuardrailEvent(event),
       getSecretProtectionConfig: () => this.userConfig.secretProtection,
       onSecretAccessEvent: (event) => this.handleSecretAccessEvent(event),
       onListenError: (err, port) => this.handleBridgeListenError(err, port),
+      getMcpToken: () => this.mcpConnection?.token ?? null,
+      // Resolved per call: the backlog store boots long after the bridge.
+      getBacklogMcpApi: () => this.backlogMcpApi(),
     });
     this.bubbleManager = new BubbleManager(this.userConfig.bubble);
     // Bubble clicks resolve focus PIDs from the bridge's state, not just the
@@ -918,6 +932,31 @@ class AgentPulseApp {
     } catch (e) {
       logger.error('[status-line] failed to refresh deployed status line', e);
     }
+  }
+
+  /**
+   * Board access for the Claude Code MCP server's bridge routes. Null until the
+   * backlog store boots — or forever, if better-sqlite3 wouldn't load — and the
+   * bridge answers 503 in that case. A created card broadcasts and nudges the
+   * scheduler on exactly the paths the renderer's own create handler uses, so a
+   * card captured from a chat shows up on an open board immediately.
+   */
+  private backlogMcpApi(): BacklogMcpApi | null {
+    const store = this.backlogStore;
+    if (!store) return null;
+    return {
+      listProjects: () => store.listProjects().map((p) => ({ id: p.id, name: p.name, path: p.path })),
+      createCard: (req) => {
+        const result = intakeCard(store, req);
+        if (result.ok && !result.duplicate) {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) win.webContents.send('backlog:changed', {});
+          }
+          this.backlogEngine?.onQueueChanged();
+        }
+        return result;
+      },
+    };
   }
 
   // The bridge couldn't bind its port after retries. The self-collision case

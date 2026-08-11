@@ -44,6 +44,9 @@ rounded-2xl` shells. `npm run lint:ui` enforces these rules and runs as part of 
 ## 📂 Project Structure
 - `src/main/bridge/`: HTTP server (port 4242) and status state management.
 - `src/main/installer/`: Tool detection and hook configuration writing logic.
+- `src/main/mcp/`: The Agent Pulse MCP server for Claude Code (backlog capture from a
+  terminal chat) plus its `~/.claude.json` registration. `server.ts` runs as its own
+  process — it must never import Electron or add npm dependencies.
 - `src/main/windows/`: Electron window configurations (Bubbles, Settings).
 - `src/renderer/components/Shared/`: Reusable UI primitives (barrel-exported). Import from here; don't hand-roll.
 - `src/renderer/components/Bubble/`: Visual status indicators and animations.

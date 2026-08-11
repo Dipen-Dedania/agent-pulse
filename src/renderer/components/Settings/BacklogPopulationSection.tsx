@@ -50,6 +50,7 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
           <Select
             value={config.defaultFilterMode}
             ariaLabel='Default issue filter'
+            className='w-full px-3 py-1.5 text-sm'
             options={[
               { value: 'assigned', label: 'Assigned to me' },
               { value: 'all', label: 'All open' },
@@ -64,6 +65,7 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
           <Select
             value={custom ? '__custom' : config.scoutModel}
             ariaLabel='GitLab scout model'
+            className='w-full px-3 py-1.5 text-sm'
             options={[...MODEL_PRESETS, { value: '__custom', label: 'Custom…' }]}
             onChange={(v) => {
               if (v === '__custom') { setCustom(true); return; }

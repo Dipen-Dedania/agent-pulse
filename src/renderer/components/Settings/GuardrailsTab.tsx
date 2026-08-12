@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { GuardrailConfig, GuardrailEvent, GuardrailRule, GuardrailTier, GuardrailOs } from '../../../common/guardrails';
-import { Button, GlassToggle, Segmented, Checkbox, Modal, appConfirm } from '../Shared';
-import { Field, inputCls, RuleRow, TabLoading } from './settingsShared';
+import { Badge, Button, GlassToggle, Input, Segmented, Checkbox, Modal, appConfirm, type BadgeTone } from '../Shared';
+import { Field, RuleRow, TabLoading } from './settingsShared';
 import { logger } from '../../../common/logger';
 
 // Serialized form of a GuardrailRule as it crosses IPC — RegExp doesn't
@@ -32,15 +32,15 @@ const TIER_LABELS: Record<GuardrailTier, string> = {
   warn:      'Warn',
 };
 
-const TIER_STYLES: Record<GuardrailTier, string> = {
-  mustBlock: 'bg-red-500/15 border-red-500/30 text-danger',
-  warn:      'bg-amber-500/15 border-amber-500/30 text-warn',
+const TIER_TONES: Record<GuardrailTier, BadgeTone> = {
+  mustBlock: 'danger',
+  warn:      'warn',
 };
 
 const TierBadge: React.FC<{ tier: GuardrailTier }> = ({ tier }) => (
-  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${TIER_STYLES[tier]}`}>
+  <Badge tone={TIER_TONES[tier]} variant='pill' size='xs' weight='semibold'>
     {TIER_LABELS[tier]}
-  </span>
+  </Badge>
 );
 
 export const GuardrailsTab: React.FC = () => {
@@ -186,15 +186,15 @@ export const GuardrailsTab: React.FC = () => {
                   key={`${evt.ts}-${i}`}
                   className='glass-secondary rounded-lg flex items-start gap-3 p-2.5'
                 >
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
-                      evt.decision === 'block'
-                        ? 'bg-red-500/15 border-red-500/30 text-danger'
-                        : 'bg-amber-500/15 border-amber-500/30 text-warn'
-                    }`}
+                  <Badge
+                    tone={evt.decision === 'block' ? 'danger' : 'warn'}
+                    variant='pill'
+                    size='xs'
+                    weight='semibold'
+                    className='shrink-0'
                   >
                     {evt.decision === 'block' ? 'Blocked' : 'Warned'}
-                  </span>
+                  </Badge>
                   <div className='flex-1 min-w-0'>
                     <div className='flex items-center gap-2 text-[10px] text-faint'>
                       <span>{new Date(evt.ts).toLocaleTimeString()}</span>
@@ -336,18 +336,18 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
       }
     >
       <Field label='ID'>
-        <input
+        <Input
           value={id} onChange={(e) => setId(e.target.value)}
           placeholder='e.g. block-prod-deploy'
-          className={inputCls}
+          className='w-full'
         />
       </Field>
 
       <Field label='Pattern (regex)'>
-        <input
+        <Input
           value={pattern} onChange={(e) => setPattern(e.target.value)}
           placeholder='e.g. \bdeploy\s+prod\b'
-          className={inputCls + ' font-mono'}
+          className='w-full font-mono'
         />
         {patternCheck && (
           <p className={`text-[11px] mt-1 ${patternCheck.ok ? 'text-ok' : 'text-danger'}`}>
@@ -381,18 +381,18 @@ const AddRuleModal: React.FC<AddRuleModalProps> = ({ onClose, onSaved }) => {
       </Field>
 
       <Field label='Message'>
-        <input
+        <Input
           value={message} onChange={(e) => setMessage(e.target.value)}
           placeholder='Why this command is risky.'
-          className={inputCls}
+          className='w-full'
         />
       </Field>
 
       <Field label='Suggested fix (optional)'>
-        <input
+        <Input
           value={suggestedFix} onChange={(e) => setSuggestedFix(e.target.value)}
           placeholder='What to do instead.'
-          className={inputCls}
+          className='w-full'
         />
       </Field>
 

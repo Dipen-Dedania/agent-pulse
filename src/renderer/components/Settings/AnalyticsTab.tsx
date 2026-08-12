@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnalyticsConfig, TimelineRange } from '../../../common/timeline-types';
-import { GlassToggle, Tooltip } from '../Shared';
+import { GlassToggle, IconButton, Tooltip } from '../Shared';
 import { logger } from '../../../common/logger';
 import { DigestCard } from './analytics/DigestCard';
 import { WindowValueCard } from './analytics/WindowValueCard';
@@ -59,13 +59,15 @@ const FreshnessControl: React.FC = () => {
     <div className='flex items-center gap-1.5 text-[11px] text-faint'>
       <span>updated {label}</span>
       <Tooltip content='Refresh'>
-        <button
+        <IconButton
+          size='sm'
+          shape='square'
+          tone='outline'
           onClick={refreshAnalytics}
           aria-label='Refresh analytics'
-          className='w-6 h-6 rounded-md border border-edge/60 bg-glass/60 text-muted hover:text-strong hover:border-edge-strong/70 transition-colors cursor-pointer'
         >
           ↻
-        </button>
+        </IconButton>
       </Tooltip>
     </div>
   );

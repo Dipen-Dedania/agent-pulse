@@ -16,12 +16,15 @@ import React from 'react';
  * used to override the variant colors — add a variant instead.
  */
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
+export type ButtonVariant = 'primary' | 'secondary' | 'success' | 'danger' | 'ghost';
 export type ButtonSize = 'xs' | 'sm' | 'md';
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: 'bg-blue-600 hover:bg-blue-500 text-white',
   secondary: 'bg-control hover:bg-control-strong text-body',
+  // Green "go" for the one-way actions blue would understate — installing an
+  // update, a webhook test that came back OK.
+  success: 'bg-emerald-600 hover:bg-emerald-500 text-white',
   danger: 'bg-red-600 hover:bg-red-500 text-white',
   ghost: 'bg-transparent hover:bg-control text-body',
 };
@@ -40,6 +43,7 @@ const SIZES: Record<ButtonSize, string> = {
 const DISABLED: Record<ButtonVariant, string> = {
   primary: 'disabled:bg-control/40 disabled:text-faint',
   secondary: 'disabled:bg-control/40 disabled:text-faint',
+  success: 'disabled:bg-control/40 disabled:text-faint',
   danger: 'disabled:bg-control/40 disabled:text-faint',
   ghost: 'disabled:opacity-50',
 };

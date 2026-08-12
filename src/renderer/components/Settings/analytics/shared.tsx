@@ -1,5 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import React from 'react';
 import { CostBreakdown, formatUsd } from '../../../../common/pricing';
 import { Badge } from '../../Shared';
 
@@ -31,146 +30,12 @@ export const InfoPill: React.FC<{ children: React.ReactNode; tone?: 'info' | 'wa
   <Badge tone={tone} variant='tag' size='sm'>{children}</Badge>
 );
 
-// A small "i" icon that reveals a glass popover on hover/focus. The popover is
-// rendered in a portal with fixed positioning and clamped to the viewport, so
-// it can never be clipped by a window edge or an overflow-hidden ancestor — it
-// centers over the icon when there's room and slides inward near the edges,
-// flipping below the icon if there isn't space above. Pass the body as children.
-const TOOLTIP_MARGIN = 8;
-
-export const InfoTooltip: React.FC<{ children: React.ReactNode; label?: string }> = ({
-  children,
-  label = 'More info',
-}) => {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const tipRef = useRef<HTMLDivElement>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-
-  const show = useCallback(() => {
-    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
-    setOpen(true);
-  }, []);
-  // Small delay so moving the cursor across the gap onto the popover doesn't close it.
-  const hide = useCallback(() => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => { setOpen(false); setPos(null); }, 80);
-  }, []);
-
-  const reposition = useCallback(() => {
-    const trigger = triggerRef.current;
-    const tip = tipRef.current;
-    if (!trigger || !tip) return;
-    const t = trigger.getBoundingClientRect();
-    const tw = tip.offsetWidth;
-    const th = tip.offsetHeight;
-    const vw = window.innerWidth;
-    let left = t.left + t.width / 2 - tw / 2;
-    left = Math.max(TOOLTIP_MARGIN, Math.min(left, vw - tw - TOOLTIP_MARGIN));
-    // Prefer above the icon; flip below when there isn't room.
-    let top = t.top - th - TOOLTIP_MARGIN;
-    if (top < TOOLTIP_MARGIN) top = t.bottom + TOOLTIP_MARGIN;
-    setPos({ left, top });
-  }, []);
-
-  // Measure once the popover is in the DOM, and keep it pinned while open.
-  useLayoutEffect(() => {
-    if (!open) return;
-    reposition();
-  }, [open, reposition]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onScroll = () => reposition();
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onScroll);
-    return () => {
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onScroll);
-    };
-  }, [open, reposition]);
-
-  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
-
-  return (
-    <span className='inline-flex align-middle'>
-      <button
-        ref={triggerRef}
-        type='button'
-        aria-label={label}
-        onMouseEnter={show}
-        onMouseLeave={hide}
-        onFocus={show}
-        onBlur={hide}
-        className='inline-flex items-center justify-center w-4 h-4 rounded-full border border-edge-strong/50 text-muted text-[10px] font-semibold leading-none cursor-help hover:text-primary hover:border-edge focus:outline-none focus-visible:ring-1 focus-visible:ring-edge transition-colors'
-      >
-        i
-      </button>
-      {open && createPortal(
-        <div
-          ref={tipRef}
-          role='tooltip'
-          onMouseEnter={show}
-          onMouseLeave={hide}
-          style={{
-            position: 'fixed',
-            left: pos?.left ?? 0,
-            top: pos?.top ?? 0,
-            zIndex: 9999,
-            visibility: pos ? 'visible' : 'hidden',
-          }}
-          className='w-max max-w-[18rem]'
-        >
-          <span className='block glass-modal rounded-lg px-3 py-2.5 text-left text-[11px] leading-relaxed text-primary font-normal normal-case tracking-normal'>
-            {children}
-          </span>
-        </div>,
-        document.body,
-      )}
-    </span>
-  );
-};
-
-// Cursor-following hover tooltip for chart marks (bars, cells, hit-rects) —
-// replaces native `title` attributes, which are slow, unstyled, and clash with
-// the glass aesthetic. One tooltip per chart: spread `tipHandlers(content)`
-// onto each mark and render `tipOverlay` once. The overlay is a portal with
-// fixed positioning clamped to the viewport, matching InfoTooltip's panel.
-export function useChartTip() {
-  const [tip, setTip] = useState<{ content: React.ReactNode; x: number; y: number } | null>(null);
-
-  const place = (e: { clientX: number; clientY: number }, content: React.ReactNode) => {
-    // Offset above-right of the cursor; flip below when near the top edge.
-    const margin = 12;
-    const x = Math.min(e.clientX + margin, window.innerWidth - 200);
-    const y = e.clientY < 72 ? e.clientY + margin + 8 : e.clientY - margin - 24;
-    setTip({ content, x, y });
-  };
-
-  const tipHandlers = useCallback((content: React.ReactNode) => ({
-    onMouseEnter: (e: React.MouseEvent) => place(e, content),
-    onMouseMove:  (e: React.MouseEvent) => place(e, content),
-    onMouseLeave: () => setTip(null),
-  }), []);
-
-  const tipOverlay = tip
-    ? createPortal(
-        <div
-          role='tooltip'
-          style={{ position: 'fixed', left: tip.x, top: tip.y, zIndex: 9999, pointerEvents: 'none' }}
-          className='w-max max-w-[18rem]'
-        >
-          <span className='block glass-modal rounded-lg px-2.5 py-1.5 text-left text-[11px] text-primary whitespace-nowrap'>
-            {tip.content}
-          </span>
-        </div>,
-        document.body,
-      )
-    : null;
-
-  return { tipHandlers, tipOverlay };
-}
+// InfoTooltip (the "i" popover) and useChartTip (the cursor-following chart
+// tip) are app-wide primitives — they now live in components/Shared alongside
+// Tooltip, sharing its portal, placement, and glass panel. Re-exported here so
+// the analytics cards keep importing them from './shared'.
+export { InfoTooltip } from '../../Shared/InfoTooltip';
+export { useChartTip } from '../../Shared/useChartTip';
 
 // Effective $/1M-token rate for a class, derived from the dollars actually
 // attributed and the tokens counted. Equals the list rate for single-model

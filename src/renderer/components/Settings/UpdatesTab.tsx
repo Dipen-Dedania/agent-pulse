@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { UpdaterState } from '../../../common/updater-types';
 import { logger } from '../../../common/logger';
-import { GlassToggle, Button } from '../Shared';
+import { Badge, GlassToggle, Button, Meter, type BadgeTone } from '../Shared';
 
 function formatBytes(n: number): string {
   if (!n || n <= 0) return '0 B';
@@ -23,16 +23,16 @@ function formatRelative(ts: number | null): string {
   return `${day} d ago`;
 }
 
-const STATUS_PILL: Record<UpdaterState['status'], { label: string; classes: string }> = {
-  idle:            { label: 'Idle',                  classes: 'bg-control-strong/30 border-edge-strong/40 text-body' },
-  disabled:        { label: 'Disabled (dev mode)',   classes: 'bg-control-strong/30 border-edge-strong/40 text-muted' },
-  unsupported:     { label: 'Manual install',        classes: 'bg-amber-500/15 border-amber-500/30 text-warn' },
-  checking:        { label: 'Checking…',             classes: 'bg-blue-500/15 border-blue-500/30 text-info' },
-  available:       { label: 'Update available',      classes: 'bg-emerald-500/15 border-emerald-500/30 text-ok' },
-  'not-available': { label: 'Up to date',            classes: 'bg-emerald-500/15 border-emerald-500/30 text-ok' },
-  downloading:     { label: 'Downloading…',          classes: 'bg-blue-500/15 border-blue-500/30 text-info' },
-  downloaded:      { label: 'Ready to install',      classes: 'bg-emerald-500/15 border-emerald-500/30 text-ok' },
-  error:           { label: 'Error',                 classes: 'bg-red-500/15 border-red-500/30 text-danger' },
+const STATUS_PILL: Record<UpdaterState['status'], { label: string; tone: BadgeTone }> = {
+  idle:            { label: 'Idle',                  tone: 'neutral' },
+  disabled:        { label: 'Disabled (dev mode)',   tone: 'neutral' },
+  unsupported:     { label: 'Manual install',        tone: 'warn'    },
+  checking:        { label: 'Checking…',             tone: 'info'    },
+  available:       { label: 'Update available',      tone: 'ok'      },
+  'not-available': { label: 'Up to date',            tone: 'ok'      },
+  downloading:     { label: 'Downloading…',          tone: 'info'    },
+  downloaded:      { label: 'Ready to install',      tone: 'ok'      },
+  error:           { label: 'Error',                 tone: 'danger'  },
 };
 
 const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className }) => (
@@ -131,10 +131,9 @@ export const UpdatesTab: React.FC = () => {
             <p className='text-xs font-semibold uppercase tracking-widest text-faint'>Current version</p>
             <p className='text-2xl font-bold text-strong mt-1 font-mono'>{state.currentVersion}</p>
           </div>
-          <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${pill.classes}`}>
-            <span className='w-1.5 h-1.5 rounded-full bg-current' />
+          <Badge tone={pill.tone} variant='pill' size='md' weight='semibold' dot>
             {pill.label}
-          </span>
+          </Badge>
         </div>
         <div className='flex items-center justify-between gap-4'>
           <p className='text-xs text-faint'>
@@ -188,12 +187,13 @@ export const UpdatesTab: React.FC = () => {
                   )}
                 </span>
               </div>
-              <div className='w-full h-2 bg-control/50 rounded-full overflow-hidden'>
-                <div
-                  className='h-full bg-blue-500 transition-all duration-300'
-                  style={{ width: `${state.progress.percent}%` }}
-                />
-              </div>
+              <Meter
+                value={state.progress.percent}
+                size='md'
+                trackClass='bg-control/50'
+                fillClass='bg-blue-500'
+                ariaLabel='Download progress'
+              />
             </div>
           )}
 
@@ -206,12 +206,9 @@ export const UpdatesTab: React.FC = () => {
             </Button>
           )}
           {state.status === 'downloaded' && (
-            <button
-              onClick={handleInstall}
-              className='w-full px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors cursor-pointer'
-            >
+            <Button variant='success' onClick={handleInstall} className='w-full'>
               Restart and install
-            </button>
+            </Button>
           )}
         </Card>
       )}

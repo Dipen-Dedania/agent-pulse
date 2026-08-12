@@ -5,17 +5,35 @@ import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import open, { openApp } from 'open';
-import { ToolId, ToolStatus, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleDisplayMatch } from '../../common/types';
+import { ToolId, ToolStatus, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleDisplayMatch, BubbleQuotaStyle } from '../../common/types';
 import { logger } from '../../common/logger';
 
 // Pixel footprint of the bubble window per size. Width hugs the orb; height is
-// taller so Claude's usage bars render in the bottom strip without a per-tool
-// resize. `tooltip` is the extra height the hover tooltip would claim (the
-// tooltip is currently disabled, but the value is kept consistent per size).
+// taller so the usage bars render in the bottom strip without a per-tool resize.
+// `tooltip` is the extra height the hover tooltip would claim (the tooltip is
+// currently disabled, but the value is kept consistent per size) — it's purely
+// vertical, and the hover expansion keeps whatever width dimsFor() reports, so
+// mascot footprints carry over untouched.
 const BUBBLE_DIMENSIONS: Record<BubbleSize, { width: number; height: number; tooltip: number }> = {
   small:  { width: 58, height: 76,  tooltip: 90 },
   medium: { width: 70, height: 90,  tooltip: 110 },
   large:  { width: 86, height: 110, tooltip: 132 },
+};
+
+// Footprint while the arc quota gauge is selected (BubbleQuotaStyle 'arc'): the
+// bars strip below the orb disappears, so the window collapses to a square that
+// holds the orb, the arc wrapped around it, and the state/escalation rings — all
+// of which arc mode pushes outward to clear the band (`ringBase` in Bubble.tsx,
+// reaching orb + 16 = 54/64/76 at the escalation ring). Arc mode centres its orb
+// rather than bottom-pinning it, so those fit with 2–5px to spare (the arc band
+// itself, orb + 8, clears by 6–9px). Widths are
+// unchanged from BUBBLE_DIMENSIONS, which is why these come out square. Mascot
+// bubbles keep their bars and never use these — the mascot checks in dimsFor
+// return first.
+const ARC_DIMENSIONS: Record<BubbleSize, { width: number; height: number; tooltip: number }> = {
+  small:  { width: 58, height: 58, tooltip: 90 },
+  medium: { width: 70, height: 70, tooltip: 110 },
+  large:  { width: 86, height: 86, tooltip: 132 },
 };
 
 // Footprint for the Claude bubble when the Clawd mascot is on. Width MATCHES the
@@ -759,6 +777,10 @@ export class BubbleManager {
   private height = BUBBLE_DIMENSIONS.medium.height;
   private tooltipHeight = BUBBLE_DIMENSIONS.medium.tooltip;
   private size: BubbleSize = 'medium';
+  // How quota is drawn on the bubble. 'arc' rings the orb instead of stacking
+  // bars underneath it, so the window loses the bars strip and goes square
+  // (ARC_DIMENSIONS). Mascot bubbles keep bars either way.
+  private quotaStyle: BubbleQuotaStyle = 'bars';
   // When true, the Claude bubble uses the larger MASCOT_DIMENSIONS footprint.
   private mascotClaudeCode = false;
   // When true, the Codex bubble uses the larger MASCOT_DIMENSIONS_CODEX footprint.
@@ -800,8 +822,10 @@ export class BubbleManager {
   }
 
   private applyDims(config: BubbleConfig) {
-    const d = BUBBLE_DIMENSIONS[config.size] ?? BUBBLE_DIMENSIONS.medium;
     this.size = BUBBLE_DIMENSIONS[config.size] ? config.size : 'medium';
+    this.quotaStyle = config.quotaStyle === 'arc' ? 'arc' : 'bars';
+    // The arc gauge rings the orb, so its window doesn't reserve the bars strip.
+    const d = (this.quotaStyle === 'arc' ? ARC_DIMENSIONS : BUBBLE_DIMENSIONS)[this.size];
     this.width = d.width;
     this.height = d.height;
     this.tooltipHeight = d.tooltip;
@@ -817,9 +841,11 @@ export class BubbleManager {
     this.hidden = config.hidden ?? false;
   }
 
-  // Window footprint for a given tool. The Claude bubble grows to the mascot
-  // size when the mascot is enabled; every other bubble uses the standard
-  // size. Used everywhere a window is sized, placed, or stacked.
+  // Window footprint for a given tool. A bubble whose mascot is enabled grows
+  // to that mascot's size; everything else uses the standard orb size, since
+  // every fill (including 'waveform', whose disc matches the orb) renders inside
+  // the same footprint. Mascot checks come first because a mascot outranks the
+  // fill mode. Used everywhere a window is sized, placed, or stacked.
   private dimsFor(toolId: ToolId): { width: number; height: number } {
     if (toolId === 'claude-code' && this.mascotClaudeCode) {
       const m = MASCOT_DIMENSIONS[this.size] ?? MASCOT_DIMENSIONS.medium;

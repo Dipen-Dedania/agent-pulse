@@ -37,12 +37,22 @@
 /* ── Semantic theme tokens ───────────────────────────────────────────────── */
 :root,
 [data-theme='dark'] {
+  /* Tells Chromium which palette to render native control chrome in — the
+     `input[type=time]` clock glyph and `type=number` spinners. Without it they
+     stay on Chromium's light default and vanish against dark glass. */
+  color-scheme: dark;
   --ap-base: oklch(20.8% 0.042 265.755);
   --ap-glass: oklch(27.9% 0.041 260.031);
   --ap-inset: oklch(20.8% 0.042 265.755);
   --ap-overlay: oklch(20.8% 0.042 265.755);
   --ap-control: oklch(37.2% 0.044 257.287);
   --ap-control-strong: oklch(44.6% 0.043 257.281);
+  /* Modal backdrop veil. Not a --color-* token: the alpha is baked in, so it's
+     consumed via .glass-scrim rather than a `bg-*` utility. The -strong variant
+     is for the tour's spotlight cutout, which has to darken everything around
+     the highlighted element hard enough to read as a spotlight. */
+  --ap-scrim: rgba(0, 0, 0, 0.6);
+  --ap-scrim-strong: rgba(8, 10, 20, 0.62);
   --ap-edge: oklch(37.2% 0.044 257.287);
   --ap-edge-strong: oklch(44.6% 0.043 257.281);
   --ap-strong: #ffffff;
@@ -58,12 +68,18 @@
 }
 
 [data-theme='light'] {
+  color-scheme: light;
   --ap-base: #f1f5f9;
   --ap-glass: #ffffff;
   --ap-inset: #94a3b8;
   --ap-overlay: #ffffff;
   --ap-control: #e2e8f0;
   --ap-control-strong: #cbd5e1;
+  /* Same slate-blue as the light glass shadows, and far weaker than dark's 60%
+     black — a 60% black veil over the pastel mesh reads as a different app.
+     The spotlight variant stays heavier: it has a cutout to make legible. */
+  --ap-scrim: rgba(30, 41, 82, 0.28);
+  --ap-scrim-strong: rgba(30, 41, 82, 0.45);
   --ap-edge: #cbd5e1;
   --ap-edge-strong: #94a3b8;
   --ap-strong: #020617;
@@ -261,6 +277,20 @@ input[type='range']:disabled::-webkit-slider-thumb {
     border-radius: inherit;
   }
 
+  /* Tier 0 — Small controls (Select trigger, text/number inputs).
+     Its own tier rather than .glass-secondary: controls are rounded-lg (not xl),
+     the panel-tuned ::after sheen washes 11-12px labels, and the lighter blur
+     keeps a screen full of controls (e.g. one ColorSelect per statusline
+     segment) cheap. No overflow-hidden — there's no pseudo-element to clip. */
+  .glass-control {
+    @apply relative rounded-lg;
+    backdrop-filter: blur(8px) saturate(130%);
+    -webkit-backdrop-filter: blur(8px) saturate(130%);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
   /* Tier 3 — Modal window */
   .glass-modal {
     @apply relative overflow-hidden rounded-2xl shadow-2xl;
@@ -280,6 +310,17 @@ input[type='range']:disabled::-webkit-slider-thumb {
     );
     pointer-events: none;
     border-radius: inherit;
+  }
+
+  /* Tier 4 — Modal backdrop. The veil every dialog sits on: themed via
+     --ap-scrim (a 60% black veil is right in dark, far too heavy in light) plus
+     the slight blur that pushes the page behind out of focus. Deliberately no
+     z-index — callers stack at z-50 / z-[60] / z-[100] and supply their own. */
+  .glass-scrim {
+    @apply fixed inset-0 flex items-center justify-center;
+    background: var(--ap-scrim);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
   }
 
   /* ── Light mode: Apple Liquid Glass rim + float ────────────────────────────
@@ -319,6 +360,13 @@ input[type='range']:disabled::-webkit-slider-thumb {
       rgba(255, 255, 255, 0.5) 0%,
       transparent 55%
     );
+  }
+  [data-theme='light'] .glass-control {
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    box-shadow:
+      inset 0 1px 1px rgba(255, 255, 255, 0.9),
+      0 1px 3px -1px rgba(30, 41, 82, 0.1);
   }
   [data-theme='light'] .glass-modal {
     background: rgba(255, 255, 255, 0.7);
@@ -394,11 +442,13 @@ input[type='range']:disabled::-webkit-slider-thumb {
   }
 }
 
-/* Apple-style overlay scrollbar */
-.apple-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
-}
+/* Apple-style overlay scrollbar.
+   Deliberately no `scrollbar-width` / `scrollbar-color`: since Chromium 121,
+   setting either standard property makes the engine ignore the
+   ::-webkit-scrollbar pseudo-elements below and fall back to the OS scrollbar
+   (a chunky bar with arrow buttons on Windows 11). The thumb styling lives
+   entirely in the pseudo-element rules below; callers own their own
+   `overflow-*` utility. */
 
 .apple-scroll::-webkit-scrollbar {
   width: 6px;
@@ -502,9 +552,7 @@ input[type='range']:disabled::-webkit-slider-thumb {
 }
 
 /* ── Light-theme overrides ───────────────────────────────────────────────── */
-[data-theme='light'] .apple-scroll {
-  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
-}
+/* No `scrollbar-color` here either — see the note above .apple-scroll. */
 [data-theme='light'] .apple-scroll::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.18);
   background-clip: padding-box;

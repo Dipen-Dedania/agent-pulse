@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { BacklogTemplate } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { Button, Tooltip } from '../Shared';
+import { Button, IconButton, Input, Modal, Textarea, Tooltip } from '../Shared';
 
 // Edit the quick-task template list (backlog.md: "Templates live in a simple
 // editable list so users can add their own"). Opens on top of the card editor,
@@ -11,9 +11,6 @@ import { Button, Tooltip } from '../Shared';
 interface Props {
   onClose: () => void;
 }
-
-const inputClass =
-  'bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60';
 
 export const TemplateManagerModal: React.FC<Props> = ({ onClose }) => {
   const templates = useBacklogStore((s) => s.templates);
@@ -44,96 +41,90 @@ export const TemplateManagerModal: React.FC<Props> = ({ onClose }) => {
   };
 
   return (
-    <div className='fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
-      <div
-        className='apple-scroll relative w-full max-w-2xl mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-          aria-label='Close'
-        >
-          ✕
-        </button>
-
-        <div>
-          <h2 className='text-lg font-bold text-strong leading-tight'>Quick-task templates</h2>
-          <p className='text-sm text-muted mt-1'>
-            Picking a template in the card editor pre-fills the title and description. Edit freely —
-            the description is the prompt the executor runs.
-          </p>
-        </div>
-
-        {rows.length === 0 ? (
-          <p className='text-sm text-muted'>No templates. Add one below.</p>
-        ) : (
-          <div className='flex flex-col gap-3'>
-            {rows.map((tpl) => (
-              <div key={tpl.id} className='glass-secondary shrink-0 p-3 flex flex-col gap-2'>
-                <div className='flex gap-2'>
-                  <input
-                    value={tpl.name}
-                    onChange={(e) => patchRow(tpl.id, { name: e.target.value })}
-                    className={`${inputClass} w-44`}
-                    placeholder='Chip label'
-                  />
-                  <input
-                    value={tpl.title}
-                    onChange={(e) => patchRow(tpl.id, { title: e.target.value })}
-                    className={`${inputClass} flex-1 min-w-0`}
-                    placeholder='Card title'
-                  />
-                  <Tooltip content='Remove template'>
-                    <button
-                      onClick={() => removeRow(tpl.id)}
-                      className='w-8 shrink-0 flex items-center justify-center rounded-lg bg-control/50 hover:bg-red-500/30 text-muted hover:text-danger text-sm cursor-pointer transition-colors'
-                      aria-label='Remove template'
-                    >
-                      ✕
-                    </button>
-                  </Tooltip>
-                </div>
-                <textarea
-                  value={tpl.description}
-                  onChange={(e) => patchRow(tpl.id, { description: e.target.value })}
-                  rows={2}
-                  className={`${inputClass} resize-y leading-relaxed`}
-                  placeholder='Card description — the research prompt'
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className='flex items-center gap-2'>
-          <Button
-            variant='secondary'
-            size='sm'
-            onClick={addRow}
-          >
-            + Add template
+    <Modal
+      title='Quick-task templates'
+      onClose={onClose}
+      // Portal + a raised z: this opens from inside the card editor's animated
+      // panel, which is a containing block for `position: fixed`, and both
+      // modals would otherwise tie at z-50.
+      portal
+      zClass='z-[60]'
+      maxWidthClass='max-w-2xl'
+      footer={
+        <>
+          <Button variant='secondary' size='md' onClick={onClose}>
+            Cancel
           </Button>
-          {!valid && <span className='text-xs text-warn'>Every template needs a chip label and a card title.</span>}
-          <div className='ml-auto flex items-center gap-2'>
-            <Button
-              variant='secondary'
-              size='md'
-              onClick={onClose}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant='primary'
-              size='md'
-              onClick={() => void handleSave()}
-              disabled={!valid || saving}
-            >
-              {saving ? 'Saving…' : 'Save templates'}
-            </Button>
-          </div>
+          <Button
+            variant='primary'
+            size='md'
+            onClick={() => void handleSave()}
+            disabled={!valid || saving}
+          >
+            {saving ? 'Saving…' : 'Save templates'}
+          </Button>
+        </>
+      }
+    >
+      <p className='text-sm text-muted -mt-2'>
+        Picking a template in the card editor pre-fills the title and description. Edit freely —
+        the description is the prompt the executor runs.
+      </p>
+
+      {rows.length === 0 ? (
+        <p className='text-sm text-muted'>No templates. Add one below.</p>
+      ) : (
+        <div className='flex flex-col gap-3'>
+          {rows.map((tpl) => (
+            <div key={tpl.id} className='glass-secondary shrink-0 p-3 flex flex-col gap-2'>
+              <div className='flex gap-2'>
+                <Input
+                  value={tpl.name}
+                  onChange={(e) => patchRow(tpl.id, { name: e.target.value })}
+                  className='w-44'
+                  placeholder='Chip label'
+                />
+                <Input
+                  value={tpl.title}
+                  onChange={(e) => patchRow(tpl.id, { title: e.target.value })}
+                  className='flex-1 min-w-0'
+                  placeholder='Card title'
+                />
+                <Tooltip content='Remove template'>
+                  {/* Stretches to the adjacent Input's height, so it overrides
+                      the size's fixed box. */}
+                  <IconButton
+                    shape='square'
+                    tone='danger'
+                    className='w-8 h-auto self-stretch'
+                    onClick={() => removeRow(tpl.id)}
+                    aria-label='Remove template'
+                  >
+                    ✕
+                  </IconButton>
+                </Tooltip>
+              </div>
+              <Textarea
+                value={tpl.description}
+                onChange={(e) => patchRow(tpl.id, { description: e.target.value })}
+                rows={2}
+                placeholder='Card description — the research prompt'
+              />
+            </div>
+          ))}
         </div>
+      )}
+
+      <div className='flex items-center gap-2'>
+        <Button
+          variant='secondary'
+          size='sm'
+          onClick={addRow}
+        >
+          + Add template
+        </Button>
+        {!valid && <span className='text-xs text-warn'>Every template needs a chip label and a card title.</span>}
       </div>
-    </div>
+    </Modal>
   );
 };

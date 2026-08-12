@@ -3,7 +3,7 @@ import { BacklogSchedulerConfig, BacklogSchedulerStatus, BacklogSlot } from '../
 import { WebhookTarget } from '../../../common/types';
 import { formatUsd } from '../../../common/pricing';
 import { WebhookRow } from './WebhookRow';
-import { Button, GlassToggle, Tooltip } from '../Shared';
+import { Button, GlassToggle, IconButton, Input, Tooltip } from '../Shared';
 
 // Backlog Scheduler — sits beside the Cowork Scheduler in Usage → Claude Code.
 // The Cowork slot is a fire INSTANT (opens a window); a backlog slot is a time
@@ -66,18 +66,18 @@ const SlotRow: React.FC<{
   return (
     <div className={`glass-secondary p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
       <div className='flex items-center gap-1.5'>
-        <input
+        <Input
+          size='sm'
           type='time'
           value={slot.start}
           onChange={(e) => onChange({ ...slot, start: e.target.value })}
-          className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
         />
         <span className='text-faint text-sm'>–</span>
-        <input
+        <Input
+          size='sm'
           type='time'
           value={slot.end}
           onChange={(e) => onChange({ ...slot, end: e.target.value })}
-          className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
         />
         {wrapsMidnight(slot) && (
           <Tooltip content='Ends the next morning'>
@@ -106,13 +106,9 @@ const SlotRow: React.FC<{
       </div>
       <div className='flex items-center gap-2 ml-auto'>
         <Toggle small on={slot.enabled} onClick={() => onChange({ ...slot, enabled: !slot.enabled })} label='Toggle window' />
-        <button
-          onClick={onRemove}
-          className='w-7 h-7 flex items-center justify-center rounded-md bg-control/50 hover:bg-red-500/30 text-muted hover:text-danger text-sm cursor-pointer transition-colors'
-          aria-label='Remove window'
-        >
+        <IconButton shape='square' tone='danger' onClick={onRemove} aria-label='Remove window'>
           ✕
-        </button>
+        </IconButton>
       </div>
     </div>
   );
@@ -281,7 +277,9 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
           </p>
         </div>
         <div className='flex items-center gap-1.5 shrink-0'>
-          <input
+          <Input
+            size='sm'
+            className='w-16 text-right'
             type='number'
             min={50}
             max={100}
@@ -292,7 +290,6 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
               if (!Number.isFinite(n)) return;
               onChange({ usageGatePercent: Math.min(100, Math.max(50, Math.round(n))) });
             }}
-            className='w-16 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-sm text-strong text-right focus:outline-none focus:border-blue-500/60'
             aria-label='Usage limit percentage to pause new tasks'
           />
           <span className='text-faint text-sm'>%</span>

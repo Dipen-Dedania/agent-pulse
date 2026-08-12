@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { SecretProtectionConfig, SecretRule, SecretAccessEvent } from '../../../common/secretProtection';
-import { Button, GlassToggle, Segmented, Modal, appConfirm, Tooltip } from '../Shared';
-import { Field, inputCls, RuleRow, TabLoading } from './settingsShared';
+import { Badge, Button, GlassToggle, Input, Segmented, Modal, appConfirm, Tooltip, type BadgeTone } from '../Shared';
+import { Field, RuleRow, TabLoading } from './settingsShared';
 import { ToolId } from '../../../common/types';
 import { TOOL_META } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
@@ -10,8 +10,8 @@ import { logger } from '../../../common/logger';
 // Static per-agent coverage map (analysis §2.1 / §7.4). `installed`/`hooked`
 // come from live detection; this table describes what protection each agent can
 // receive and how strong it is.
-type BadgeTone = 'hard' | 'soft' | 'bypass' | 'none';
-const COVERAGE: Record<ToolId, { ignoreFile: boolean; hookBlock: boolean; badge: string; tone: BadgeTone }> = {
+type CoverageTone = 'hard' | 'soft' | 'bypass' | 'none';
+const COVERAGE: Record<ToolId, { ignoreFile: boolean; hookBlock: boolean; badge: string; tone: CoverageTone }> = {
   'claude-code':     { ignoreFile: true,  hookBlock: true,  badge: 'Hook deny (soft)',        tone: 'soft' },
   'antigravity-cli': { ignoreFile: true,  hookBlock: true,  badge: 'Hook deny + built-in',    tone: 'soft' },
   'cursor':          { ignoreFile: true,  hookBlock: false, badge: 'Bypassable in agent mode',tone: 'bypass' },
@@ -23,11 +23,12 @@ const COVERAGE: Record<ToolId, { ignoreFile: boolean; hookBlock: boolean; badge:
   'grok':            { ignoreFile: false, hookBlock: true,  badge: 'Hook deny (soft)',        tone: 'soft' },
 };
 
-const TONE_CLS: Record<BadgeTone, string> = {
-  hard:   'bg-emerald-500/15 border-emerald-500/30 text-ok',
-  soft:   'bg-amber-500/15 border-amber-500/30 text-warn',
-  bypass: 'bg-rose-500/15 border-rose-500/30 text-danger',
-  none:   'bg-control/40 border-edge-strong/40 text-muted',
+// How strong a tool's protection is, mapped onto the shared Badge palette.
+const TONE_BADGE: Record<CoverageTone, BadgeTone> = {
+  hard:   'ok',
+  soft:   'warn',
+  bypass: 'danger',
+  none:   'neutral',
 };
 
 interface DetectInfo { installed?: boolean; hookInstalled?: boolean }
@@ -153,9 +154,15 @@ export const SecretProtectionTab: React.FC = () => {
                     </span>
                     <Cov ok={cov.ignoreFile && installed} label='ignore-file' />
                     <Cov ok={cov.hookBlock && hooked} label='hook-block' />
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${TONE_CLS[cov.tone]}`}>
+                    <Badge
+                      tone={TONE_BADGE[cov.tone]}
+                      variant='pill'
+                      size='xs'
+                      weight='semibold'
+                      className='shrink-0'
+                    >
                       {cov.badge}
-                    </span>
+                    </Badge>
                   </div>
                 </Tooltip>
               );
@@ -234,15 +241,15 @@ export const SecretProtectionTab: React.FC = () => {
                   key={`${evt.ts}-${i}`}
                   className='glass-secondary rounded-lg flex items-start gap-3 p-2.5'
                 >
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
-                      evt.decision === 'block'
-                        ? 'bg-red-500/15 border-red-500/30 text-danger'
-                        : 'bg-amber-500/15 border-amber-500/30 text-warn'
-                    }`}
+                  <Badge
+                    tone={evt.decision === 'block' ? 'danger' : 'warn'}
+                    variant='pill'
+                    size='xs'
+                    weight='semibold'
+                    className='shrink-0'
                   >
                     {evt.decision === 'block' ? 'Blocked' : 'Warned'}
-                  </span>
+                  </Badge>
                   <div className='flex-1 min-w-0'>
                     <div className='flex items-center gap-2 text-[10px] text-faint'>
                       <span>{new Date(evt.ts).toLocaleTimeString()}</span>
@@ -375,26 +382,26 @@ const AddGlobModal: React.FC<AddGlobModalProps> = ({ onClose, onSaved }) => {
       }
     >
       <Field label='ID'>
-        <input
+        <Input
           value={id} onChange={(e) => setId(e.target.value)}
           placeholder='e.g. company-token'
-          className={inputCls}
+          className='w-full'
         />
       </Field>
 
       <Field label='Glob (.gitignore-style)'>
-        <input
+        <Input
           value={glob} onChange={(e) => setGlob(e.target.value)}
           placeholder='e.g. **/*.secret  or  config/keys/**'
-          className={inputCls + ' font-mono'}
+          className='w-full font-mono'
         />
       </Field>
 
       <Field label='Message (optional)'>
-        <input
+        <Input
           value={message} onChange={(e) => setMessage(e.target.value)}
           placeholder='Why this file is sensitive.'
-          className={inputCls}
+          className='w-full'
         />
       </Field>
 

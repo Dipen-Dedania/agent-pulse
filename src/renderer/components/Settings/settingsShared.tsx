@@ -17,10 +17,6 @@ export const TabLoading: React.FC<{ label: string }> = ({ label }) => (
 
 // ── Add-rule form fields ──────────────────────────────────────────────────────
 
-/** Shared input styling for the add-rule modals. */
-export const inputCls =
-  'glass-secondary rounded-lg w-full px-3 py-2 text-sm text-strong placeholder:text-faint focus:outline-none focus:border-blue-500/60';
-
 /** Labeled form field wrapper used inside the add-rule modals. */
 export const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div>

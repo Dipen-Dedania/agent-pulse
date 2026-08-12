@@ -1,6 +1,6 @@
 import React from 'react';
 import { AntigravityUsageStatus, UsageState } from '../../../common/types';
-import { Tooltip } from '../Shared';
+import { Meter, Tooltip } from '../Shared';
 import {
   UsageNotificationUI,
   UsageProviderPanel,
@@ -78,15 +78,14 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                       )}
                     </div>
                     <div className='flex items-center gap-3 mt-1.5'>
-                      <div
-                        className='relative flex-1 rounded-full overflow-hidden bg-white/10 light:bg-black/10'
-                        style={{ height: 4 }}
-                      >
-                        <div
-                          className={`absolute left-0 top-0 h-full rounded-full transition-all duration-500 motion-reduce:transition-none ${quotaFillClass(remaining)}`}
-                          style={{ width: `${Math.max(2, Math.min(100, remaining))}%` }}
-                        />
-                      </div>
+                      <Meter
+                        className='flex-1'
+                        value={remaining}
+                        minWidthPct={2}
+                        height={4}
+                        trackClass='bg-white/10 light:bg-black/10'
+                        fillClass={quotaFillClass(remaining)}
+                      />
                       <span className='text-xs text-muted shrink-0 tabular-nums'>
                         {Math.round(remaining)}% · resets {formatRelativeReset(m.resetsAt)}
                       </span>

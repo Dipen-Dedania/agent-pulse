@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
-import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, DisplayInfo, ToolId } from '../../../common/types';
+import { AnimatePresence, motion } from 'framer-motion';
+import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, DisplayInfo, ToolId } from '../../../common/types';
 import { BUBBLE_SOUNDS, playBubbleSound } from '../../sound';
 import { TOOL_META } from '../../../common/toolMeta';
-import { Button, GlassToggle, Tooltip } from '../Shared';
+import { Button, GlassToggle, Modal, Segmented, Tooltip } from '../Shared';
 
 // The agents that ship an animated mascot. Each maps a BubbleConfig flag to the
 // tool it belongs to (for the logo + label via TOOL_META) and the mascot's name.
@@ -38,7 +38,30 @@ const FILL_OPTIONS: { id: BubbleFillMode; label: string }[] = [
   { id: 'glass', label: 'Glass' },
   { id: 'solid', label: 'Solid' },
   { id: 'particle', label: '3D Orb' },
+  { id: 'waveform', label: 'Waveform' },
 ];
+
+const QUOTA_STYLE_OPTIONS: { value: BubbleQuotaStyle; label: string; hint: string }[] = [
+  { value: 'bars', label: 'Bars', hint: 'One bar per quota window, stacked below the bubble.' },
+  { value: 'arc', label: 'Arc', hint: 'A ring around the bubble showing one window. Frees the vertical space the bars use.' },
+];
+
+// Preview for the Waveform fill: flatline → a burst of tool calls → flatline →
+// the held spike that means "waiting on you". A horizontal trace needs width,
+// not a 30px round swatch — which is why the option row is a 2×2 grid.
+const WaveformSwatch: React.FC = () => (
+  <svg viewBox='0 0 72 22' width={72} height={22} aria-hidden focusable='false'>
+    <line x1='0' y1='11' x2='72' y2='11' stroke='currentColor' strokeOpacity='0.2' strokeWidth='1' />
+    <polyline
+      points='0,11 10,11 13,4 15,18 17,6 19,16 21,8 23,14 25,11 36,11 42,11 44,3 72,3'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='1.5'
+      strokeLinejoin='round'
+      strokeLinecap='round'
+    />
+  </svg>
+);
 
 // Quick-pick fill colors. White covers the common "dark logo, dark desktop"
 // case; the rest are neutral backdrops. Any color is reachable via the picker.
@@ -298,39 +321,50 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
         <p className='text-xs text-muted -mt-1'>
           Frosted glass blends with your desktop, but a dark logo (e.g. Cursor) can vanish over a dark
           window. A solid fill paints a consistent backdrop so every logo stays clearly visible.
+          Waveform fills the orb with a live trace of the last 20 seconds of activity, over a dimmed
+          agent logo.
         </p>
-        <div className='flex gap-3'>
+        <p className='text-xs text-faint -mt-1'>
+          Agents with a mascot enabled above keep their mascot — a mascot always wins over the fill.
+        </p>
+        {/* 2×2 rather than one row of four: four side-by-side buttons squeeze
+            the preview swatches, and Waveform's is a horizontal trace. */}
+        <div className='grid grid-cols-2 gap-3'>
           {FILL_OPTIONS.map((opt) => {
             const active = (config.fillMode ?? 'glass') === opt.id;
             return (
               <button
                 key={opt.id}
                 onClick={() => onChange({ fillMode: opt.id })}
-                className={`flex-1 flex flex-col items-center justify-center gap-2 py-4 rounded-xl border transition-colors cursor-pointer ${
+                className={`flex flex-col items-center justify-center gap-2 py-4 rounded-xl border transition-colors cursor-pointer ${
                   active
                     ? 'bg-blue-500/15 border-blue-500/50 text-strong'
                     : 'bg-inset/40 border-edge/60 text-muted hover:border-edge-strong hover:text-primary'
                 }`}
               >
-                <span
-                  className='rounded-full'
-                  style={{
-                    width: 30,
-                    height: 30,
-                    background:
-                      opt.id === 'solid'
-                        ? config.fillColor || '#ffffff'
-                        : opt.id === 'particle'
-                          ? 'transparent'
-                          : 'radial-gradient(circle, rgba(148,163,184,0.55) 0%, rgba(128,128,128,0.06) 100%)',
-                    backdropFilter: opt.id === 'glass' ? 'blur(6px)' : undefined,
-                    // 3D Orb previews itself as a dotted ring; glass/solid use a solid rim.
-                    border:
-                      opt.id === 'particle'
-                        ? '2px dotted rgba(255,255,255,0.55)'
-                        : '1.5px solid rgba(255,255,255,0.25)',
-                  }}
-                />
+                {opt.id === 'waveform' ? (
+                  <WaveformSwatch />
+                ) : (
+                  <span
+                    className='rounded-full'
+                    style={{
+                      width: 30,
+                      height: 30,
+                      background:
+                        opt.id === 'solid'
+                          ? config.fillColor || '#ffffff'
+                          : opt.id === 'particle'
+                            ? 'transparent'
+                            : 'radial-gradient(circle, rgba(148,163,184,0.55) 0%, rgba(128,128,128,0.06) 100%)',
+                      backdropFilter: opt.id === 'glass' ? 'blur(6px)' : undefined,
+                      // 3D Orb previews itself as a dotted ring; glass/solid use a solid rim.
+                      border:
+                        opt.id === 'particle'
+                          ? '2px dotted rgba(255,255,255,0.55)'
+                          : '1.5px solid rgba(255,255,255,0.25)',
+                    }}
+                  />
+                )}
                 <span className='text-sm font-medium'>{opt.label}</span>
               </button>
             );
@@ -366,6 +400,28 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
             </label>
           </div>
         )}
+      </div>
+
+      {/* ── Quota display ────────────────────────────────────────────────── */}
+      <div className='flex flex-col gap-3'>
+        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Quota display</p>
+        <p className='text-xs text-muted -mt-1'>
+          How each agent's remaining subscription credit is drawn. Bars stack one thin bar per quota
+          window beneath the bubble. The arc rings the bubble instead, which costs no vertical space
+          but only fits one window — for agents that track several (Claude's 5-hour and 7-day,
+          Copilot's quotas, Antigravity's per-model), the arc shows the one most likely to block you
+          and the rest stay in the hover tooltip.
+        </p>
+        <p className='text-xs text-faint -mt-1'>
+          Agents with a mascot enabled above keep their bars — there's no orb for an arc to ring.
+        </p>
+        <Segmented
+          options={QUOTA_STYLE_OPTIONS}
+          value={config.quotaStyle ?? 'bars'}
+          onChange={(next) => onChange({ quotaStyle: next as BubbleQuotaStyle })}
+          size='md'
+          className='self-start'
+        />
       </div>
 
       {/* ── Opacity ──────────────────────────────────────────────────────── */}
@@ -500,15 +556,17 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       </div>
     </motion.section>
 
-    {mascotModalOpen && (
-      <MascotModal
-        config={config}
-        onChange={onChange}
-        allOn={allMascotsOn}
-        onToggleAll={toggleAllMascots}
-        onClose={() => setMascotModalOpen(false)}
-      />
-    )}
+    <AnimatePresence>
+      {mascotModalOpen && (
+        <MascotModal
+          config={config}
+          onChange={onChange}
+          allOn={allMascotsOn}
+          onToggleAll={toggleAllMascots}
+          onClose={() => setMascotModalOpen(false)}
+        />
+      )}
+    </AnimatePresence>
     </>
   );
 };
@@ -524,70 +582,49 @@ const MascotModal: React.FC<{
   onClose: () => void;
 }> = ({ config, onChange, allOn, onToggleAll, onClose }) => {
   return (
-    <div
-      className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm'
-      onClick={onClose}
-    >
-      <div
-        className='glass-modal apple-scroll relative w-full max-w-lg mx-4 p-6 flex flex-col gap-5 max-h-[85vh] overflow-y-auto'
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-          aria-label='Close'
-        >
-          ✕
-        </button>
-
-        <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>Bubble appearance</p>
-          <h3 className='text-lg font-bold text-strong'>Mascots</h3>
+    <Modal eyebrow='Bubble appearance' title='Mascots' onClose={onClose}>
+      {/* Master switch */}
+      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
+        <div className='min-w-0'>
+          <p className='text-sm font-medium text-strong'>Animated mascots</p>
+          <p className='text-xs text-muted mt-0.5'>
+            Swap an agent's orb for an animated mascot whose pose tracks its state — sleeping when idle,
+            flagging when it needs you, working out while it runs. Other agents keep their orb; the bubble
+            grows a little to give the mascot room.
+          </p>
         </div>
-
-        {/* Master switch */}
-        <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
-          <div className='min-w-0'>
-            <p className='text-sm font-medium text-strong'>Animated mascots</p>
-            <p className='text-xs text-muted mt-0.5'>
-              Swap an agent's orb for an animated mascot whose pose tracks its state — sleeping when idle,
-              flagging when it needs you, working out while it runs. Other agents keep their orb; the bubble
-              grows a little to give the mascot room.
-            </p>
-          </div>
-          <GlassToggle
-            checked={allOn}
-            onChange={onToggleAll}
-            size='lg'
-            label='Animated mascots (all agents)'
-          />
-        </div>
-
-        {/* Per-agent rows */}
-        <div className='flex flex-col gap-2'>
-          {MASCOTS.map((m) => (
-            <div key={m.key} className='glass-secondary flex items-center justify-between gap-3 px-4 py-2.5'>
-              <div className='min-w-0 flex items-center gap-3'>
-                <img
-                  src={TOOL_META[m.toolId].icon}
-                  alt=''
-                  aria-hidden
-                  className='w-6 h-6 rounded-full object-contain bg-control/40 shrink-0'
-                />
-                <p className='text-sm font-medium text-strong truncate'>
-                  {m.name} <span className='text-muted font-normal'>({TOOL_META[m.toolId].label})</span>
-                </p>
-              </div>
-              <GlassToggle
-                checked={!!config[m.key]}
-                onChange={() => onChange({ [m.key]: !config[m.key] })}
-                size='sm'
-                label={`${m.name} mascot (${TOOL_META[m.toolId].label})`}
-              />
-            </div>
-          ))}
-        </div>
+        <GlassToggle
+          checked={allOn}
+          onChange={onToggleAll}
+          size='lg'
+          label='Animated mascots (all agents)'
+        />
       </div>
-    </div>
+
+      {/* Per-agent rows */}
+      <div className='flex flex-col gap-2'>
+        {MASCOTS.map((m) => (
+          <div key={m.key} className='glass-secondary flex items-center justify-between gap-3 px-4 py-2.5'>
+            <div className='min-w-0 flex items-center gap-3'>
+              <img
+                src={TOOL_META[m.toolId].icon}
+                alt=''
+                aria-hidden
+                className='w-6 h-6 rounded-full object-contain bg-control/40 shrink-0'
+              />
+              <p className='text-sm font-medium text-strong truncate'>
+                {m.name} <span className='text-muted font-normal'>({TOOL_META[m.toolId].label})</span>
+              </p>
+            </div>
+            <GlassToggle
+              checked={!!config[m.key]}
+              onChange={() => onChange({ [m.key]: !config[m.key] })}
+              size='sm'
+              label={`${m.name} mascot (${TOOL_META[m.toolId].label})`}
+            />
+          </div>
+        ))}
+      </div>
+    </Modal>
   );
 };

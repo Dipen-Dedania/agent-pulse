@@ -201,11 +201,15 @@ const Landing: React.FC = () => {
   const secondaryClass =
     'px-6 py-3 rounded-full text-sm font-semibold text-body border border-edge hover:border-edge-strong hover:text-strong transition-all hover:scale-105 active:scale-95 cursor-pointer';
 
+  // The root carries the same liquid wallpaper as the Settings window: the glass
+  // feature cards below need a real gradient to blur and refract — over a flat
+  // fill the glass is invisible (see .settings-liquid-bg in index.css).
   return (
-    <div className='h-screen w-screen bg-base text-body flex items-center justify-center font-sans overflow-hidden relative py-5'>
-      {/* Background glow effects for "Enterprise" feel */}
-      <div className='absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 blur-[120px] rounded-full pointer-events-none' />
-      <div className='absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 blur-[120px] rounded-full pointer-events-none' />
+    <div className='h-screen w-screen settings-liquid-bg text-body flex items-center justify-center font-sans overflow-hidden relative py-5'>
+      {/* Accent glows for "Enterprise" feel, now layered over the mesh. Toned
+          down in light mode so they tint the pastel base instead of muddying it. */}
+      <div className='absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 light:bg-blue-500/10 blur-[120px] rounded-full pointer-events-none' />
+      <div className='absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 light:bg-purple-500/10 blur-[120px] rounded-full pointer-events-none' />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}

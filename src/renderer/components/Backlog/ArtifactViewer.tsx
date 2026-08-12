@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { BacklogArtifact, BacklogArtifactKind, BacklogAttempt, BacklogCard } from '../../../common/backlog-types';
 import { logger } from '../../../common/logger';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, appConfirm, Button, Select, Tooltip } from '../Shared';
+import { appAlert, appConfirm, Button, Modal, Select, Tooltip } from '../Shared';
 import { DiffView } from './DiffView';
 import { Markdown } from './Markdown';
 
@@ -289,267 +289,258 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
   // stay in the narrow reading column.
   const isDiff = selected?.kind === 'diff';
 
+  const wide = isDiff && !fullReport;
+
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
-      <div
-        className={`apple-scroll relative w-full mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-3 overflow-y-auto ${
-          isDiff && !fullReport ? 'max-w-[1600px] max-h-[92vh]' : 'max-w-3xl max-h-[85vh]'
-        }`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-          aria-label='Close'
-        >
-          ✕
-        </button>
-
-        <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>Card history</p>
-          <h2 className='text-lg font-bold text-strong leading-tight pr-8'>{card.title}</h2>
-        </div>
-
-        {loading ? (
-          <p className='text-sm text-muted'>Loading…</p>
-        ) : fullReport ? (
-          /* Full report — one attempt's complete markdown, reached via "Show more" */
-          <div className='flex flex-col gap-3 min-h-0'>
-            <div className='flex items-center gap-2'>
-              <Button
-                variant='secondary'
-                size='sm'
-                onClick={() => setFullReport(null)}
-              >
-                ← Back
-              </Button>
-              <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>Full report</p>
-              <Button
-                variant='secondary'
-                size='sm'
-                onClick={() => void window.electron.invoke('open-path', fullReport.path)}
-              >
-                Open file
-              </Button>
+    <Modal
+      eyebrow='Card history'
+      title={card.title}
+      onClose={onClose}
+      maxWidthClass={wide ? 'max-w-[1600px]' : 'max-w-3xl'}
+      maxHeightClass={wide ? 'max-h-[92vh]' : 'max-h-[85vh]'}
+      // Tighter than Modal's default gap-4: the attempt history + diff rail is
+      // the densest content of any dialog.
+      panelClass='gap-3'
+    >
+      {loading ? (
+        <p className='text-sm text-muted'>Loading…</p>
+      ) : fullReport ? (
+        /* Full report — one attempt's complete markdown, reached via "Show more" */
+        <div className='flex flex-col gap-3 min-h-0'>
+          <div className='flex items-center gap-2'>
+            <Button
+              variant='secondary'
+              size='sm'
+              onClick={() => setFullReport(null)}
+            >
+              ← Back
+            </Button>
+            <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>Full report</p>
+            <Button
+              variant='secondary'
+              size='sm'
+              onClick={() => void window.electron.invoke('open-path', fullReport.path)}
+            >
+              Open file
+            </Button>
+          </div>
+          {fullContent == null ? (
+            <p className='text-sm text-muted'>Loading…</p>
+          ) : (
+            <div className='max-h-[70vh] overflow-y-auto apple-scroll glass-secondary shrink-0 p-4'>
+              <Markdown content={fullContent} images={fullImages} />
+              {fullTruncated && (
+                <p className='mt-2 text-[11px] text-faint italic'>
+                  Preview truncated — use “Open file” to read the full report.
+                </p>
+              )}
             </div>
-            {fullContent == null ? (
-              <p className='text-sm text-muted'>Loading…</p>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Attempt history */}
+          <div className='glass-secondary shrink-0 px-4 py-3'>
+            <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-1.5'>Attempts</p>
+            {attempts.length === 0 ? (
+              <p className='text-sm text-muted'>No runs yet.</p>
             ) : (
-              <div className='max-h-[70vh] overflow-y-auto apple-scroll glass-secondary shrink-0 p-4'>
-                <Markdown content={fullContent} images={fullImages} />
-                {fullTruncated && (
-                  <p className='mt-2 text-[11px] text-faint italic'>
-                    Preview truncated — use “Open file” to read the full report.
-                  </p>
-                )}
+              <div className='flex flex-col gap-2'>
+                {attempts.map((a) => {
+                  const report = artifacts.find((x) => x.attemptId === a.id && x.kind === 'report');
+                  const diff = artifacts.find((x) => x.attemptId === a.id && x.kind === 'diff');
+                  const summary = attemptSummary(report?.preview);
+                  // A saved diff whose status listing is empty ⇒ the run changed
+                  // nothing. Flag it even on older attempts recorded as 'success'
+                  // before honest-outcome classification existed.
+                  const noChanges = diff != null && diff.preview.trim() === '(no changes)';
+                  return (
+                    <div key={a.id} className='flex flex-col gap-0.5'>
+                      <div className='flex items-center gap-3 text-xs flex-wrap'>
+                        <span className='text-muted w-32 shrink-0'>{formatWhen(a.startedAt)}</span>
+                        <span className={`font-medium ${OUTCOME_COLOR[a.outcome ?? ''] ?? 'text-body'}`}>
+                          {OUTCOME_LABEL[a.outcome ?? ''] ?? a.outcome ?? 'running…'}
+                        </span>
+                        {noChanges && a.outcome !== 'no-changes' && (
+                          <span className='px-1.5 py-0.5 rounded bg-amber-500/15 text-warn text-[10px] font-semibold uppercase tracking-wide'>
+                            no file changes
+                          </span>
+                        )}
+                        {formatDuration(a) && <span className='text-faint'>{formatDuration(a)}</span>}
+                        {a.costUsd != null && <span className='text-faint'>${a.costUsd.toFixed(2)}</span>}
+                        {a.numTurns != null && <span className='text-faint'>{a.numTurns} turns</span>}
+                        {a.manual && <span className='text-faint'>manual</span>}
+                        {/* reason only when there's no richer report summary (failed/killed
+                            runs write no report) — avoids showing the same line twice. */}
+                        {a.reason && !summary && (
+                          <Tooltip content={a.reason}>
+                            <span className='text-faint truncate max-w-64'>{a.reason}</span>
+                          </Tooltip>
+                        )}
+                      </div>
+                      {summary && (
+                        <Tooltip content={report?.preview}>
+                          <p className='text-muted leading-snug line-clamp-2 pl-[8.75rem] text-xs'>
+                            {summary}
+                          </p>
+                        </Tooltip>
+                      )}
+                      {report && (
+                        <button
+                          onClick={() => setFullReport(report)}
+                          className='self-start ml-[8.75rem] text-[11px] text-primary hover:underline cursor-pointer bg-transparent border-0'
+                        >
+                          Show more
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
-        ) : (
-          <>
-            {/* Attempt history */}
-            <div className='glass-secondary shrink-0 px-4 py-3'>
-              <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-1.5'>Attempts</p>
-              {attempts.length === 0 ? (
-                <p className='text-sm text-muted'>No runs yet.</p>
+
+          {/* Artifact — grouped by kind: Summary / Diff / QA report */}
+          {artifacts.length > 0 && (
+            <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
+              <div className='flex items-center gap-2 flex-wrap'>
+                <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>
+                  {selected ? KIND_LABEL[selected.kind] : 'Report'}
+                </p>
+                {qaVerdict && (
+                  <span
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                      qaVerdict === 'passed' ? 'bg-emerald-500/15 text-ok' : 'bg-red-500/15 text-danger'
+                    }`}
+                  >
+                    {qaVerdict === 'passed' ? 'PASS' : 'FAIL'}
+                  </span>
+                )}
+                {artifacts.length > 1 && (
+                  <Select
+                    value={selected?.id ?? ''}
+                    onChange={(id) => setSelected(artifacts.find((x) => x.id === id) ?? null)}
+                    className='px-2 py-1 text-xs'
+                    ariaLabel='Select artifact'
+                    options={KIND_ORDER.flatMap((kind) =>
+                      artifacts
+                        .filter((x) => x.kind === kind)
+                        .map((x) => ({
+                          value: x.id,
+                          // screenshots share a timestamp per attempt — the filename tells them apart
+                          label: x.kind === 'screenshot' ? x.preview : formatWhen(x.createdAt),
+                          group: KIND_LABEL[kind],
+                        })),
+                    )}
+                  />
+                )}
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  onClick={openFile}
+                >
+                  Open file
+                </Button>
+              </div>
+              {selected?.kind === 'screenshot' ? (
+                dataUrl == null ? (
+                  <p className='text-sm text-muted'>Loading screenshot…</p>
+                ) : (
+                  <div className='max-h-96 overflow-y-auto apple-scroll'>
+                    <img
+                      src={dataUrl}
+                      alt={selected.preview}
+                      className='max-w-full rounded-lg border border-edge/50'
+                    />
+                    <p className='mt-1.5 text-[11px] text-faint font-mono'>{selected.preview}</p>
+                  </div>
+                )
+              ) : selected?.kind === 'diff' ? (
+                content == null ? (
+                  <p className='text-sm text-muted'>Loading diff…</p>
+                ) : (
+                  <DiffView patch={content} truncated={contentTruncated} />
+                )
+              ) : selected?.kind === 'report' ? (
+                // Summary reports are plain markdown — render a formatted
+                // preview instead of raw source. Falls back to the ~500-char
+                // preview when the artifact file couldn't be read.
+                content == null ? (
+                  <p className='text-sm text-muted'>Loading…</p>
+                ) : (
+                  <div className='max-h-96 overflow-y-auto apple-scroll'>
+                    <Markdown content={content} images={reportImages} />
+                    {contentTruncated && (
+                      <p className='mt-2 text-[11px] text-faint italic'>
+                        Preview truncated — use “Open file” to read the full report.
+                      </p>
+                    )}
+                  </div>
+                )
               ) : (
-                <div className='flex flex-col gap-2'>
-                  {attempts.map((a) => {
-                    const report = artifacts.find((x) => x.attemptId === a.id && x.kind === 'report');
-                    const diff = artifacts.find((x) => x.attemptId === a.id && x.kind === 'diff');
-                    const summary = attemptSummary(report?.preview);
-                    // A saved diff whose status listing is empty ⇒ the run changed
-                    // nothing. Flag it even on older attempts recorded as 'success'
-                    // before honest-outcome classification existed.
-                    const noChanges = diff != null && diff.preview.trim() === '(no changes)';
-                    return (
-                      <div key={a.id} className='flex flex-col gap-0.5'>
-                        <div className='flex items-center gap-3 text-xs flex-wrap'>
-                          <span className='text-muted w-32 shrink-0'>{formatWhen(a.startedAt)}</span>
-                          <span className={`font-medium ${OUTCOME_COLOR[a.outcome ?? ''] ?? 'text-body'}`}>
-                            {OUTCOME_LABEL[a.outcome ?? ''] ?? a.outcome ?? 'running…'}
-                          </span>
-                          {noChanges && a.outcome !== 'no-changes' && (
-                            <span className='px-1.5 py-0.5 rounded bg-amber-500/15 text-warn text-[10px] font-semibold uppercase tracking-wide'>
-                              no file changes
-                            </span>
-                          )}
-                          {formatDuration(a) && <span className='text-faint'>{formatDuration(a)}</span>}
-                          {a.costUsd != null && <span className='text-faint'>${a.costUsd.toFixed(2)}</span>}
-                          {a.numTurns != null && <span className='text-faint'>{a.numTurns} turns</span>}
-                          {a.manual && <span className='text-faint'>manual</span>}
-                          {/* reason only when there's no richer report summary (failed/killed
-                              runs write no report) — avoids showing the same line twice. */}
-                          {a.reason && !summary && (
-                            <Tooltip content={a.reason}>
-                              <span className='text-faint truncate max-w-64'>{a.reason}</span>
-                            </Tooltip>
-                          )}
-                        </div>
-                        {summary && (
-                          <Tooltip content={report?.preview}>
-                            <p className='text-muted leading-snug line-clamp-2 pl-[8.75rem] text-xs'>
-                              {summary}
-                            </p>
-                          </Tooltip>
-                        )}
-                        {report && (
-                          <button
-                            onClick={() => setFullReport(report)}
-                            className='self-start ml-[8.75rem] text-[11px] text-primary hover:underline cursor-pointer bg-transparent border-0'
-                          >
-                            Show more
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                <pre className='whitespace-pre-wrap text-xs text-primary leading-relaxed font-mono max-h-96 overflow-y-auto apple-scroll'>
+                  {content ?? 'Loading…'}
+                </pre>
               )}
             </div>
+          )}
 
-            {/* Artifact — grouped by kind: Summary / Diff / QA report */}
-            {artifacts.length > 0 && (
-              <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
-                <div className='flex items-center gap-2 flex-wrap'>
-                  <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>
-                    {selected ? KIND_LABEL[selected.kind] : 'Report'}
-                  </p>
-                  {qaVerdict && (
-                    <span
-                      className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                        qaVerdict === 'passed' ? 'bg-emerald-500/15 text-ok' : 'bg-red-500/15 text-danger'
-                      }`}
-                    >
-                      {qaVerdict === 'passed' ? 'PASS' : 'FAIL'}
-                    </span>
-                  )}
-                  {artifacts.length > 1 && (
-                    <Select
-                      value={selected?.id ?? ''}
-                      onChange={(id) => setSelected(artifacts.find((x) => x.id === id) ?? null)}
-                      className='px-2 py-1 text-xs'
-                      ariaLabel='Select artifact'
-                      options={KIND_ORDER.flatMap((kind) =>
-                        artifacts
-                          .filter((x) => x.kind === kind)
-                          .map((x) => ({
-                            value: x.id,
-                            // screenshots share a timestamp per attempt — the filename tells them apart
-                            label: x.kind === 'screenshot' ? x.preview : formatWhen(x.createdAt),
-                            group: KIND_LABEL[kind],
-                          })),
-                      )}
-                    />
-                  )}
-                  <Button
-                    variant='secondary'
-                    size='sm'
-                    onClick={openFile}
-                  >
-                    Open file
-                  </Button>
-                </div>
-                {selected?.kind === 'screenshot' ? (
-                  dataUrl == null ? (
-                    <p className='text-sm text-muted'>Loading screenshot…</p>
-                  ) : (
-                    <div className='max-h-96 overflow-y-auto apple-scroll'>
-                      <img
-                        src={dataUrl}
-                        alt={selected.preview}
-                        className='max-w-full rounded-lg border border-edge/50'
-                      />
-                      <p className='mt-1.5 text-[11px] text-faint font-mono'>{selected.preview}</p>
-                    </div>
-                  )
-                ) : selected?.kind === 'diff' ? (
-                  content == null ? (
-                    <p className='text-sm text-muted'>Loading diff…</p>
-                  ) : (
-                    <DiffView patch={content} truncated={contentTruncated} />
-                  )
-                ) : selected?.kind === 'report' ? (
-                  // Summary reports are plain markdown — render a formatted
-                  // preview instead of raw source. Falls back to the ~500-char
-                  // preview when the artifact file couldn't be read.
-                  content == null ? (
-                    <p className='text-sm text-muted'>Loading…</p>
-                  ) : (
-                    <div className='max-h-96 overflow-y-auto apple-scroll'>
-                      <Markdown content={content} images={reportImages} />
-                      {contentTruncated && (
-                        <p className='mt-2 text-[11px] text-faint italic'>
-                          Preview truncated — use “Open file” to read the full report.
-                        </p>
-                      )}
-                    </div>
-                  )
-                ) : (
-                  <pre className='whitespace-pre-wrap text-xs text-primary leading-relaxed font-mono max-h-96 overflow-y-auto apple-scroll'>
-                    {content ?? 'Loading…'}
-                  </pre>
+          {/* Worktree — execution cards only, preserved until removed by hand */}
+          {card.taskType === 'execution' && card.worktreePath && !worktreeGone && (
+            <div className='glass-secondary shrink-0 px-4 py-3 flex flex-col gap-2'>
+              <div className='flex items-baseline gap-2 min-w-0'>
+                <p className='text-xs uppercase tracking-widest text-faint font-semibold shrink-0'>Worktree</p>
+                <Tooltip content={card.worktreePath}>
+                  <span className='text-xs text-body font-mono truncate flex-1 min-w-0'>
+                    {card.worktreePath}
+                  </span>
+                </Tooltip>
+                {card.baseSha && (
+                  <span className='text-xs text-faint shrink-0'>
+                    base <span className='font-mono text-muted'>{card.baseSha.slice(0, 7)}</span>
+                  </span>
                 )}
               </div>
-            )}
-
-            {/* Worktree — execution cards only, preserved until removed by hand */}
-            {card.taskType === 'execution' && card.worktreePath && !worktreeGone && (
-              <div className='glass-secondary shrink-0 px-4 py-3 flex flex-col gap-2'>
-                <div className='flex items-baseline gap-2 min-w-0'>
-                  <p className='text-xs uppercase tracking-widest text-faint font-semibold shrink-0'>Worktree</p>
-                  <Tooltip content={card.worktreePath}>
-                    <span className='text-xs text-body font-mono truncate flex-1 min-w-0'>
-                      {card.worktreePath}
-                    </span>
+              <div className='flex items-center gap-2'>
+                <button
+                  onClick={() => void handleApplyWorktree()}
+                  disabled={applying}
+                  className='px-3 py-1 rounded-lg text-xs font-medium bg-emerald-500/20 hover:bg-emerald-500/30 text-ok cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                >
+                  {applying ? 'Applying…' : 'Apply to project'}
+                </button>
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  onClick={openWorktreeFolder}
+                >
+                  Open folder
+                </Button>
+                {resumeSessionId && (
+                  <Tooltip content='Open an interactive Claude Code session on this worktree, resumed from the last run'>
+                    <Button
+                      variant='secondary'
+                      size='sm'
+                      onClick={() => void handleResumeSession()}
+                      disabled={resuming}
+                    >
+                      {resuming ? 'Opening…' : 'Resume in Claude Code'}
+                    </Button>
                   </Tooltip>
-                  {card.baseSha && (
-                    <span className='text-xs text-faint shrink-0'>
-                      base <span className='font-mono text-muted'>{card.baseSha.slice(0, 7)}</span>
-                    </span>
-                  )}
-                </div>
-                <div className='flex items-center gap-2'>
-                  <button
-                    onClick={() => void handleApplyWorktree()}
-                    disabled={applying}
-                    className='px-3 py-1 rounded-lg text-xs font-medium bg-emerald-500/20 hover:bg-emerald-500/30 text-ok cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-                  >
-                    {applying ? 'Applying…' : 'Apply to project'}
-                  </button>
-                  <Button
-                    variant='secondary'
-                    size='sm'
-                    onClick={openWorktreeFolder}
-                  >
-                    Open folder
-                  </Button>
-                  {resumeSessionId && (
-                    <Tooltip content='Open an interactive Claude Code session on this worktree, resumed from the last run'>
-                      <Button
-                        variant='secondary'
-                        size='sm'
-                        onClick={() => void handleResumeSession()}
-                        disabled={resuming}
-                      >
-                        {resuming ? 'Opening…' : 'Resume in Claude Code'}
-                      </Button>
-                    </Tooltip>
-                  )}
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    onClick={() => void handleRemoveWorktree()}
-                    className='hover:bg-red-500/30 hover:text-danger'
-                  >
-                    Remove worktree
-                  </Button>
-                </div>
+                )}
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={() => void handleRemoveWorktree()}
+                  className='hover:bg-red-500/30 hover:text-danger'
+                >
+                  Remove worktree
+                </Button>
               </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
+            </div>
+          )}
+        </>
+      )}
+    </Modal>
   );
 };

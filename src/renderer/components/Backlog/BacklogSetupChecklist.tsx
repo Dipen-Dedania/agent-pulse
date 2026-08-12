@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TourState } from '../../../common/types';
 import { logger } from '../../../common/logger';
-import { Button, Tooltip } from '../Shared';
+import { Button, IconButton, Tooltip } from '../Shared';
 
 // ── Backlog board setup checklist ────────────────────────────────────────────
 // Sits at the top of the Backlog board until dismissed. Its three items check
@@ -148,13 +148,9 @@ export const BacklogSetupChecklist: React.FC<Props> = ({
           </button>
         ) : (
           <Tooltip content='Dismiss — everything here stays available from the board'>
-            <button
-              onClick={dismiss}
-              className='w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-              aria-label='Dismiss board setup checklist'
-            >
+            <IconButton onClick={dismiss} aria-label='Dismiss board setup checklist'>
               ✕
-            </button>
+            </IconButton>
           </Tooltip>
         )}
       </div>

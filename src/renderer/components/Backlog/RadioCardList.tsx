@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { EmptyState, Radio } from '../Shared';
+import { EmptyState, Input, Radio } from '../Shared';
 
 // Single-select glass radio-card list used by the source-link pickers
 // (LinearLinkModal, JiraLinkModal). Each option is a whole-card <label> with a
@@ -71,12 +71,11 @@ export const RadioCardList: React.FC<Props> = ({
   return (
     <div className='flex-1 min-h-0 flex flex-col gap-2'>
       {showSearch && (
-        <input
+        <Input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder={searchPlaceholder ?? 'Filter…'}
           aria-label={searchPlaceholder ?? 'Filter list'}
-          className='bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
         />
       )}
       <div className='apple-scroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -m-1 p-1'>

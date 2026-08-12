@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { IssueFilterMode } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, appConfirm, Button, Select, Tooltip } from '../Shared';
+import { appAlert, appConfirm, Button, Input, Select, Tooltip } from '../Shared';
 import { SourceIcon } from './SourceIcon';
 import { LinearLinkModal } from './LinearLinkModal';
 import { JiraLinkModal } from './JiraLinkModal';
@@ -62,14 +62,15 @@ const LabelInput: React.FC<{ projectId: string; labels: string[] }> = ({ project
     void store.setIssueFilter(projectId, { mode: 'label', labels: next });
   };
   return (
-    <input
+    <Input
+      size='xs'
+      className='w-48'
       value={text}
       onChange={(e) => setText(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
       placeholder='label-a, label-b'
       aria-label='Issue labels'
-      className='px-2 py-1 rounded-lg text-xs bg-control/50 text-body placeholder:text-ghost outline-none focus:bg-control-strong w-48'
     />
   );
 };

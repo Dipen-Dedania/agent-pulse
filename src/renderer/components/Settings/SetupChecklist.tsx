@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TourState } from '../../../common/types';
 import { logger } from '../../../common/logger';
-import { Tooltip } from '../Shared';
+import { IconButton, Tooltip } from '../Shared';
 
 // ── "Get set up" checklist ───────────────────────────────────────────────────
 // Lives at the top of the Hooks tab until dismissed. The three items check off
@@ -129,13 +129,9 @@ export const SetupChecklist: React.FC<SetupChecklistProps> = ({
           </button>
         ) : (
           <Tooltip content='Dismiss — you can always set up from the tool cards below'>
-            <button
-              onClick={dismiss}
-              className='w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-              aria-label='Dismiss setup checklist'
-            >
+            <IconButton onClick={dismiss} aria-label='Dismiss setup checklist'>
               ✕
-            </button>
+            </IconButton>
           </Tooltip>
         )}
       </div>

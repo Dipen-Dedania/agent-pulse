@@ -21,6 +21,16 @@ interface ModalProps {
   footer?: React.ReactNode;
   /** Tailwind max-width class for the panel. Defaults to `max-w-lg`. */
   maxWidthClass?: string;
+  /** Tailwind max-height class for the panel. Defaults to `max-h-[85vh]`. */
+  maxHeightClass?: string;
+  /** Escape hatch for one-off panel styling; appended last. */
+  panelClass?: string;
+  /**
+   * Stacking level for the overlay. Defaults to `z-50`. Raise it for a modal
+   * that opens *on top of* another modal (e.g. the template manager over the
+   * card editor), which would otherwise tie at z-50.
+   */
+  zClass?: string;
   /**
    * Render into a portal on `document.body` instead of inline. Needed when the
    * caller sits inside a `transform`/`filter` ancestor (e.g. a Framer-Motion
@@ -41,6 +51,9 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   footer,
   maxWidthClass = 'max-w-lg',
+  maxHeightClass = 'max-h-[85vh]',
+  panelClass = '',
+  zClass = 'z-50',
   portal = false,
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -79,7 +92,7 @@ export const Modal: React.FC<ModalProps> = ({
 
   const tree = (
     <motion.div
-      className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm'
+      className={`glass-scrim ${zClass}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -88,7 +101,11 @@ export const Modal: React.FC<ModalProps> = ({
     >
       <motion.div
         ref={panelRef}
-        className={`glass-modal apple-scroll relative w-full ${maxWidthClass} mx-4 p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto`}
+        // bg-overlay/80 lifts .glass-modal's 10% fill so body text stays legible
+        // over whatever the dialog covers (a dense board, a chart) — the pairing
+        // the Shared README prescribes for glass holding text over arbitrary
+        // content.
+        className={`glass-modal bg-overlay/80 apple-scroll relative w-full ${maxWidthClass} mx-4 p-6 flex flex-col gap-4 ${maxHeightClass} overflow-y-auto ${panelClass}`}
         initial={{ opacity: 0, scale: 0.95, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 8 }}

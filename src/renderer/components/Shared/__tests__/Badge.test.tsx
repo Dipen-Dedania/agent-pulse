@@ -37,4 +37,27 @@ describe('Badge', () => {
     expect(bg('ok')).toContain('bg-emerald-500/15');
     expect(bg('danger')).toContain('bg-red-500/15');
   });
+
+  it('sizes own font size and horizontal padding', () => {
+    const cls = (size: 'xs' | 'sm' | 'md') =>
+      render(<Badge size={size}>x</Badge>).container.firstElementChild!.className;
+    // xs/sm keep the original px-2 so the InfoPill/StatePill callers that
+    // predate `md` render exactly as before.
+    expect(cls('xs')).toContain('text-[10px]');
+    expect(cls('xs')).toContain('px-2');
+    expect(cls('sm')).toContain('text-[11px]');
+    expect(cls('sm')).toContain('px-2');
+    expect(cls('md')).toContain('text-xs');
+    expect(cls('md')).toContain('px-2.5');
+  });
+
+  it('leaves font weight inherited unless asked', () => {
+    const plain = render(<Badge>x</Badge>).container.firstElementChild!.className;
+    expect(plain).not.toContain('font-medium');
+    expect(plain).not.toContain('font-semibold');
+    expect(render(<Badge weight='medium'>x</Badge>).container.firstElementChild!.className)
+      .toContain('font-medium');
+    expect(render(<Badge weight='semibold'>x</Badge>).container.firstElementChild!.className)
+      .toContain('font-semibold');
+  });
 });

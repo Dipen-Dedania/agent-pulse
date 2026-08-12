@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { WebhookKind, WebhookTarget } from '../../../common/types';
 import { logger } from '../../../common/logger';
-import { Select, GlassToggle, Tooltip } from '../Shared';
+import { Select, Button, GlassToggle, IconButton, Input, Tooltip } from '../Shared';
 
 // One editable Discord/Slack webhook row: platform picker, label, enable toggle,
 // delete, URL, and a "Send test" button. Shared by the attention-escalation
@@ -48,12 +48,12 @@ export const WebhookRow: React.FC<{
           className='px-2 py-1.5 text-sm w-28'
           options={KIND_OPTIONS.map((k) => ({ value: k.id, label: k.label }))}
         />
-        <input
+        <Input
           type='text'
           value={target.label ?? ''}
           onChange={(e) => onChange({ ...target, label: e.target.value })}
           placeholder='Label (optional)'
-          className='glass-secondary rounded-lg flex-1 px-3 py-1.5 text-sm text-primary placeholder:text-faint'
+          className='flex-1 min-w-0'
         />
         <GlassToggle
           checked={target.enabled}
@@ -62,36 +62,28 @@ export const WebhookRow: React.FC<{
           label='Toggle webhook'
         />
         <Tooltip content='Delete webhook'>
-          <button
-            onClick={onDelete}
-            className='px-2 py-1.5 rounded-lg text-xs font-medium bg-control/60 hover:bg-red-600/70 text-body hover:text-white cursor-pointer transition-colors'
-            aria-label='Delete webhook'
-          >
+          <IconButton shape='square' tone='danger' onClick={onDelete} aria-label='Delete webhook'>
             ✕
-          </button>
+          </IconButton>
         </Tooltip>
       </div>
       <div className='flex items-center gap-2'>
-        <input
+        <Input
           type='url'
           value={target.url}
           onChange={(e) => onChange({ ...target, url: e.target.value })}
           placeholder={target.kind === 'discord' ? 'https://discord.com/api/webhooks/…' : 'https://hooks.slack.com/services/…'}
-          className='glass-secondary rounded-lg flex-1 px-3 py-1.5 text-sm text-primary placeholder:text-faint font-mono'
+          className='flex-1 min-w-0 font-mono'
         />
-        <button
+        <Button
+          size='sm'
+          variant={testState === 'ok' ? 'success' : testState === 'fail' ? 'danger' : 'secondary'}
           onClick={sendTest}
           disabled={!target.url.trim() || testState === 'sending'}
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${
-            testState === 'ok'
-              ? 'bg-green-600/70 text-white'
-              : testState === 'fail'
-                ? 'bg-red-600/70 text-white'
-                : 'bg-control/70 hover:bg-control-strong text-primary'
-          }`}
+          className='shrink-0'
         >
           {testLabel}
-        </button>
+        </Button>
       </div>
     </div>
   );

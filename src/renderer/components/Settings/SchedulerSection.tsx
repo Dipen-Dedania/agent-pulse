@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SchedulerStatus } from '../../../common/types';
 import { estimateCost, formatUsd } from '../../../common/pricing';
-import { Button, GlassToggle, Segmented, Tooltip } from '../Shared';
+import { Button, GlassToggle, IconButton, Input, Segmented, Tooltip } from '../Shared';
 
 // Mirrors SchedulerConfig in src/main/user-config.ts (kept structural so the
 // renderer needn't import main-process modules).
@@ -75,11 +75,11 @@ const SlotRow: React.FC<{
   };
   return (
     <div className={`glass-secondary p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
-      <input
+      <Input
+        size='sm'
         type='time'
         value={slot.time}
         onChange={(e) => onChange({ ...slot, time: e.target.value })}
-        className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
       />
       <div className='flex gap-1'>
         {WEEKDAYS.map((label, d) => {
@@ -100,13 +100,9 @@ const SlotRow: React.FC<{
       </div>
       <div className='flex items-center gap-2 ml-auto'>
         <Toggle small on={slot.enabled} onClick={() => onChange({ ...slot, enabled: !slot.enabled })} label='Toggle slot' />
-        <button
-          onClick={onRemove}
-          className='w-7 h-7 flex items-center justify-center rounded-md bg-control/50 hover:bg-red-500/30 text-muted hover:text-danger text-sm cursor-pointer transition-colors'
-          aria-label='Remove slot'
-        >
+        <IconButton shape='square' tone='danger' onClick={onRemove} aria-label='Remove slot'>
           ✕
-        </button>
+        </IconButton>
       </div>
     </div>
   );
@@ -234,31 +230,31 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
         <div className='mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4'>
           <label className='flex flex-col gap-1.5'>
             <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Work start</span>
-            <input
+            <Input
+              size='sm'
               type='time'
               value={config.adaptive.workHours.start}
               onChange={(e) => onChange({ adaptive: { ...config.adaptive, workHours: { ...config.adaptive.workHours, start: e.target.value } } })}
-              className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
             />
           </label>
           <label className='flex flex-col gap-1.5'>
             <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Work end</span>
-            <input
+            <Input
+              size='sm'
               type='time'
               value={config.adaptive.workHours.end}
               onChange={(e) => onChange({ adaptive: { ...config.adaptive, workHours: { ...config.adaptive.workHours, end: e.target.value } } })}
-              className='bg-glass/60 border border-edge/70 rounded-lg px-2 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
             />
           </label>
           <label className='flex flex-col gap-1.5'>
             <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Max windows/day</span>
-            <input
+            <Input
+              className='w-24'
               type='number'
               min={1}
               max={10}
               value={config.adaptive.maxWindowsPerDay}
               onChange={(e) => onChange({ adaptive: { ...config.adaptive, maxWindowsPerDay: Math.max(1, Math.min(10, Number(e.target.value) || 1)) } })}
-              className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
             />
           </label>
           <p className='text-xs text-faint sm:col-span-3'>
@@ -288,13 +284,13 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
       <div className='mt-5 flex flex-wrap items-end gap-4'>
         <label className='flex flex-col gap-1.5'>
           <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Max openers/day</span>
-          <input
+          <Input
+            className='w-24'
             type='number'
             min={1}
             max={24}
             value={config.maxOpenersPerDay}
             onChange={(e) => onChange({ maxOpenersPerDay: Math.max(1, Math.min(24, Number(e.target.value) || 1)) })}
-            className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60'
           />
         </label>
         <Button

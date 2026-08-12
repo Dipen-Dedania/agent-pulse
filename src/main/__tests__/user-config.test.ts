@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { migrateBacklogPopulation } from '../user-config';
+import { migrateBacklogPopulation, migrateBubble } from '../user-config';
 
 describe('migrateBacklogPopulation', () => {
   it('returns the shipped defaults for missing / non-object input', () => {
@@ -40,5 +40,22 @@ describe('migrateBacklogPopulation', () => {
     const c = migrateBacklogPopulation({ enabled: true, backgroundRefresh: true });
     expect(c.enabled).toBe(true);
     expect(c.backgroundRefresh).toBe(true);
+  });
+});
+
+describe('migrateBubble', () => {
+  it('defaults quotaStyle to bars', () => {
+    // A config saved before the arc gauge existed has no quotaStyle — it must
+    // keep the bars it was showing, not silently resize every bubble window.
+    expect(migrateBubble(undefined).quotaStyle).toBe('bars');
+    expect(migrateBubble({}).quotaStyle).toBe('bars');
+  });
+
+  it('enum-checks quotaStyle', () => {
+    expect(migrateBubble({ quotaStyle: 'arc' }).quotaStyle).toBe('arc');
+    expect(migrateBubble({ quotaStyle: 'bars' }).quotaStyle).toBe('bars');
+    // A hand-edited config must not feed an unknown value into the window sizing.
+    expect(migrateBubble({ quotaStyle: 'gauge' }).quotaStyle).toBe('bars');
+    expect(migrateBubble({ quotaStyle: 7 }).quotaStyle).toBe('bars');
   });
 });

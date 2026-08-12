@@ -1,11 +1,24 @@
 import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { useIsDark } from '../../hooks/useTheme';
-import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, CopilotQuotaWindow, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleTooltipPayload, TourDemoState } from '../../../common/types';
+import { ToolId, AgentState, ToolStatus, UsageStatus, UsageWindow, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, CopilotQuotaWindow, AntigravityUsageStatus, AntigravityModelWindow, SchedulerStatus, BubbleSize, BubbleSoundId, BubbleConfig, BubbleFillMode, BubbleQuotaStyle, BubbleTooltipPayload, TourDemoState } from '../../../common/types';
 import { GuardrailEvent } from '../../../common/guardrails';
 import { SecretAccessEvent } from '../../../common/secretProtection';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
+import { Meter } from '../Shared';
 import { ParticleOrb } from './ParticleOrb';
+import { WaveformTrace, WAVEFORM_BOX } from './WaveformTrace';
+import { QuotaArc, QUOTA_ARC_BAND } from './QuotaArc';
+import {
+  fillColorForRemaining,
+  quotaTrackColor,
+  quotaInactiveFill,
+  claudeArcRemaining,
+  codexArcRemaining,
+  cursorArcRemaining,
+  copilotArcRemaining,
+  antigravityArcRemaining,
+} from './quota';
 import { ClawdMascot } from './ClawdMascot';
 import { CodexMascot } from './CodexMascot';
 import { AntigravityMascot } from './AntigravityMascot';
@@ -19,7 +32,9 @@ import { playBubbleSound } from '../../sound';
 // Orb/icon/ring pixel sizes per bubble size, plus the usage-bar geometry
 // (width / thickness / inter-bar gap) so the bars scale in step with the orb.
 // The window footprint is set in the main process
-// (BubbleManager.BUBBLE_DIMENSIONS); these scale the visuals to fit.
+// (BubbleManager.BUBBLE_DIMENSIONS / ARC_DIMENSIONS); these scale the visuals to
+// fit. `orb` and `icon` are mirrored by WAVEFORM_BOX's `disc` and `logo` in
+// WaveformTrace.tsx (the waveform disc is orb-sized) — keep them in step.
 interface BubbleDims {
   orb: number;
   icon: number;
@@ -117,17 +132,6 @@ function schedulerGlance(status: SchedulerStatus | null): string | undefined {
   return undefined;
 }
 
-function fillColorForRemaining(remaining: number, isDark: boolean): string {
-  // Bar reads as an "opportunity gauge": full bar = lots of credit left.
-  // Green when plenty remains, amber as it depletes, red when nearly out.
-  if (remaining > 50) {
-    return isDark ? 'rgba(34,197,94,0.7)' : 'rgba(22,163,74,0.6)';
-  }
-  if (remaining > 20) {
-    return isDark ? 'rgba(245,158,11,0.75)' : 'rgba(217,119,6,0.65)';
-  }
-  return isDark ? 'rgba(239,68,68,0.8)' : 'rgba(220,38,38,0.7)';
-}
 
 // ── Tooltip line builders ─────────────────────────────────────────────────
 // Produce the human-readable lines shown in the rich hover tooltip. Kept as
@@ -215,6 +219,10 @@ function visibleAntigravityModels(status: AntigravityUsageStatus): AntigravityMo
 
 interface BarDims { width: number; height: number; gap: number }
 
+// A live-but-nearly-empty bar still shows a sliver, so "almost out" never reads
+// as "no data" (which is what a zero-width fill means here).
+const QUOTA_BAR_MIN_PCT = 2;
+
 interface UsageBarsProps {
   status: UsageStatus;
   isDark: boolean;
@@ -227,27 +235,22 @@ const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark, showSevenDay, bar
   const fiveHour: UsageWindow | undefined = status.snapshot?.fiveHour;
   const sevenDay: UsageWindow | undefined = status.snapshot?.sevenDay;
 
-  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
-  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+  const trackColor = quotaTrackColor(isDark);
+  const inactiveFill = quotaInactiveFill(isDark);
 
   // Bar fill represents REMAINING credit, not consumed credit — so a full
   // green bar = lots of headroom left, an empty red bar = nearly out.
   const renderBar = (window: UsageWindow | undefined) => {
     const remaining = isOk && window ? 100 - window.utilization : 0;
-    const fill = isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill;
-    const widthPct = isOk && window ? Math.max(2, Math.min(100, remaining)) : 0;
     return (
-      <div
-        className='relative rounded-full overflow-hidden'
-        style={{ width: bar.width, height: bar.height, background: trackColor }}
-      >
-        {widthPct > 0 && (
-          <div
-            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
-            style={{ width: `${widthPct}%`, background: fill }}
-          />
-        )}
-      </div>
+      <Meter
+        value={isOk && window ? remaining : 0}
+        minWidthPct={QUOTA_BAR_MIN_PCT}
+        width={bar.width}
+        height={bar.height}
+        trackColor={trackColor}
+        fillColor={isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill}
+      />
     );
   };
 
@@ -273,25 +276,20 @@ const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark, bar }) 
   const primary = status.snapshot?.primary;
   const secondary = status.snapshot?.secondary;
 
-  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
-  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+  const trackColor = quotaTrackColor(isDark);
+  const inactiveFill = quotaInactiveFill(isDark);
 
   const renderBar = (window: UsageWindow | undefined) => {
     const remaining = isOk && window ? 100 - window.utilization : 0;
-    const fill = isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill;
-    const widthPct = isOk && window ? Math.max(2, Math.min(100, remaining)) : 0;
     return (
-      <div
-        className='relative rounded-full overflow-hidden'
-        style={{ width: bar.width, height: bar.height, background: trackColor }}
-      >
-        {widthPct > 0 && (
-          <div
-            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
-            style={{ width: `${widthPct}%`, background: fill }}
-          />
-        )}
-      </div>
+      <Meter
+        value={isOk && window ? remaining : 0}
+        minWidthPct={QUOTA_BAR_MIN_PCT}
+        width={bar.width}
+        height={bar.height}
+        trackColor={trackColor}
+        fillColor={isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill}
+      />
     );
   };
 
@@ -316,25 +314,20 @@ const CursorUsageBars: React.FC<CursorUsageBarsProps> = ({ status, isDark, bar }
   const isOk = status.state === 'ok' && !!status.snapshot;
   const plan = status.snapshot?.plan;
 
-  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
-  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+  const trackColor = quotaTrackColor(isDark);
+  const inactiveFill = quotaInactiveFill(isDark);
 
   const renderBar = (window: UsageWindow | undefined) => {
     const remaining = isOk && window ? 100 - window.utilization : 0;
-    const fill = isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill;
-    const widthPct = isOk && window ? Math.max(2, Math.min(100, remaining)) : 0;
     return (
-      <div
-        className='relative rounded-full overflow-hidden'
-        style={{ width: bar.width, height: bar.height, background: trackColor }}
-      >
-        {widthPct > 0 && (
-          <div
-            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
-            style={{ width: `${widthPct}%`, background: fill }}
-          />
-        )}
-      </div>
+      <Meter
+        value={isOk && window ? remaining : 0}
+        minWidthPct={QUOTA_BAR_MIN_PCT}
+        width={bar.width}
+        height={bar.height}
+        trackColor={trackColor}
+        fillColor={isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill}
+      />
     );
   };
 
@@ -362,26 +355,21 @@ const CopilotUsageBars: React.FC<CopilotUsageBarsProps> = ({ status, isDark, bar
   const isOk = status.state === 'ok' && !!status.snapshot;
   const quotas = (status.snapshot?.quotas ?? []).filter((q) => q.key !== 'completions');
 
-  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
-  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+  const trackColor = quotaTrackColor(isDark);
+  const inactiveFill = quotaInactiveFill(isDark);
 
   const renderBar = (window: CopilotQuotaWindow | undefined) => {
     const remaining = isOk && window ? (window.unlimited ? 100 : 100 - window.utilization) : 0;
-    const fill = isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill;
-    const widthPct = isOk && window ? Math.max(2, Math.min(100, remaining)) : 0;
     return (
-      <div
+      <Meter
         key={window?.key ?? '_'}
-        className='relative rounded-full overflow-hidden'
-        style={{ width: bar.width, height: bar.height, background: trackColor }}
-      >
-        {widthPct > 0 && (
-          <div
-            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
-            style={{ width: `${widthPct}%`, background: fill }}
-          />
-        )}
-      </div>
+        value={isOk && window ? remaining : 0}
+        minWidthPct={QUOTA_BAR_MIN_PCT}
+        width={bar.width}
+        height={bar.height}
+        trackColor={trackColor}
+        fillColor={isOk && window ? fillColorForRemaining(remaining, isDark) : inactiveFill}
+      />
     );
   };
 
@@ -417,26 +405,21 @@ const AntigravityUsageBars: React.FC<AntigravityUsageBarsProps> = ({ status, isD
   const isOk = status.state === 'ok' && !!status.snapshot;
   const visible = visibleAntigravityModels(status);
 
-  const trackColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
-  const inactiveFill = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+  const trackColor = quotaTrackColor(isDark);
+  const inactiveFill = quotaInactiveFill(isDark);
 
   const renderBar = (model: AntigravityModelWindow | undefined) => {
     const remaining = isOk && model ? 100 - model.utilization : 0;
-    const fill = isOk && model ? fillColorForRemaining(remaining, isDark) : inactiveFill;
-    const widthPct = isOk && model ? Math.max(2, Math.min(100, remaining)) : 0;
     return (
-      <div
+      <Meter
         key={model?.modelKey ?? '_'}
-        className='relative rounded-full overflow-hidden'
-        style={{ width: bar.width, height: bar.height, background: trackColor }}
-      >
-        {widthPct > 0 && (
-          <div
-            className='absolute left-0 top-0 h-full rounded-full transition-all duration-500'
-            style={{ width: `${widthPct}%`, background: fill }}
-          />
-        )}
-      </div>
+        value={isOk && model ? remaining : 0}
+        minWidthPct={QUOTA_BAR_MIN_PCT}
+        width={bar.width}
+        height={bar.height}
+        trackColor={trackColor}
+        fillColor={isOk && model ? fillColorForRemaining(remaining, isDark) : inactiveFill}
+      />
     );
   };
 
@@ -512,6 +495,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
   const [bubbleSound, setBubbleSound] = useState<BubbleSoundId>('pop');
   const [fillMode, setFillMode] = useState<BubbleFillMode>('glass');
   const [fillColor, setFillColor] = useState<string>('#ffffff');
+  const [quotaStyle, setQuotaStyle] = useState<BubbleQuotaStyle>('bars');
   const [mascotEnabled, setMascotEnabled] = useState(false);
   const [mascotCodexEnabled, setMascotCodexEnabled] = useState(false);
   const [mascotAntigravityEnabled, setMascotAntigravityEnabled] = useState(false);
@@ -552,6 +536,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
       if (b.sound) setBubbleSound(b.sound);
       if (b.fillMode) setFillMode(b.fillMode);
       if (b.fillColor) setFillColor(b.fillColor);
+      if (b.quotaStyle) setQuotaStyle(b.quotaStyle);
       if (typeof b.mascotClaudeCode === 'boolean') setMascotEnabled(b.mascotClaudeCode);
       if (typeof b.mascotOpenaiCodex === 'boolean') setMascotCodexEnabled(b.mascotOpenaiCodex);
       if (typeof b.mascotAntigravity === 'boolean') setMascotAntigravityEnabled(b.mascotAntigravity);
@@ -949,6 +934,44 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
   // driven. Mutually exclusive with mascot mode (mascot wins), matching how
   // glass/solid already yield to a mascot.
   const particleMode = !mascotMode && fillMode === 'particle';
+  // "Waveform" fill: the orb's contents become an oscilloscope trace of the last
+  // ~20s of tool-call activity, in a glass disc the same size as the orb with the
+  // logo behind it. Yields to a mascot the same way every other fill does.
+  const waveformMode = !mascotMode && fillMode === 'waveform';
+  const waveformBox = WAVEFORM_BOX[renderSize] ?? WAVEFORM_BOX.medium;
+  // "Arc" quota style: ring the orb instead of stacking bars beneath it. Mascot
+  // bubbles keep their bars — there's no orb for an arc to ring, and their
+  // window still reserves the bars strip (MASCOT_DIMENSIONS in bubble-manager).
+  const arcMode = quotaStyle === 'arc' && !mascotMode;
+  // The arc wraps the orb from outside, so the orb keeps its full face. That
+  // annulus is normally the state rings' territory — dims.ring is only orb + 8,
+  // and its own 2px border (border-box) occupies half of that gap — so in arc
+  // mode every ring shifts out past the band: + BAND*2 for the band itself, + 4
+  // for the ring's border top and bottom.
+  //
+  // The whole stack has to stay inside the window, which is orb + 20 wide
+  // (ARC_DIMENSIONS in bubble-manager). At BAND 4 the outermost ring lands at
+  // orb + 16, i.e. 2px inside the window per side at the smallest size — 2px
+  // tighter than bars mode's own reach (dims.ring + 4 = orb + 12). Raising BAND
+  // eats that remaining headroom 2px at a time.
+  const arcOuter = dims.orb + QUOTA_ARC_BAND * 2;
+  const ringBase = arcMode ? arcOuter + 4 : dims.ring;
+  // Remaining credit for the arc: each tool nominates one primary window (see
+  // quota.ts), since a ring can only carry one number where the bars carry N.
+  // null → draw no arc at all; the tooltip still lists every window.
+  const arcRemaining = !arcMode
+    ? null
+    : toolId === 'claude-code'
+      ? claudeArcRemaining(demo ? demoUsage : usageStatus)
+      : toolId === 'openai-codex'
+        ? codexArcRemaining(codexUsageStatus)
+        : toolId === 'cursor'
+          ? cursorArcRemaining(cursorUsageStatus)
+          : toolId === 'vscode-copilot'
+            ? copilotArcRemaining(copilotUsageStatus)
+            : toolId === 'antigravity-cli'
+              ? antigravityArcRemaining(antigravityUsageStatus, visibleAntigravityModels(antigravityUsageStatus))
+              : null;
   const mascotWidth = codexMascotMode
     ? (MASCOT_WIDTH_CODEX[renderSize] ?? MASCOT_WIDTH_CODEX.medium)
     : antigravityMascotMode
@@ -1087,7 +1110,22 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
 
   return (
     <div
-      className='flex flex-col items-center justify-end h-full w-full pb-2'
+      // h-screen/w-screen, NOT h-full/w-full: nothing sets a height on html or
+      // body, so `height: 100%` resolves against an auto-height containing block
+      // and collapses to the CONTENT height. Every ring here (state, arc,
+      // escalation, guardrail) is absolutely positioned and so contributes no
+      // height — with a collapsed root they overflow the body's content box and
+      // `body { overflow: hidden }` in index.css crops them flat. Viewport units
+      // pin this to the real window instead, which is also what makes the
+      // justify-* below mean anything.
+      //
+      // Bars mode pins the orb to the bottom so the bars strip below it fills
+      // the rest of the window. Arc mode has nothing below the orb, and its
+      // rings reach further out, so it centres instead — bottom-pinning would
+      // push the escalation ring flush against the window edge.
+      className={`flex flex-col items-center h-screen w-screen ${
+        arcMode ? 'justify-center' : 'justify-end pb-2'
+      }`}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       // Whole-bubble opacity (orb/mascot, usage bars, badges) — a renderer CSS
@@ -1104,29 +1142,31 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
         // than `undefined` — otherwise Framer Motion leaves behind the inline
         // opacity/scale it wrote while the bubble briefly rendered as an orb
         // before the mascot config loaded, leaving the mascot stuck at ~0.5.
-        animate={mascotMode
+        animate={mascotMode || waveformMode
           ? { opacity: 1, scale: 1, x: 0, y: 0, ...(demo ? { transition: { type: 'spring', stiffness: 260, damping: 18 } } : {}) }
           : activeAnimation}
         className={`relative flex items-center justify-center cursor-pointer select-none shrink-0 ${mascotMode ? '' : 'rounded-full'}`}
         style={{
           width: mascotMode ? mascotWidth : dims.orb,
           height: mascotMode ? undefined : dims.orb,
-          marginTop: '5px',
-          // Mascot and particle ("3D orb") modes are transparent stages — the
-          // character / dot-cloud carries the look, so no disc, border, blur or
-          // drop-shadow. Solid fill paints an opaque backdrop so logos stay
-          // legible over busy desktops; glass keeps the frosted, state-tinted
-          // gradient. The state-color glow (boxShadow animation) still reads in
-          // every mode.
-          background: mascotMode || particleMode
+          // Nudges the orb clear of the top edge in the bottom-pinned layout.
+          // Arc mode centres instead, where any margin would undo the centring.
+          marginTop: arcMode ? 0 : '5px',
+          // Mascot, particle ("3D orb") and waveform modes are transparent
+          // stages — the character / dot-cloud / trace panel carries the look,
+          // so no disc, border, blur or drop-shadow here. Solid fill paints an
+          // opaque backdrop so logos stay legible over busy desktops; glass
+          // keeps the frosted, state-tinted gradient. The state-color glow
+          // (boxShadow animation) still reads in glass/solid.
+          background: mascotMode || particleMode || waveformMode
             ? 'transparent'
             : fillMode === 'solid'
               ? fillColor
               : `radial-gradient(circle, ${fill} 0%, rgba(128,128,128,0.06) 100%)`,
-          backdropFilter: mascotMode || particleMode || fillMode === 'solid' ? undefined : 'blur(14px)',
-          WebkitBackdropFilter: mascotMode || particleMode || fillMode === 'solid' ? undefined : 'blur(14px)',
-          border: mascotMode || particleMode ? 'none' : `1.5px solid ${borderColor}`,
-          boxShadow: mascotMode || particleMode
+          backdropFilter: mascotMode || particleMode || waveformMode || fillMode === 'solid' ? undefined : 'blur(14px)',
+          WebkitBackdropFilter: mascotMode || particleMode || waveformMode || fillMode === 'solid' ? undefined : 'blur(14px)',
+          border: mascotMode || particleMode || waveformMode ? 'none' : `1.5px solid ${borderColor}`,
+          boxShadow: mascotMode || particleMode || waveformMode
             ? 'none'
             : isDark
               ? '0 8px 8px 0 rgba(0,0,0,0.4)'
@@ -1145,6 +1185,15 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
           ) : (
             <ClawdMascot state={state} width={mascotWidth} />
           )
+        ) : waveformMode ? (
+          <WaveformTrace
+            state={state}
+            isDark={isDark}
+            box={waveformBox}
+            iconSrc={meta.icon}
+            label={meta.label}
+            activityAt={status?.lastUpdated}
+          />
         ) : particleMode ? (
           <ParticleOrb
             state={state}
@@ -1167,30 +1216,38 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
           />
         )}
 
-        {/* Orbiting ring – waiting state (slow dots) */}
-        {!mascotMode && !particleMode && state === 'waiting' && ring && (
+        {/* Quota arc — wraps the orb from outside, in place of the bars strip
+            below it, leaving the orb's face untouched. Applies to every
+            non-mascot fill (the waveform disc is orb-sized, so it rings that
+            too); the state rings move out to `ringBase` to clear it. */}
+        <QuotaArc remaining={arcRemaining} size={arcOuter} isDark={isDark} />
+
+        {/* Orbiting ring – waiting state (slow dots). The circular orbits are
+            orb furniture; the waveform trace says the same thing with its held
+            spike, so they sit out that mode. */}
+        {!mascotMode && !particleMode && !waveformMode && state === 'waiting' && ring && (
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
             className='absolute rounded-full'
-            style={{ width: dims.ring, height: dims.ring, border: `2px dotted ${ring}` }}
+            style={{ width: ringBase, height: ringBase, border: `2px dotted ${ring}` }}
           />
         )}
 
         {/* Orbiting ring – working state (fast dashes) */}
-        {!mascotMode && !particleMode && state === 'working' && ring && (
+        {!mascotMode && !particleMode && !waveformMode && state === 'working' && ring && (
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 2.5, repeat: Infinity, ease: 'linear' }}
             className='absolute rounded-full'
-            style={{ width: dims.ring, height: dims.ring, border: `2px dashed ${ring}` }}
+            style={{ width: ringBase, height: ringBase, border: `2px dashed ${ring}` }}
           />
         )}
 
         {/* Attention escalation — warm-orange ring + bell badge when the tool
             has waited on the user past the threshold. Distinct from the teal
             nudge badge and amber/red guardrail ring. */}
-        {isEscalated && !mascotMode && (
+        {isEscalated && !mascotMode && !waveformMode && (
           <motion.div
             animate={{
               opacity: [0.5, 1, 0.5],
@@ -1203,8 +1260,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
             transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut' }}
             className='absolute rounded-full pointer-events-none'
             style={{
-              width: dims.ring + 4,
-              height: dims.ring + 4,
+              width: ringBase + 4,
+              height: ringBase + 4,
               border: `2px solid ${isDark ? 'rgba(249,115,22,0.9)' : 'rgba(234,88,12,0.9)'}`,
             }}
           />
@@ -1225,7 +1282,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
         )}
 
         {/* Error dot */}
-        {!mascotMode && !particleMode && state === 'error' && (
+        {!mascotMode && !particleMode && !waveformMode && state === 'error' && (
           <div
             className='absolute -top-1 -right-1 w-3 h-3 rounded-full'
             style={{
@@ -1237,7 +1294,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
 
         {/* Guardrail ring — amber pulse on warn, solid red on block. Sits
             outside the orb so it doesn't fight the working/waiting orbits. */}
-        {!mascotMode && guardrailSignal && (
+        {!mascotMode && !waveformMode && guardrailSignal && (
           <motion.div
             animate={
               guardrailSignal.decision === 'block'
@@ -1258,8 +1315,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
             }
             className='absolute rounded-full pointer-events-none'
             style={{
-              width: dims.ring + 2,
-              height: dims.ring + 2,
+              width: ringBase + 2,
+              height: ringBase + 2,
               border: `2px solid ${guardrailSignal.decision === 'block'
                 ? (isDark ? 'rgba(239,68,68,0.95)' : 'rgba(220,38,38,0.95)')
                 : (isDark ? 'rgba(245,158,11,0.85)' : 'rgba(217,119,6,0.85)')
@@ -1289,7 +1346,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
 
         {/* Secret Protection ring + badge — shown when no command-guardrail
             signal is competing for the same corner. Key icon distinguishes it. */}
-        {!mascotMode && secretSignal && !guardrailSignal && (
+        {!mascotMode && !waveformMode && secretSignal && !guardrailSignal && (
           <motion.div
             animate={
               secretSignal.decision === 'block'
@@ -1310,8 +1367,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
             }
             className='absolute rounded-full pointer-events-none'
             style={{
-              width: dims.ring + 2,
-              height: dims.ring + 2,
+              width: ringBase + 2,
+              height: ringBase + 2,
               border: `2px solid ${secretSignal.decision === 'block'
                 ? (isDark ? 'rgba(239,68,68,0.95)' : 'rgba(220,38,38,0.95)')
                 : (isDark ? 'rgba(245,158,11,0.85)' : 'rgba(217,119,6,0.85)')
@@ -1464,35 +1521,39 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
         )}
       </motion.div>
 
-      {/* Claude subscription usage bars — only rendered for the Claude bubble.
-          Sits below the orb; window height was sized to fit (see BUBBLE_HEIGHT). */}
-      {toolId === 'claude-code' && (
-        <UsageBars
-          status={demo ? demoUsage : usageStatus}
-          isDark={isDark}
-          showSevenDay={showSevenDay}
-          bar={dims.bar}
-        />
-      )}
+      {/* Subscription usage bars — one block per tool that has a quota poller,
+          each rendered only in its own bubble. They live in the strip below the
+          orb that BUBBLE_DIMENSIONS reserves. In arc mode that strip doesn't
+          exist (ARC_DIMENSIONS is square) and the ring above stands in for them,
+          so every block sits out — except on a mascot bubble, which always keeps
+          its bars (arcMode already accounts for that). */}
+      {!arcMode && (
+        <>
+          {toolId === 'claude-code' && (
+            <UsageBars
+              status={demo ? demoUsage : usageStatus}
+              isDark={isDark}
+              showSevenDay={showSevenDay}
+              bar={dims.bar}
+            />
+          )}
 
-      {/* Codex subscription usage bars — only rendered for the Codex bubble. */}
-      {toolId === 'openai-codex' && (
-        <CodexUsageBars status={codexUsageStatus} isDark={isDark} bar={dims.bar} />
-      )}
+          {toolId === 'openai-codex' && (
+            <CodexUsageBars status={codexUsageStatus} isDark={isDark} bar={dims.bar} />
+          )}
 
-      {/* Cursor subscription usage bar — only rendered for the Cursor bubble. */}
-      {toolId === 'cursor' && (
-        <CursorUsageBars status={cursorUsageStatus} isDark={isDark} bar={dims.bar} />
-      )}
+          {toolId === 'cursor' && (
+            <CursorUsageBars status={cursorUsageStatus} isDark={isDark} bar={dims.bar} />
+          )}
 
-      {/* Copilot subscription usage bars — only rendered for the Copilot bubble. */}
-      {toolId === 'vscode-copilot' && (
-        <CopilotUsageBars status={copilotUsageStatus} isDark={isDark} bar={dims.bar} />
-      )}
+          {toolId === 'vscode-copilot' && (
+            <CopilotUsageBars status={copilotUsageStatus} isDark={isDark} bar={dims.bar} />
+          )}
 
-      {/* Antigravity per-model usage bars — only rendered for the Antigravity bubble. */}
-      {toolId === 'antigravity-cli' && (
-        <AntigravityUsageBars status={antigravityUsageStatus} isDark={isDark} bar={dims.bar} />
+          {toolId === 'antigravity-cli' && (
+            <AntigravityUsageBars status={antigravityUsageStatus} isDark={isDark} bar={dims.bar} />
+          )}
+        </>
       )}
     </div>
   );

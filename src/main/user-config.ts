@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold, AppearanceConfig, ThemeMode } from '../common/types';
+import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold, AppearanceConfig, ThemeMode } from '../common/types';
 import { GuardrailConfig } from '../common/guardrails';
 import {
   BacklogPopulationConfig,
@@ -174,6 +174,7 @@ const DEFAULTS: UserConfig = {
     sound: 'pop',
     fillMode: 'glass',
     fillColor: '#ffffff',
+    quotaStyle: 'bars',
     hidden: false,
     mascotClaudeCode: false,
     mascotOpenaiCodex: false,
@@ -558,13 +559,14 @@ function migrateSecretProtection(raw: unknown): SecretProtectionConfig {
 // Validate a persisted bubble block against the known string unions, falling
 // back to defaults for any unrecognized/missing field so a hand-edited or
 // stale config can't strand the bubbles at an invalid size/corner/sound.
-function migrateBubble(raw: unknown): BubbleConfig {
+export function migrateBubble(raw: unknown): BubbleConfig {
   const d = DEFAULTS.bubble;
   const b = (raw && typeof raw === 'object' ? raw : {}) as Partial<BubbleConfig>;
   const SIZES: BubbleSize[] = ['small', 'medium', 'large'];
   const POSITIONS: BubbleStackPosition[] = ['bottom-right', 'bottom-left', 'top-right', 'top-left'];
   const SOUNDS: BubbleSoundId[] = ['pop', 'chime', 'ding', 'marimba', 'none'];
-  const FILL_MODES: BubbleFillMode[] = ['glass', 'solid', 'particle'];
+  const FILL_MODES: BubbleFillMode[] = ['glass', 'solid', 'particle', 'waveform'];
+  const QUOTA_STYLES: BubbleQuotaStyle[] = ['bars', 'arc'];
   // Accept #rgb/#rrggbb or rgb()/rgba() so a hand-edited config can't feed an
   // arbitrary string into the orb's inline style. Anything else → default.
   const isColor = (v: unknown): v is string =>
@@ -610,6 +612,7 @@ function migrateBubble(raw: unknown): BubbleConfig {
     sound: SOUNDS.includes(b.sound as BubbleSoundId) ? (b.sound as BubbleSoundId) : d.sound,
     fillMode: FILL_MODES.includes(b.fillMode as BubbleFillMode) ? (b.fillMode as BubbleFillMode) : d.fillMode,
     fillColor: isColor(b.fillColor) ? b.fillColor.trim() : d.fillColor,
+    quotaStyle: QUOTA_STYLES.includes(b.quotaStyle as BubbleQuotaStyle) ? (b.quotaStyle as BubbleQuotaStyle) : d.quotaStyle,
     hidden: typeof b.hidden === 'boolean' ? b.hidden : d.hidden,
     mascotClaudeCode: typeof b.mascotClaudeCode === 'boolean' ? b.mascotClaudeCode : d.mascotClaudeCode,
     mascotOpenaiCodex: typeof b.mascotOpenaiCodex === 'boolean' ? b.mascotOpenaiCodex : d.mascotOpenaiCodex,

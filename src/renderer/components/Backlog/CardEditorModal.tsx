@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import {
   AttachmentIntent, BacklogAttachment, BacklogCard, BacklogProject, BacklogTaskType,
   BacklogTemplate, PendingAttachment, QaProvider, RiskTier, isSafeModelId,
 } from '../../../common/backlog-types';
 import { buildPreviewPrompt, PromptAttachment } from '../../../common/backlog-prompt';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, Button, Checkbox, Segmented, Select, Tooltip } from '../Shared';
+import { appAlert, Button, Checkbox, Input, Modal, Segmented, Select, Textarea, Tooltip } from '../Shared';
 import { TIER_META } from './CardTile';
 import { TemplateManagerModal } from './TemplateManagerModal';
 import { PromptPreviewModal } from './PromptPreviewModal';
@@ -64,9 +65,10 @@ const MODEL_PRESETS: { value: string; label: string }[] = [
 ];
 const isPresetModel = (m: string) => MODEL_PRESETS.some((p) => p.value === m);
 
-const inputClass =
-  'bg-glass/60 border border-edge/70 rounded-lg px-3 py-1.5 text-sm text-strong focus:outline-none focus:border-blue-500/60';
 const labelClass = 'text-xs uppercase tracking-widest text-faint font-semibold';
+// Shared by both <Select>s in the form so their triggers line up with the
+// <Input> fields around them (Select brings its own .glass-control material).
+const selectClass = 'w-full px-3 py-1.5 text-sm cursor-pointer';
 
 // Small "ⓘ" affordance carrying a glass tooltip — uses the shared Tooltip
 // primitive so it matches the rest of the app instead of a native browser hint.
@@ -270,382 +272,12 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   const valid = title.trim().length > 0 && projectId.length > 0 && modelValid;
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm' onClick={onClose}>
-      <div
-        className='apple-scroll relative w-full max-w-xl mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-h-[85vh] overflow-y-auto'
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-          aria-label='Close'
-        >
-          ✕
-        </button>
-
-        <h2 className='text-lg font-bold text-strong leading-tight'>{card ? 'Edit card' : 'New card'}</h2>
-
-        {/* Quick tasks — templates pre-fill title + description (create only) */}
-        {!card && (
-          <div className='flex flex-col gap-1.5'>
-            <div className='flex items-center gap-2'>
-              <span className={labelClass}>Quick tasks</span>
-              <Tooltip content='Add, edit, or remove quick-task templates'>
-                <button
-                  onClick={() => setManagingTemplates(true)}
-                  className='text-[11px] text-faint hover:text-body cursor-pointer transition-colors'
-                >
-                  manage
-                </button>
-              </Tooltip>
-            </div>
-            {templates.length === 0 ? (
-              <p className='text-xs text-faint'>No templates yet — "manage" to add some.</p>
-            ) : (
-              <div className='flex gap-2 flex-wrap'>
-                {templates.map((tpl) => (
-                  <Tooltip key={tpl.id} content={tpl.description}>
-                    <Button
-                      variant='secondary'
-                      size='sm'
-                      onClick={() => applyTemplate(tpl)}
-                    >
-                      {tpl.name}
-                    </Button>
-                  </Tooltip>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        <label className='flex flex-col gap-1.5'>
-          <span className={labelClass}>Title</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} placeholder='What should the agent research?' />
-        </label>
-
-        <label className='flex flex-col gap-1.5'>
-          <span className={labelClass}>Description</span>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={5}
-            className={`${inputClass} resize-y leading-relaxed`}
-            placeholder='The prompt the executor runs. Be specific — the output is a markdown report.'
-          />
-        </label>
-
-        {/* Interactive refinement — mirrors the board tile's Refine/Import
-            actions. Opens a plan-mode session; the plan auto-attaches below. */}
-        {card && card.state === 'refinement' && (
-          <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
-            <div>
-              <p className='text-sm font-medium text-strong'>Interactive refinement</p>
-              <p className='text-xs text-muted mt-1'>
-                Opens a Claude Code plan-mode session in a terminal. Discuss the task and present a
-                plan — it auto-attaches as <code>refinement-plan.md</code> below and is carried into
-                execution.
-              </p>
-            </div>
-            <div className='flex items-center gap-2 flex-wrap'>
-              <Button variant='secondary' size='sm' type='button' onClick={() => void handleRefine()} disabled={refining}>
-                {refining ? 'Opening…' : `✨ ${refineSessionActive ? 'Re-plan' : 'Refine'}`}
-              </Button>
-              {refineSessionActive && (
-                <Button variant='secondary' size='sm' type='button' onClick={() => void handleImportPlan()} disabled={importingPlan}>
-                  {importingPlan ? 'Importing…' : '⬇ Import plan'}
-                </Button>
-              )}
-            </div>
-            {refineSessionActive && (
-              <p className='text-[11px] text-muted leading-snug'>
-                Planning session open in a terminal — the plan attaches automatically when you present
-                one. Use "Import plan" if it didn’t catch.
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Attachments — text files inlined verbatim into the prompt, so a card
-            can carry context that isn't committed to the repo (an isolated
-            worktree only sees committed files). */}
-        <div className='flex flex-col gap-1.5'>
-          <div className='flex items-center gap-2'>
-            <span className={labelClass}>Attachments</span>
-            <Button
-              variant='secondary'
-              size='xs'
-              type='button'
-              onClick={() => void handlePickAttachments()}
-              disabled={picking}
-            >
-              {picking ? 'Choosing…' : '+ Attach files'}
-            </Button>
-          </div>
-          {keptExisting.length === 0 && pendingAttachments.length === 0 ? (
-            <p className='text-xs text-faint'>
-              Attach text files (specs, plans) to inline them into the prompt — useful for uncommitted files a worktree can’t see.
-            </p>
-          ) : (
-            <div className='flex flex-wrap gap-1.5'>
-              {keptExisting.map((a) => (
-                <span key={a.id} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-glass/70 border border-edge/60 text-xs text-primary'>
-                  <Tooltip content={a.filename}><span className='truncate max-w-48'>{a.filename}</span></Tooltip>
-                  <span className='text-faint'>{formatBytes(a.bytes)}</span>
-                  <button
-                    type='button'
-                    onClick={() => setRemovedIds((prev) => [...prev, a.id])}
-                    className='text-faint hover:text-danger cursor-pointer'
-                    aria-label={`Remove ${a.filename}`}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-              {pendingAttachments.map((a, i) => (
-                <span key={`pending-${a.filename}-${i}`} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-ok'>
-                  <Tooltip content={a.filename}><span className='truncate max-w-48'>{a.filename}</span></Tooltip>
-                  <span className='text-ok/80'>{formatBytes(a.bytes)} · new</span>
-                  <button
-                    type='button'
-                    onClick={() => setPendingAttachments((prev) => prev.filter((_, j) => j !== i))}
-                    className='text-ok/70 hover:text-danger cursor-pointer'
-                    aria-label={`Remove ${a.filename}`}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
-          <label className='flex flex-col gap-1.5'>
-            <span className={labelClass}>Project</span>
-            <Select
-              value={projectId}
-              onChange={(v) => setProjectId(v)}
-              ariaLabel='Project'
-              className={`${inputClass} cursor-pointer`}
-              options={
-                projects.length === 0
-                  ? [{ value: '', label: 'No projects registered' }]
-                  : projects.map((p) => ({ value: p.id, label: p.name }))
-              }
-            />
-          </label>
-
-          <div className='flex flex-col gap-1.5'>
-            <span className={labelClass}>Task type</span>
-            <Segmented
-              options={[
-                { value: 'research', label: 'Research', hint: 'Read-only — the agent produces a report.' },
-                { value: 'execution', label: 'Execution', hint: 'Edits files in an isolated worktree — delivers a diff + report.' },
-                { value: 'qa', label: 'QA', hint: 'Read-only — opens the running app in a headless browser and checks each acceptance criterion. Delivers a report + screenshots.' },
-              ]}
-              value={taskType}
-              onChange={(v) => setTaskType(v as BacklogTaskType)}
-            />
-          </div>
-
-          <div className='flex flex-col gap-1.5'>
-            <span className={labelClass}>Risk tier</span>
-            <Segmented
-              options={(Object.keys(TIER_META) as RiskTier[]).map((tier) => ({
-                value: tier,
-                label: TIER_META[tier].label,
-                hint: TIER_META[tier].hint,
-                dot: TIER_META[tier].dot,
-              }))}
-              value={riskTier}
-              onChange={(v) => setRiskTier(v as RiskTier)}
-            />
-          </div>
-
-          <label className='flex flex-col gap-1.5 sm:col-span-2'>
-            <span className={labelClass}>Model</span>
-            <Select
-              value={modelChoice}
-              onChange={setModelChoice}
-              className='w-full px-3 py-1.5 text-sm'
-              ariaLabel='Model'
-              options={[
-                { value: '', label: `Project default${projectDefaultModel ? ` (${projectDefaultModel})` : ''}` },
-                ...MODEL_PRESETS,
-                { value: 'custom', label: 'Custom model id…' },
-              ]}
-            />
-            {modelChoice === 'custom' && (
-              <>
-                <input
-                  value={customModel}
-                  onChange={(e) => setCustomModel(e.target.value)}
-                  className={inputClass}
-                  placeholder='e.g. claude-sonnet-4-6'
-                />
-                {!modelValid && (
-                  <span className='text-[11px] text-danger'>
-                    Letters, digits, dots, dashes, and brackets only.
-                  </span>
-                )}
-              </>
-            )}
-          </label>
-
-          <label className='flex flex-col gap-1.5'>
-            <span className={`${labelClass} inline-flex items-center gap-1.5`}>
-              Est. minutes
-              <InfoHint text='Size-fit + hard time budget. The scheduler only claims this card if it fits the time left in the window, and kills the run if it exceeds this many minutes. Default 30, clamped 5–120.' />
-            </span>
-            <input
-              type='number' min={5} max={120} value={estimatedMinutes}
-              onChange={(e) => setEstimatedMinutes(e.target.value)}
-              className={`${inputClass} w-28`} placeholder='30'
-            />
-          </label>
-
-          <label className='flex flex-col gap-1.5'>
-            <span className={`${labelClass} inline-flex items-center gap-1.5`}>
-              Est. cost ($)
-              <InfoHint text='Informational only — feeds the "queue will burn ~$X next window" forecast. It never limits or stops a run. Default $0.50.' />
-            </span>
-            <input
-              type='number' min={0} step={0.1} value={estimatedCostUsd}
-              onChange={(e) => setEstimatedCostUsd(e.target.value)}
-              className={`${inputClass} w-28`} placeholder='0.50'
-            />
-          </label>
-        </div>
-
-        {/* Prerequisites — gate autorun until the checked cards are Done */}
-        {prereqCandidates.length > 0 && (
-          <div className='flex flex-col gap-1.5'>
-            <span className={labelClass}>Prerequisites</span>
-            <p className='text-xs text-muted -mt-0.5'>
-              Autorun waits until these cards are Done ("Run now" overrides).
-            </p>
-            <div className='apple-scroll flex flex-col gap-1 max-h-36 overflow-y-auto glass-secondary shrink-0 p-2'>
-              {prereqCandidates.map((c) => (
-                <label key={c.id} className='flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-glass/60 cursor-pointer'>
-                  <Checkbox
-                    size='sm'
-                    checked={prereqIds.includes(c.id)}
-                    onChange={() => togglePrereq(c.id)}
-                    ariaLabel={`Require "${c.title}" done first`}
-                  />
-                  <span className='flex-1 min-w-0 text-sm text-primary truncate'>{c.title}</span>
-                  <span className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 ${
-                    c.state === 'done' ? 'bg-emerald-500/15 text-ok' : 'bg-control/60 text-muted'
-                  }`}>
-                    {c.state}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Acceptance criteria & QA provider — execution cards only */}
-        {taskType === 'execution' ? (
-          <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
-            <div>
-              <p className='text-sm font-medium text-strong'>Acceptance criteria & QA</p>
-              <p className='text-xs text-muted mt-1'>
-                The executor edits files in an isolated worktree; QA runs the chosen check afterward and gates Done.
-              </p>
-            </div>
-
-            <label className='flex flex-col gap-1.5'>
-              <span className={labelClass}>Acceptance criteria</span>
-              <textarea
-                value={acceptanceCriteria}
-                onChange={(e) => setAcceptanceCriteria(e.target.value)}
-                rows={4}
-                className={`${inputClass} resize-y leading-relaxed`}
-                placeholder='One per line — injected into the executor prompt as a checklist. Not machine-checked yet.'
-              />
-            </label>
-
-            <label className='flex flex-col gap-1.5'>
-              <span className={labelClass}>QA provider</span>
-              <Select
-                value={qaProvider}
-                onChange={(v) => setQaProvider(v as QaProvider)}
-                className='w-full sm:w-56 px-3 py-1.5 text-sm'
-                ariaLabel='QA provider'
-                options={[
-                  ...QA_PROVIDERS.map((p) => ({ value: p.value, label: p.label })),
-                  { value: 'browser' as QaProvider, label: 'Browser — coming later', disabled: true },
-                ]}
-              />
-              <span className='text-[11px] text-faint'>
-                {QA_PROVIDERS.find((p) => p.value === qaProvider)?.hint}
-              </span>
-            </label>
-
-            {qaProvider === 'custom' && (
-              <label className='flex flex-col gap-1.5'>
-                <span className={labelClass}>Custom QA command</span>
-                <input
-                  value={qaCommand}
-                  onChange={(e) => setQaCommand(e.target.value)}
-                  className={inputClass}
-                  placeholder='npm run e2e'
-                />
-                {qaCommand.trim() === '' && (
-                  <span className='text-[11px] text-warn'>
-                    Required for the custom provider — QA fails with no command to run.
-                  </span>
-                )}
-              </label>
-            )}
-          </div>
-        ) : taskType === 'qa' ? (
-          <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
-            <div>
-              <p className='text-sm font-medium text-strong'>Browser verification</p>
-              <p className='text-xs text-muted mt-1'>
-                A read-only agent opens the app in a headless browser (chrome-devtools-mcp) and checks
-                each criterion against the live UI. The app must already be running — the agent can’t start it.
-              </p>
-            </div>
-
-            <label className='flex flex-col gap-1.5'>
-              <span className={labelClass}>App URL</span>
-              <input
-                value={qaUrl}
-                onChange={(e) => setQaUrl(e.target.value)}
-                className={inputClass}
-                placeholder='http://localhost:5173'
-              />
-              {qaUrl.trim() === '' && (
-                <span className='text-[11px] text-warn'>
-                  Recommended — without a URL the agent only has the description to go on.
-                </span>
-              )}
-            </label>
-
-            <label className='flex flex-col gap-1.5'>
-              <span className={labelClass}>Acceptance criteria</span>
-              <textarea
-                value={acceptanceCriteria}
-                onChange={(e) => setAcceptanceCriteria(e.target.value)}
-                rows={4}
-                className={`${inputClass} resize-y leading-relaxed`}
-                placeholder='One per line — the agent checks each against the live UI and reports PASS/FAIL with screenshots.'
-              />
-            </label>
-          </div>
-        ) : (
-          <div className='glass-secondary shrink-0 p-3 opacity-50'>
-            <p className='text-xs text-muted'>
-              QA applies to execution tasks — research cards are done when their report is attached.
-            </p>
-          </div>
-        )}
-
-        <div className='flex items-center gap-2 justify-end'>
+    <Modal
+      title={card ? 'Edit card' : 'New card'}
+      onClose={onClose}
+      maxWidthClass='max-w-xl'
+      footer={
+        <>
           <Button variant='secondary' onClick={() => setPreviewing(true)} className='mr-auto'>
             Preview prompt
           </Button>
@@ -676,9 +308,371 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
               </Button>
             </>
           )}
+        </>
+      }
+    >
+      {/* Quick tasks — templates pre-fill title + description (create only) */}
+      {!card && (
+        <div className='flex flex-col gap-1.5'>
+          <div className='flex items-center gap-2'>
+            <span className={labelClass}>Quick tasks</span>
+            <Tooltip content='Add, edit, or remove quick-task templates'>
+              <button
+                onClick={() => setManagingTemplates(true)}
+                className='text-[11px] text-faint hover:text-body cursor-pointer transition-colors'
+              >
+                manage
+              </button>
+            </Tooltip>
+          </div>
+          {templates.length === 0 ? (
+            <p className='text-xs text-faint'>No templates yet — "manage" to add some.</p>
+          ) : (
+            <div className='flex gap-2 flex-wrap'>
+              {templates.map((tpl) => (
+                <Tooltip key={tpl.id} content={tpl.description}>
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={() => applyTemplate(tpl)}
+                  >
+                    {tpl.name}
+                  </Button>
+                </Tooltip>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <label className='flex flex-col gap-1.5'>
+        <span className={labelClass}>Title</span>
+        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder='What should the agent research?' />
+      </label>
+
+      <label className='flex flex-col gap-1.5'>
+        <span className={labelClass}>Description</span>
+        <Textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={5}
+          placeholder='The prompt the executor runs. Be specific — the output is a markdown report.'
+        />
+      </label>
+
+      {/* Interactive refinement — mirrors the board tile's Refine/Import
+          actions. Opens a plan-mode session; the plan auto-attaches below. */}
+      {card && card.state === 'refinement' && (
+        <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
+          <div>
+            <p className='text-sm font-medium text-strong'>Interactive refinement</p>
+            <p className='text-xs text-muted mt-1'>
+              Opens a Claude Code plan-mode session in a terminal. Discuss the task and present a
+              plan — it auto-attaches as <code>refinement-plan.md</code> below and is carried into
+              execution.
+            </p>
+          </div>
+          <div className='flex items-center gap-2 flex-wrap'>
+            <Button variant='secondary' size='sm' type='button' onClick={() => void handleRefine()} disabled={refining}>
+              {refining ? 'Opening…' : `✨ ${refineSessionActive ? 'Re-plan' : 'Refine'}`}
+            </Button>
+            {refineSessionActive && (
+              <Button variant='secondary' size='sm' type='button' onClick={() => void handleImportPlan()} disabled={importingPlan}>
+                {importingPlan ? 'Importing…' : '⬇ Import plan'}
+              </Button>
+            )}
+          </div>
+          {refineSessionActive && (
+            <p className='text-[11px] text-muted leading-snug'>
+              Planning session open in a terminal — the plan attaches automatically when you present
+              one. Use "Import plan" if it didn’t catch.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Attachments — text files inlined verbatim into the prompt, so a card
+          can carry context that isn't committed to the repo (an isolated
+          worktree only sees committed files). */}
+      <div className='flex flex-col gap-1.5'>
+        <div className='flex items-center gap-2'>
+          <span className={labelClass}>Attachments</span>
+          <Button
+            variant='secondary'
+            size='xs'
+            type='button'
+            onClick={() => void handlePickAttachments()}
+            disabled={picking}
+          >
+            {picking ? 'Choosing…' : '+ Attach files'}
+          </Button>
+        </div>
+        {keptExisting.length === 0 && pendingAttachments.length === 0 ? (
+          <p className='text-xs text-faint'>
+            Attach text files (specs, plans) to inline them into the prompt — useful for uncommitted files a worktree can’t see.
+          </p>
+        ) : (
+          <div className='flex flex-wrap gap-1.5'>
+            {keptExisting.map((a) => (
+              <span key={a.id} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-glass/70 border border-edge/60 text-xs text-primary'>
+                <Tooltip content={a.filename}><span className='truncate max-w-48'>{a.filename}</span></Tooltip>
+                <span className='text-faint'>{formatBytes(a.bytes)}</span>
+                <button
+                  type='button'
+                  onClick={() => setRemovedIds((prev) => [...prev, a.id])}
+                  className='text-faint hover:text-danger cursor-pointer'
+                  aria-label={`Remove ${a.filename}`}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+            {pendingAttachments.map((a, i) => (
+              <span key={`pending-${a.filename}-${i}`} className='inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-ok'>
+                <Tooltip content={a.filename}><span className='truncate max-w-48'>{a.filename}</span></Tooltip>
+                <span className='text-ok/80'>{formatBytes(a.bytes)} · new</span>
+                <button
+                  type='button'
+                  onClick={() => setPendingAttachments((prev) => prev.filter((_, j) => j !== i))}
+                  className='text-ok/70 hover:text-danger cursor-pointer'
+                  aria-label={`Remove ${a.filename}`}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
+        <label className='flex flex-col gap-1.5'>
+          <span className={labelClass}>Project</span>
+          <Select
+            value={projectId}
+            onChange={(v) => setProjectId(v)}
+            ariaLabel='Project'
+            className={selectClass}
+            options={
+              projects.length === 0
+                ? [{ value: '', label: 'No projects registered' }]
+                : projects.map((p) => ({ value: p.id, label: p.name }))
+            }
+          />
+        </label>
+
+        <div className='flex flex-col gap-1.5'>
+          <span className={labelClass}>Task type</span>
+          <Segmented
+            options={[
+              { value: 'research', label: 'Research', hint: 'Read-only — the agent produces a report.' },
+              { value: 'execution', label: 'Execution', hint: 'Edits files in an isolated worktree — delivers a diff + report.' },
+              { value: 'qa', label: 'QA', hint: 'Read-only — opens the running app in a headless browser and checks each acceptance criterion. Delivers a report + screenshots.' },
+            ]}
+            value={taskType}
+            onChange={(v) => setTaskType(v as BacklogTaskType)}
+          />
         </div>
 
+        <div className='flex flex-col gap-1.5'>
+          <span className={labelClass}>Risk tier</span>
+          <Segmented
+            options={(Object.keys(TIER_META) as RiskTier[]).map((tier) => ({
+              value: tier,
+              label: TIER_META[tier].label,
+              hint: TIER_META[tier].hint,
+              dot: TIER_META[tier].dot,
+            }))}
+            value={riskTier}
+            onChange={(v) => setRiskTier(v as RiskTier)}
+          />
+        </div>
+
+        <label className='flex flex-col gap-1.5 sm:col-span-2'>
+          <span className={labelClass}>Model</span>
+          <Select
+            value={modelChoice}
+            onChange={setModelChoice}
+            className={selectClass}
+            ariaLabel='Model'
+            options={[
+              { value: '', label: `Project default${projectDefaultModel ? ` (${projectDefaultModel})` : ''}` },
+              ...MODEL_PRESETS,
+              { value: 'custom', label: 'Custom model id…' },
+            ]}
+          />
+          {modelChoice === 'custom' && (
+            <>
+              <Input
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                invalid={!modelValid}
+                placeholder='e.g. claude-sonnet-4-6'
+              />
+              {!modelValid && (
+                <span className='text-[11px] text-danger'>
+                  Letters, digits, dots, dashes, and brackets only.
+                </span>
+              )}
+            </>
+          )}
+        </label>
+
+        <label className='flex flex-col gap-1.5'>
+          <span className={`${labelClass} inline-flex items-center gap-1.5`}>
+            Est. minutes
+            <InfoHint text='Size-fit + hard time budget. The scheduler only claims this card if it fits the time left in the window, and kills the run if it exceeds this many minutes. Default 30, clamped 5–120.' />
+          </span>
+          <Input
+            type='number' min={5} max={120} value={estimatedMinutes}
+            onChange={(e) => setEstimatedMinutes(e.target.value)}
+            className='w-28' placeholder='30'
+          />
+        </label>
+
+        <label className='flex flex-col gap-1.5'>
+          <span className={`${labelClass} inline-flex items-center gap-1.5`}>
+            Est. cost ($)
+            <InfoHint text='Informational only — feeds the "queue will burn ~$X next window" forecast. It never limits or stops a run. Default $0.50.' />
+          </span>
+          <Input
+            type='number' min={0} step={0.1} value={estimatedCostUsd}
+            onChange={(e) => setEstimatedCostUsd(e.target.value)}
+            className='w-28' placeholder='0.50'
+          />
+        </label>
+      </div>
+
+      {/* Prerequisites — gate autorun until the checked cards are Done */}
+      {prereqCandidates.length > 0 && (
+        <div className='flex flex-col gap-1.5'>
+          <span className={labelClass}>Prerequisites</span>
+          <p className='text-xs text-muted -mt-0.5'>
+            Autorun waits until these cards are Done ("Run now" overrides).
+          </p>
+          <div className='apple-scroll flex flex-col gap-1 max-h-36 overflow-y-auto glass-secondary shrink-0 p-2'>
+            {prereqCandidates.map((c) => (
+              <label key={c.id} className='flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-glass/60 cursor-pointer'>
+                <Checkbox
+                  size='sm'
+                  checked={prereqIds.includes(c.id)}
+                  onChange={() => togglePrereq(c.id)}
+                  ariaLabel={`Require "${c.title}" done first`}
+                />
+                <span className='flex-1 min-w-0 text-sm text-primary truncate'>{c.title}</span>
+                <span className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 ${
+                  c.state === 'done' ? 'bg-emerald-500/15 text-ok' : 'bg-control/60 text-muted'
+                }`}>
+                  {c.state}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Acceptance criteria & QA provider — execution cards only */}
+      {taskType === 'execution' ? (
+        <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
+          <div>
+            <p className='text-sm font-medium text-strong'>Acceptance criteria & QA</p>
+            <p className='text-xs text-muted mt-1'>
+              The executor edits files in an isolated worktree; QA runs the chosen check afterward and gates Done.
+            </p>
+          </div>
+
+          <label className='flex flex-col gap-1.5'>
+            <span className={labelClass}>Acceptance criteria</span>
+            <Textarea
+              value={acceptanceCriteria}
+              onChange={(e) => setAcceptanceCriteria(e.target.value)}
+              rows={4}
+              placeholder='One per line — injected into the executor prompt as a checklist. Not machine-checked yet.'
+            />
+          </label>
+
+          <label className='flex flex-col gap-1.5'>
+            <span className={labelClass}>QA provider</span>
+            <Select
+              value={qaProvider}
+              onChange={(v) => setQaProvider(v as QaProvider)}
+              className='w-full sm:w-56 px-3 py-1.5 text-sm'
+              ariaLabel='QA provider'
+              options={[
+                ...QA_PROVIDERS.map((p) => ({ value: p.value, label: p.label })),
+                { value: 'browser' as QaProvider, label: 'Browser — coming later', disabled: true },
+              ]}
+            />
+            <span className='text-[11px] text-faint'>
+              {QA_PROVIDERS.find((p) => p.value === qaProvider)?.hint}
+            </span>
+          </label>
+
+          {qaProvider === 'custom' && (
+            <label className='flex flex-col gap-1.5'>
+              <span className={labelClass}>Custom QA command</span>
+              <Input
+                value={qaCommand}
+                onChange={(e) => setQaCommand(e.target.value)}
+                placeholder='npm run e2e'
+              />
+              {qaCommand.trim() === '' && (
+                <span className='text-[11px] text-warn'>
+                  Required for the custom provider — QA fails with no command to run.
+                </span>
+              )}
+            </label>
+          )}
+        </div>
+      ) : taskType === 'qa' ? (
+        <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
+          <div>
+            <p className='text-sm font-medium text-strong'>Browser verification</p>
+            <p className='text-xs text-muted mt-1'>
+              A read-only agent opens the app in a headless browser (chrome-devtools-mcp) and checks
+              each criterion against the live UI. The app must already be running — the agent can’t start it.
+            </p>
+          </div>
+
+          <label className='flex flex-col gap-1.5'>
+            <span className={labelClass}>App URL</span>
+            <Input
+              value={qaUrl}
+              onChange={(e) => setQaUrl(e.target.value)}
+              placeholder='http://localhost:5173'
+            />
+            {qaUrl.trim() === '' && (
+              <span className='text-[11px] text-warn'>
+                Recommended — without a URL the agent only has the description to go on.
+              </span>
+            )}
+          </label>
+
+          <label className='flex flex-col gap-1.5'>
+            <span className={labelClass}>Acceptance criteria</span>
+            <Textarea
+              value={acceptanceCriteria}
+              onChange={(e) => setAcceptanceCriteria(e.target.value)}
+              rows={4}
+              placeholder='One per line — the agent checks each against the live UI and reports PASS/FAIL with screenshots.'
+            />
+          </label>
+        </div>
+      ) : (
+        <div className='glass-secondary shrink-0 p-3 opacity-50'>
+          <p className='text-xs text-muted'>
+            QA applies to execution tasks — research cards are done when their report is attached.
+          </p>
+        </div>
+      )}
+
+      {/* Nested modals. Both portal to document.body — this panel animates its
+          scale, making it a containing block that would otherwise capture
+          their `position: fixed`. */}
+      <AnimatePresence>
         {managingTemplates && <TemplateManagerModal onClose={() => setManagingTemplates(false)} />}
+      </AnimatePresence>
+      <AnimatePresence>
         {previewing && (
           <PromptPreviewModal
             taskType={taskType}
@@ -695,7 +689,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             onClose={() => setPreviewing(false)}
           />
         )}
-      </div>
-    </div>
+      </AnimatePresence>
+    </Modal>
   );
 };

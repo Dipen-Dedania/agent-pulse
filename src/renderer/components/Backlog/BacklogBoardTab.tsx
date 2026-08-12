@@ -9,7 +9,7 @@ import {
   DONE_FILTER_META, DONE_FILTER_ORDER, DONE_FILTER_PREDICATES, DoneFilter,
   passesViewFilters,
 } from './board-filters';
-import { appAlert, appConfirm, Button, Segmented, Spinner, Tooltip } from '../Shared';
+import { appAlert, appConfirm, Button, IconButton, Segmented, Spinner, Tooltip } from '../Shared';
 import { CardTile } from './CardTile';
 import { CardEditorModal } from './CardEditorModal';
 import { BacklogSearchPalette } from './BacklogSearchPalette';
@@ -550,10 +550,9 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour })
           <IssueSourceHeaderActions projectFilter={projectFilter} onReview={() => setImportOpen(true)} />
           {onStartTour && (
             <Tooltip content='Replay the guided tour'>
-              <button
+              <IconButton
                 onClick={onStartTour}
                 aria-label='Replay the guided tour'
-                className='w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors cursor-pointer shrink-0'
               >
                 <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={1.75} className='w-3.5 h-3.5' aria-hidden='true'>
                   <circle cx='12' cy='12' r='9' strokeLinecap='round' strokeLinejoin='round' />
@@ -563,7 +562,7 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour })
                     strokeLinejoin='round'
                   />
                 </svg>
-              </button>
+              </IconButton>
             </Tooltip>
           )}
         </div>
@@ -708,17 +707,21 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour })
         </>
       )}
 
-      {editor.open && (
-        <CardEditorModal
-          card={editor.card}
-          projects={store.projects}
-          templates={store.templates}
-          cards={store.cards}
-          onSave={(input, attachments) => void handleSave(input, attachments)}
-          onClose={() => setEditor({ open: false, card: null })}
-        />
-      )}
-      {detailCard && <ArtifactViewer card={detailCard} onClose={() => setDetailCard(null)} />}
+      <AnimatePresence>
+        {editor.open && (
+          <CardEditorModal
+            card={editor.card}
+            projects={store.projects}
+            templates={store.templates}
+            cards={store.cards}
+            onSave={(input, attachments) => void handleSave(input, attachments)}
+            onClose={() => setEditor({ open: false, card: null })}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {detailCard && <ArtifactViewer card={detailCard} onClose={() => setDetailCard(null)} />}
+      </AnimatePresence>
       <AnimatePresence>
         {importOpen && <IssueImportModal projectFilter={projectFilter} onClose={() => setImportOpen(false)} />}
       </AnimatePresence>

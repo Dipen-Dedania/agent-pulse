@@ -310,7 +310,7 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
             width: rect.width + SPOT_PAD * 2,
             height: rect.height + SPOT_PAD * 2,
             borderRadius: 14,
-            boxShadow: '0 0 0 9999px rgba(8,10,20,0.62)',
+            boxShadow: '0 0 0 9999px var(--ap-scrim-strong)',
             border: '1.5px solid rgba(96,165,250,0.9)',
             pointerEvents: 'none',
             zIndex: 1,
@@ -318,7 +318,8 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
         />
       ) : (
         <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(8,10,20,0.62)', zIndex: 1 }}
+          className='glass-scrim'
+          style={{ background: 'var(--ap-scrim-strong)', zIndex: 1 }}
         />
       )}
 

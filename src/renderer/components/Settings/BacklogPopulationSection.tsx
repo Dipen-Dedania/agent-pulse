@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BacklogPopulationConfig, IssueFilterMode } from '../../../common/backlog-types';
-import { GlassToggle, Select } from '../Shared';
+import { GlassToggle, Input, Select } from '../Shared';
 
 // Settings → Usage → Claude Code: issue population config (Phase 3), sibling of
 // the Backlog Scheduler section. Governs GitLab + Linear population defaults.
@@ -74,14 +74,14 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
             }}
           />
           {custom && (
-            <input
+            <Input
+              size='xs'
               value={modelText}
               onChange={(e) => setModelText(e.target.value)}
               onBlur={() => onChange({ scoutModel: modelText.trim() })}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               placeholder='claude-…'
               aria-label='Custom scout model id'
-              className='px-2 py-1 rounded-lg text-xs bg-control/50 text-body placeholder:text-ghost outline-none focus:bg-control-strong'
             />
           )}
           <span className='text-[11px] text-faint'>A scan is pure extraction — the cheap default is plenty (~$0.11/run).</span>
@@ -105,7 +105,9 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
         {config.backgroundRefresh && (
           <label className='flex items-center gap-2 text-xs text-muted'>
             every
-            <input
+            <Input
+              size='xs'
+              className='w-20'
               type='number'
               min={15}
               max={1440}
@@ -115,7 +117,6 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
                 if (Number.isFinite(n)) onChange({ refreshIntervalMinutes: Math.min(1440, Math.max(15, Math.round(n))) });
               }}
               aria-label='Background refresh interval (minutes)'
-              className='w-20 px-2 py-1 rounded-lg text-xs bg-control/50 text-body outline-none focus:bg-control-strong'
             />
             min
           </label>

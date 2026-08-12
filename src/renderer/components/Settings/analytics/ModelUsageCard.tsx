@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
 import { ModelUsageMode } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { estimateCostBreakdown, formatUsd } from '../../../../common/pricing';
-import { AnimatedNumber } from '../../Shared';
-import { smooth } from '../../../motion';
+import { AnimatedNumber, Meter } from '../../Shared';
 import { useModelUsage } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, CostBreakdownContent, EmptyState, InfoPill, InfoTooltip, Segmented, SkeletonLine, formatCompactNumber } from './shared';
@@ -81,14 +79,13 @@ export const ModelUsageCard: React.FC = () => {
                       : <AnimatedNumber value={pct} format={(n) => `${n.toFixed(1)}%`} />}
                   </p>
                 </div>
-                <div className='h-1.5 bg-glass/60 rounded-full overflow-hidden mb-2'>
-                  <motion.div
-                    className='h-full bg-blue-500'
-                    animate={{ width: `${pct}%` }}
-                    transition={smooth}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
+                <Meter
+                  className='mb-2'
+                  value={pct}
+                  animate
+                  trackClass='bg-glass/60'
+                  fillClass='bg-blue-500'
+                />
                 <div className='flex items-center justify-between text-[11px] text-muted font-mono tabular-nums'>
                   <span className='inline-flex items-center gap-1.5'>
                     in <AnimatedNumber value={row.tokensIn} format={formatCompactNumber} className='text-primary' /> ·

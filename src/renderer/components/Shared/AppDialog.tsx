@@ -107,7 +107,7 @@ export const AppDialogHost: React.FC = () => {
       {current && (
         <motion.div
           key={current.id}
-          className='fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm'
+          className='glass-scrim z-[100]'
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -115,7 +115,7 @@ export const AppDialogHost: React.FC = () => {
           onClick={() => settle(false)}
         >
           <motion.div
-            className='w-full max-w-md mx-4 bg-overlay/95 border border-edge/70 rounded-2xl shadow-2xl p-6 flex flex-col gap-3'
+            className='w-full max-w-md mx-4 glass-modal bg-overlay/80 p-6 flex flex-col gap-3'
             initial={{ opacity: 0, scale: 0.95, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}

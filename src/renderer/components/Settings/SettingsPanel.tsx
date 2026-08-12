@@ -15,7 +15,7 @@ import { SchedulerSection, SchedulerConfigUI } from './SchedulerSection';
 import { BubbleSection } from './BubbleSection';
 import { AttentionSection } from './AttentionSection';
 import { StatusLineSection } from './StatusLineSection';
-import { GlassToggle, Tooltip, Button, Spinner, Segmented, Tabs } from '../Shared';
+import { Badge, GlassToggle, IconButton, Tooltip, Button, Spinner, Segmented, Tabs, Modal } from '../Shared';
 import { GuardrailsTab } from './GuardrailsTab';
 import { SecretProtectionTab } from './SecretProtectionTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
@@ -174,85 +174,59 @@ const HookInfoModal: React.FC<{
 }> = ({ info, label, onClose }) => {
   const [tab, setTab] = useState<'install' | 'troubleshoot'>('install');
   return (
-    <div
-      className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm'
-      onClick={onClose}
-    >
-      <div
-        className='glass-modal apple-scroll w-full max-w-lg mx-4 p-6 flex flex-col gap-5 max-h-[85vh] overflow-y-auto'
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Close */}
-        <button
-          onClick={onClose}
-          className='absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-control/60 hover:bg-control-strong text-muted hover:text-strong transition-colors text-sm cursor-pointer'
-          aria-label='Close'
-        >
-          ✕
-        </button>
+    <Modal eyebrow='Hook Installation' title={label} onClose={onClose}>
+      {/* Tabs */}
+      <Segmented
+        options={[
+          { value: 'install', label: 'Install' },
+          { value: 'troubleshoot', label: 'Troubleshoot' },
+        ]}
+        value={tab}
+        onChange={(v) => setTab(v as 'install' | 'troubleshoot')}
+      />
 
-        {/* Title */}
-        <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-1'>
-            Hook Installation
-          </p>
-          <h2 className='text-lg font-bold text-strong leading-tight'>{label}</h2>
-        </div>
-
-        {/* Tabs */}
-        <Segmented
-          options={[
-            { value: 'install', label: 'Install' },
-            { value: 'troubleshoot', label: 'Troubleshoot' },
-          ]}
-          value={tab}
-          onChange={(v) => setTab(v as 'install' | 'troubleshoot')}
-        />
-
-        {tab === 'install' ? (
-          <>
-            {/* Badges */}
-            <div className='flex flex-wrap gap-2'>
-              <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-info text-xs font-medium'>
-                <span className='w-1.5 h-1.5 rounded-full bg-blue-400 inline-block' />
-                {info.mechanism}
-              </span>
-              <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-control/60 border border-edge-strong/50 text-body text-xs font-mono'>
-                {info.configFile}
-              </span>
-            </div>
-
-            {/* Description */}
-            <p className='text-sm text-body leading-relaxed'>
-              {info.description}
-            </p>
-
-            {/* Snippet */}
-            <div>
-              <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-2'>
-                Config snippet
-              </p>
-              <pre className='bg-glass/80 border border-edge/60 rounded-xl p-4 text-xs text-ok font-mono overflow-x-auto whitespace-pre leading-relaxed'>
-                {info.snippet}
-              </pre>
-            </div>
-          </>
-        ) : (
-          <div>
-            <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
-              If status events aren't arriving
-            </p>
-            <ol className='flex flex-col gap-2.5 list-decimal list-inside text-sm text-body leading-relaxed'>
-              {info.troubleshooting.map((step, i) => (
-                <li key={i} className='pl-1'>
-                  {step}
-                </li>
-              ))}
-            </ol>
+      {tab === 'install' ? (
+        <>
+          {/* Badges */}
+          <div className='flex flex-wrap gap-2'>
+            <Badge tone='info' variant='pill' size='md' weight='medium' dot>
+              {info.mechanism}
+            </Badge>
+            <Badge tone='neutral' variant='pill' size='md' className='font-mono'>
+              {info.configFile}
+            </Badge>
           </div>
-        )}
-      </div>
-    </div>
+
+          {/* Description */}
+          <p className='text-sm text-body leading-relaxed'>
+            {info.description}
+          </p>
+
+          {/* Snippet */}
+          <div>
+            <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-2'>
+              Config snippet
+            </p>
+            <pre className='bg-glass/80 border border-edge/60 rounded-xl p-4 text-xs text-ok font-mono overflow-x-auto whitespace-pre leading-relaxed'>
+              {info.snippet}
+            </pre>
+          </div>
+        </>
+      ) : (
+        <div>
+          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
+            If status events aren't arriving
+          </p>
+          <ol className='flex flex-col gap-2.5 list-decimal list-inside text-sm text-body leading-relaxed'>
+            {info.troubleshooting.map((step, i) => (
+              <li key={i} className='pl-1'>
+                {step}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </Modal>
   );
 };
 
@@ -758,9 +732,11 @@ export const SettingsPanel: React.FC = () => {
     <div className='h-screen overflow-y-auto apple-scroll settings-liquid-bg text-strong p-8 font-sans'>
       {/* Header */}
       <div className='mb-10 flex items-start gap-3'>
-        <button
+        <IconButton
+          size='lg'
+          tone='outline'
+          className='mt-1'
           onClick={handleBack}
-          className='mt-1 w-9 h-9 flex items-center justify-center rounded-full bg-glass/70 hover:bg-control border border-edge/70 text-body hover:text-strong transition-colors cursor-pointer shrink-0'
           aria-label='Back'
         >
           <svg
@@ -775,7 +751,7 @@ export const SettingsPanel: React.FC = () => {
               clipRule='evenodd'
             />
           </svg>
-        </button>
+        </IconButton>
         <img
           src='./assets/logo-transparent.png'
           alt='Agent Pulse'
@@ -919,19 +895,21 @@ export const SettingsPanel: React.FC = () => {
 
                 {/* Actions */}
                 <div className='flex gap-2'>
-                  <button
-                    onClick={() => handleInstallHook(toolId)}
-                    disabled={config.hookInstalled || !toolDetected}
-                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                      config.hookInstalled
-                        ? 'bg-green-500/15 text-green-400 border border-green-500/30 cursor-default'
-                        : !toolDetected
-                          ? 'bg-control/40 text-faint cursor-not-allowed'
-                          : 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer'
-                    }`}
-                  >
-                    {config.hookInstalled ? 'Hook Active' : 'Install Hook'}
-                  </button>
+                  {/* Once installed there's nothing left to press — this reads
+                      as a status, so it stops being a (disabled) button. */}
+                  {config.hookInstalled ? (
+                    <Badge tone='ok' variant='pill' size='md' className='flex-1 justify-center'>
+                      Hook Active
+                    </Badge>
+                  ) : (
+                    <Button
+                      onClick={() => handleInstallHook(toolId)}
+                      disabled={!toolDetected}
+                      className='flex-1'
+                    >
+                      Install Hook
+                    </Button>
+                  )}
                   <Button
                     variant='secondary'
                     onClick={() => handleUninstallHook(toolId)}
@@ -1112,13 +1090,15 @@ export const SettingsPanel: React.FC = () => {
         onFinish={finishBacklogTour}
       />
 
-      {activeInfo && (
-        <HookInfoModal
-          info={TOOL_META[activeInfo].hookInfo}
-          label={TOOL_META[activeInfo].label}
-          onClose={() => setActiveInfo(null)}
-        />
-      )}
+      <AnimatePresence>
+        {activeInfo && (
+          <HookInfoModal
+            info={TOOL_META[activeInfo].hookInfo}
+            label={TOOL_META[activeInfo].label}
+            onClose={() => setActiveInfo(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Styled alert/confirm host — replaces the renderer-blocking native dialogs. */}
       <AppDialogHost />

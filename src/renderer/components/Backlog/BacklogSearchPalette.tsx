@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BacklogCard, BacklogProject } from '../../../common/backlog-types';
-import { EmptyState, Modal } from '../Shared';
+import { EmptyState, Input, Modal } from '../Shared';
 import { searchCards } from './card-search';
 import { TIER_META } from './CardTile';
 import { projectColor } from './project-colors';
@@ -54,12 +54,11 @@ export const BacklogSearchPalette: React.FC<Props> = ({ cards, projects, onPick,
 
   return (
     <Modal title='Find cards' onClose={onClose} portal maxWidthClass='max-w-xl'>
-      <input
+      <Input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={onInputKeyDown}
         placeholder='Search cards by title, description, or project…'
-        className='bg-glass/60 border border-edge/70 rounded-lg px-3 py-2 text-sm text-strong focus:outline-none focus:border-blue-500/60'
         aria-label='Search cards'
       />
 

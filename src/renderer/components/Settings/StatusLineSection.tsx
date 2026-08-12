@@ -8,7 +8,7 @@ import {
   StatusLineDetectInfo,
 } from '../../../common/types';
 import { renderStatusLine, DEFAULT_SEGMENT_ICON } from '../../../common/statusline-render';
-import { Select, GlassToggle, Tooltip, Button } from '../Shared';
+import { Select, Badge, GlassToggle, IconButton, Input, Tooltip, Button } from '../Shared';
 
 interface Props {
   config: StatusLineConfig;
@@ -163,15 +163,15 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
 
   // Header chips ───────────────────────────────────────────────────────────
   const runtimeBadge = detect.runtime
-    ? <span className='inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-info text-xs font-medium'>{RUNTIME_LABEL[detect.runtime]} ✓</span>
-    : <span className='inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-warn text-xs font-medium'>No runtime — install Node</span>;
+    ? <Badge tone='info' variant='pill' size='md' weight='medium'>{RUNTIME_LABEL[detect.runtime]} ✓</Badge>
+    : <Badge tone='warn' variant='pill' size='md' weight='medium'>No runtime — install Node</Badge>;
 
   const stateBadge =
     detect.state === 'ours'
-      ? <span className='px-2.5 py-0.5 rounded-full bg-green-500/15 border border-green-500/30 text-green-400 text-xs font-medium'>Installed</span>
+      ? <Badge tone='ok' variant='pill' size='md' weight='medium'>Installed</Badge>
       : detect.state === 'foreign'
-        ? <span className='px-2.5 py-0.5 rounded-full bg-control/60 border border-edge-strong/50 text-body text-xs font-medium'>Another status line set</span>
-        : <span className='px-2.5 py-0.5 rounded-full bg-control/60 border border-edge-strong/50 text-muted text-xs font-medium'>Not installed</span>;
+        ? <Badge tone='neutral' variant='pill' size='md' weight='medium'>Another status line set</Badge>
+        : <Badge tone='neutral' variant='pill' size='md' weight='medium'>Not installed</Badge>;
 
   return (
     <section className='mt-6 glass-primary p-6'>
@@ -311,14 +311,18 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
 
                           {/* Icon / emoji prefix */}
                           <Tooltip content='Optional emoji or glyph shown before this segment'>
-                            <input
+                            <Input
+                              size='sm'
+                              // A hair wider than the old w-11: the shared size
+                              // tier's px-2 leaves less room for a 4-char glyph
+                              // than the bespoke px-1 did.
+                              className='w-12 text-center'
                               type='text'
                               value={seg.icon ?? ''}
                               placeholder={DEFAULT_SEGMENT_ICON[seg.type] || '—'}
                               maxLength={4}
                               onChange={(e) => patchSegment(li, si, { icon: e.target.value })}
                               aria-label={`Icon for ${SEGMENT_LABEL[seg.type]}`}
-                              className='w-11 text-center bg-glass/60 border border-edge/70 rounded-lg px-1 py-1 text-sm text-strong focus:outline-none focus:border-blue-500/60'
                             />
                           </Tooltip>
 
@@ -333,13 +337,14 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                             <>
                               <label className='flex items-center gap-1.5 text-xs text-muted'>
                                 Width
-                                <input
+                                <Input
+                                  size='xs'
+                                  className='w-16'
                                   type='number'
                                   min={4}
                                   max={40}
                                   value={seg.width ?? 20}
                                   onChange={(e) => patchSegment(li, si, { width: Math.max(4, Math.min(40, Number(e.target.value) || 20)) })}
-                                  className='w-16 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong focus:outline-none focus:border-blue-500/60'
                                 />
                               </label>
                               <label className='flex items-center gap-1.5 text-xs text-muted'>
@@ -369,22 +374,22 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
 
                           {/* Reorder (crosses line boundaries at the edges) */}
                           <div className='ml-auto flex items-center gap-1'>
-                            <button
+                            <IconButton
+                              shape='square'
                               onClick={() => moveSegmentUp(li, si)}
                               disabled={li === 0 && si === 0}
-                              className='w-7 h-7 rounded-md text-muted bg-control/50 hover:bg-control disabled:opacity-30 disabled:cursor-default cursor-pointer transition-colors flex items-center justify-center'
                               aria-label='Move up'
                             >
                               ↑
-                            </button>
-                            <button
+                            </IconButton>
+                            <IconButton
+                              shape='square'
                               onClick={() => moveSegmentDown(li, si)}
                               disabled={li === lastLine && si === row.segments.length - 1}
-                              className='w-7 h-7 rounded-md text-muted bg-control/50 hover:bg-control disabled:opacity-30 disabled:cursor-default cursor-pointer transition-colors flex items-center justify-center'
                               aria-label='Move down'
                             >
                               ↓
-                            </button>
+                            </IconButton>
                           </div>
                         </div>
                       ))
@@ -405,11 +410,12 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
             <div className='mt-4 flex flex-wrap items-center gap-3'>
               <label className='flex items-center gap-2 text-xs text-muted'>
                 Separator
-                <input
+                <Input
+                  size='xs'
+                  className='w-24 font-mono'
                   type='text'
                   value={config.separator}
                   onChange={(e) => onChange({ separator: e.target.value })}
-                  className='w-24 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong font-mono focus:outline-none focus:border-blue-500/60'
                 />
               </label>
               <Tooltip content='When a line has more than this many indicators, it wraps onto extra terminal rows. 0 = never wrap.'>
@@ -417,13 +423,14 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
                   className='flex items-center gap-2 text-xs text-muted'
                 >
                   Wrap after
-                  <input
+                  <Input
+                    size='xs'
+                    className='w-16'
                     type='number'
                     min={0}
                     max={20}
                     value={config.maxItemsPerLine ?? 0}
                     onChange={(e) => onChange({ maxItemsPerLine: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })}
-                    className='w-16 bg-glass/60 border border-edge/70 rounded-lg px-2 py-1 text-xs text-strong focus:outline-none focus:border-blue-500/60'
                   />
                   items
                 </label>

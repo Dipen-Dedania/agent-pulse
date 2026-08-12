@@ -1,7 +1,7 @@
 import React, { useId, useState } from 'react';
 import { motion } from 'framer-motion';
 import { UsageState } from '../../../../common/types';
-import { GlassToggle, Button, Badge, type BadgeTone } from '../../Shared';
+import { GlassToggle, Button, Badge, Input, Meter, type BadgeTone } from '../../Shared';
 import { smooth } from '../../../motion';
 
 // ── Shared usage-panel primitives ───────────────────────────────────────────
@@ -112,14 +112,11 @@ export const QuotaBar: React.FC<{
       {sub != null && <p className='text-xs text-muted mt-1'>{sub}</p>}
       {/* Reserve the bar's height even when hidden so the card doesn't reflow
           when the first snapshot arrives over IPC. */}
-      <div className='mt-2 h-1.5 rounded-full bg-control/40 overflow-hidden'>
-        {showBar && (
-          <div
-            className={`h-full rounded-full transition-all duration-500 motion-reduce:transition-none ${quotaFillClass(pct)}`}
-            style={{ width: `${pct}%` }}
-          />
-        )}
-      </div>
+      <Meter
+        className='mt-2'
+        value={showBar ? pct : 0}
+        fillClass={quotaFillClass(pct)}
+      />
     </div>
   );
 };
@@ -234,7 +231,7 @@ export const PollIntervalInput: React.FC<{
           Poll interval
         </span>
         <div className='flex items-center gap-2'>
-          <input
+          <Input
             type='number'
             min={minSec}
             max={maxSec}
@@ -245,7 +242,7 @@ export const PollIntervalInput: React.FC<{
               setCoerced(false);
             }}
             onBlur={commit}
-            className='w-24 glass-secondary rounded-lg px-3 py-1.5 text-sm text-strong tabular-nums focus:outline-none'
+            className='w-24 tabular-nums'
           />
           <span className='text-xs text-faint'>seconds (min {minSec})</span>
         </div>

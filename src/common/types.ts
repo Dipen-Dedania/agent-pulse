@@ -37,7 +37,21 @@ export type BubbleSoundId = 'pop' | 'chime' | 'ding' | 'marimba' | 'none';
 // busy/dark desktops (e.g. Cursor's black icon over a dark VS Code window).
 // 'particle' renders a rotating dotted "3D orb" (canvas point-cloud) around the
 // tool logo, with the formation/motion/colour driven by the agent state.
-export type BubbleFillMode = 'glass' | 'solid' | 'particle';
+// 'waveform' swaps the orb for an oscilloscope trace of the last ~20 seconds of
+// tool-call activity, drawn in a circular glass disc the same size as the orb
+// with the logo watermarked behind it (see WaveformTrace.tsx). Because the disc
+// matches the orb, no fill mode changes the window footprint. Mascots still win
+// over fill mode.
+export type BubbleFillMode = 'glass' | 'solid' | 'particle' | 'waveform';
+
+// How subscription quota is drawn on a bubble. 'bars' stacks one thin bar per
+// quota window in a strip below the orb (the original look, and the only one
+// that can show more than one window at a time). 'arc' rings the orb with a
+// single conic gauge for that tool's PRIMARY window and leaves the rest to the
+// tooltip, which lists every window either way. Mascot bubbles always use bars —
+// there's no orb for an arc to ring. See QuotaArc.tsx and ARC_DIMENSIONS in
+// bubble-manager (the arc window drops the bars strip and goes square).
+export type BubbleQuotaStyle = 'bars' | 'arc';
 
 // Durable identity for the chosen monitor. Electron display ids are NOT
 // stable across reboots (macOS regenerates CGDirectDisplayIDs), so the id
@@ -57,6 +71,7 @@ export interface BubbleConfig {
   sound: BubbleSoundId;
   fillMode: BubbleFillMode;
   fillColor: string;          // CSS color used when fillMode === 'solid' (e.g. '#ffffff')
+  quotaStyle: BubbleQuotaStyle; // bars under the orb vs an arc gauge around it. 'arc' shows one window per tool (the primary) and shrinks the window to a square, since the bars strip is no longer needed. Mascot bubbles ignore this and always render bars.
   hidden: boolean;            // master visibility switch — true hides every bubble window while leaving the bridge, hooks, pollers, and guardrails running
   mascotClaudeCode: boolean;  // when true, the Claude Code bubble swaps its orb for the animated Clawd mascot, whose pose tracks the agent state. Other tools are unaffected. The Claude bubble window grows to fit the mascot (see MASCOT_DIMENSIONS in bubble-manager).
   mascotOpenaiCodex: boolean; // when true, the OpenAI Codex bubble swaps its orb for the animated frog mascot, whose pose tracks the agent state. Other tools are unaffected. The Codex bubble window grows to fit the mascot (see MASCOT_DIMENSIONS_CODEX in bubble-manager).

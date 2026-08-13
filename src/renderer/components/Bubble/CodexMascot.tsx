@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import gsap from 'gsap';
 import { AgentState } from '../../../common/types';
+import { MascotRigSnapshot, resetMascotRig, snapshotMascotRig } from './mascotRig';
 
 // ── Codex frog mascot ─────────────────────────────────────────────────────────
 // An animated stand-in for the OpenAI Codex orb. Each AgentState drives a pose,
@@ -47,9 +48,17 @@ const LEGS = ['#leg-left', '#leg-right'];
 
 export const CodexMascot: React.FC<CodexMascotProps> = ({ state, width }) => {
   const rootRef = useRef<SVGSVGElement>(null);
+  // Authored transforms, captured on mount so every pose can start from them.
+  const rigRef = useRef<MascotRigSnapshot | null>(null);
 
   useEffect(() => {
     if (!rootRef.current) return;
+
+    // GSAP's revert() leaves SVG transform residue behind (see mascotRig.ts):
+    // without this the character drifts a few user units lower on every state
+    // change until it overlaps the usage bars.
+    if (!rigRef.current) rigRef.current = snapshotMascotRig(rootRef.current);
+    resetMascotRig(rigRef.current);
 
     const ctx = gsap.context(() => {
       // Shoulders the forelimbs rotate about, so each arm's root stays buried

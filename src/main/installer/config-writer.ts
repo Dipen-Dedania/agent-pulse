@@ -4,6 +4,12 @@ import os from 'os';
 import { execFileSync } from 'child_process';
 import { BRIDGE_URL } from '../bridge/config';
 import { ToolId, StatusLineConfig, StatusLineRuntime, StatusLineState } from '../../common/types';
+import {
+  OPENCODE_PLUGIN_FILENAME,
+  opencodeConfigDir,
+  opencodePluginDirs,
+  opencodePluginPath,
+} from './opencode-paths';
 
 export class ConfigWriter {
   private bridgeUrl = BRIDGE_URL;
@@ -24,6 +30,8 @@ export class ConfigWriter {
         return this.isAntigravityCliHookInstalled(projectPath);
       case 'grok':
         return this.isGrokHookInstalled();
+      case 'opencode':
+        return this.isOpencodeHookInstalled();
       default:
         return false;
     }
@@ -45,6 +53,8 @@ export class ConfigWriter {
         return this.writeAntigravityCliHook(projectPath);
       case 'grok':
         return this.writeGrokHook();
+      case 'opencode':
+        return this.writeOpencodeHook();
       default:
         throw new Error(`Hook installation for ${toolId} not yet implemented`);
     }
@@ -1050,7 +1060,293 @@ exit 0
 `;
   }
 
+  // ─── OpenCode ──────────────────────────────────────────────────────────────
+  // OpenCode has NO declarative shell-hook config. The `experimental.hook`
+  // block (file_edited / session_completed) documented in various third-party
+  // guides is absent from the live schema at opencode.ai/config.json and from
+  // the current source — do not build on it. The supported extension point is
+  // an in-process JS/TS plugin, so that is what we install.
+
+  private isOpencodeHookInstalled(): boolean {
+    // Accept either directory spelling; only OUR file counts as installed.
+    return opencodePluginDirs().some((dir) =>
+      fs.existsSync(path.join(dir, OPENCODE_PLUGIN_FILENAME)),
+    );
+  }
+
+  private writeOpencodeHook() {
+    const pluginPath = opencodePluginPath();
+    const pluginDir = path.dirname(pluginPath);
+    if (!fs.existsSync(pluginDir)) fs.mkdirSync(pluginDir, { recursive: true });
+
+    // Plain .js on purpose. A .ts plugin importing `@opencode-ai/plugin` for
+    // its types makes OpenCode shell out to Bun on next boot and install ~49MB
+    // of node_modules into the user's config dir — a very visible side effect
+    // for zero runtime benefit.
+    fs.writeFileSync(pluginPath, this.buildOpencodePlugin(), 'utf8');
+
+    return { success: true, path: pluginPath, configDir: opencodeConfigDir() };
+  }
+
+  /**
+   * The OpenCode plugin. Runs INSIDE OpenCode (Bun runtime), so unlike every
+   * other tool we support there is no shell script, no stdin parsing, and no
+   * transcript to tail — the event bus hands us typed state and real token
+   * counts directly.
+   *
+   * Verified event order for one turn on OpenCode 1.18.18:
+   *   session.created → session.updated → message.updated → message.part.updated
+   *   → session.status{busy} → [session.error] → session.status{idle} → session.idle
+   *
+   * Two consequences that shape the code below:
+   *  1. A FAILED turn still ends with status{idle} + session.idle, so status
+   *     alone can never surface an error — we latch the error and swallow the
+   *     idle that follows it.
+   *  2. Subagents get their own sessions, so status events interleave. We count
+   *     busy sessions instead of trusting the latest event.
+   */
+  private buildOpencodePlugin(): string {
+    // NOTE: no backticks / ${} inside the emitted source — this is a TS
+    // template literal, so the plugin body uses plain concatenation.
+    return `// Agent Pulse — OpenCode plugin (auto-generated; safe to delete)
+//
+// Reports agent state to the Agent Pulse bridge on localhost. Fire-and-forget:
+// every POST swallows its own errors so Agent Pulse being closed can never slow
+// down or break an OpenCode turn.
+//
+// Docs: https://opencode.ai/docs/plugins/
+
+const BRIDGE_URL = ${JSON.stringify(this.bridgeUrl)};
+
+// Cap the reported-message set so a very long-lived server can't grow it
+// without bound.
+const MAX_TRACKED_MESSAGES = 500;
+
+export const AgentPulse = async ({ directory, worktree }) => {
+  const cwd = worktree || directory || undefined;
+
+  // Sessions currently mid-turn. OpenCode gives subagents their own session ids
+  // and their status events interleave with the parent's, so "is anything
+  // working" is a COUNT, not the last event we saw.
+  const busySessions = new Set();
+
+  // Sessions that errored during the current turn. session.status{idle} and
+  // session.idle both still fire after a failure; without this latch the red
+  // error state would be overwritten by idle-active milliseconds later.
+  const erroredSessions = new Set();
+
+  // messageIDs whose tokens we've already reported. message.updated fires
+  // repeatedly while a message streams, and the token counts on it are
+  // per-message totals — counting every update would multiply usage.
+  const countedMessages = new Set();
+
+  let lastModel;
+
+  // On 1.18.18 a turn ends with BOTH session.status{idle} and session.idle, so
+  // acting on each would write duplicate timeline events. We prefer
+  // session.status and use session.idle only as a fallback for builds that
+  // don't emit status at all — feature-detected rather than version-sniffed.
+  let sawStatusEvent = false;
+
+  const post = (body) => {
+    try {
+      const p = fetch(BRIDGE_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {
+      // Agent Pulse not running / no fetch — stay silent.
+    }
+  };
+
+  const send = (state, extra) => {
+    const payload = {
+      cwd,
+      agentPid: typeof process !== 'undefined' ? process.pid : undefined,
+      activeAgents: busySessions.size,
+      model: lastModel,
+    };
+    const body = { toolId: 'opencode', state, payload };
+    if (extra) {
+      // Guardrail fields live at the TOP level: the bridge's extractCommand
+      // reads the raw body, while payload stays the typed NormalizedEvent shape.
+      if (extra.toolName) body.toolName = extra.toolName;
+      if (extra.command) body.command = extra.command;
+      if (extra.sessionId) payload.sessionId = extra.sessionId;
+      if (extra.taskSummary) payload.taskSummary = extra.taskSummary;
+      if (extra.errorMessage) payload.errorMessage = extra.errorMessage;
+      if (extra.tokens) payload.tokens = extra.tokens;
+    }
+    post(body);
+  };
+
+  // The state the session is ACTUALLY in right now, derived from the busy count
+  // rather than from whichever event happens to be in hand. Used by the token
+  // report, which must never change the visible state: if a completed assistant
+  // message arrives after the turn already went idle (or failed), reporting a
+  // hardcoded 'working' would resurrect a finished turn or paint over an error.
+  const impliedState = (sessionId) => {
+    if (busySessions.size > 0) return 'working';
+    if (erroredSessions.has(sessionId)) return 'error';
+    return 'idle-active';
+  };
+
+  // Emit the state implied by the current busy count. Called after every
+  // status transition so subagent churn resolves to one coherent state.
+  const syncState = (sessionId) => {
+    if (busySessions.size > 0) {
+      send('working', { sessionId });
+      return;
+    }
+    // Turn boundary. If this session just failed, leave the error standing.
+    if (erroredSessions.has(sessionId)) {
+      erroredSessions.delete(sessionId);
+      return;
+    }
+    send('idle-active', { sessionId });
+  };
+
+  return {
+    event: async ({ event }) => {
+      const type = event && event.type;
+      const props = (event && event.properties) || {};
+      const sessionId = props.sessionID;
+
+      switch (type) {
+        case 'session.status': {
+          sawStatusEvent = true;
+          const status = (props.status && props.status.type) || 'idle';
+          if (status === 'busy' || status === 'retry') {
+            // 'retry' means OpenCode is re-attempting after a provider error —
+            // still actively working, not finished.
+            if (sessionId) busySessions.add(sessionId);
+            send('working', { sessionId });
+          } else {
+            if (sessionId) busySessions.delete(sessionId);
+            syncState(sessionId);
+          }
+          break;
+        }
+
+        case 'session.updated': {
+          // Carries the model for the session; remember it so later state
+          // events can label the bubble even when no message is in flight.
+          const info = props.info || {};
+          if (info.model && info.model.id) lastModel = info.model.id;
+          break;
+        }
+
+        case 'session.error': {
+          if (sessionId) {
+            erroredSessions.add(sessionId);
+            busySessions.delete(sessionId);
+          }
+          const err = props.error || {};
+          const message =
+            (err.data && err.data.message) || err.name || 'OpenCode session error';
+          send('error', { sessionId, errorMessage: String(message) });
+          break;
+        }
+
+        case 'permission.asked': {
+          // Blocked on the user — this is Agent Pulse's 'waiting', distinct
+          // from a finished turn.
+          send('waiting', { sessionId });
+          break;
+        }
+
+        case 'permission.replied': {
+          if (sessionId) busySessions.add(sessionId);
+          send('working', { sessionId });
+          break;
+        }
+
+        case 'session.idle': {
+          // Fallback only — see sawStatusEvent above.
+          if (sawStatusEvent) break;
+          if (sessionId) busySessions.delete(sessionId);
+          syncState(sessionId);
+          break;
+        }
+
+        case 'session.deleted': {
+          if (sessionId) {
+            busySessions.delete(sessionId);
+            erroredSessions.delete(sessionId);
+          }
+          send('idle', { sessionId });
+          break;
+        }
+
+        case 'message.updated': {
+          // Real token counts, straight off the assistant message. Only read
+          // COMPLETED messages: a streaming message's counts are still moving.
+          const info = props.info || {};
+          if (info.role !== 'assistant') break;
+          if (!info.time || !info.time.completed) break;
+          if (!info.id || countedMessages.has(info.id)) break;
+
+          countedMessages.add(info.id);
+          if (countedMessages.size > MAX_TRACKED_MESSAGES) {
+            const oldest = countedMessages.values().next().value;
+            countedMessages.delete(oldest);
+          }
+
+          if (info.modelID) lastModel = info.modelID;
+          const t = info.tokens || {};
+          const cache = t.cache || {};
+          const msgSession = info.sessionID || sessionId;
+          send(impliedState(msgSession), {
+            sessionId: msgSession,
+            tokens: {
+              model: info.modelID || lastModel,
+              tokensIn: t.input || 0,
+              tokensOut: t.output || 0,
+              cacheRead: cache.read || 0,
+              cacheWrite: cache.write || 0,
+            },
+          });
+          break;
+        }
+
+        default:
+          break;
+      }
+    },
+
+    // Surfaces the running command so the bubble can show what the agent is
+    // doing, and lets the bridge's guardrails warn on dangerous shell calls.
+    'tool.execute.before': async (input, output) => {
+      const toolName = input && input.tool;
+      const args = (output && output.args) || {};
+      const command = typeof args.command === 'string' ? args.command : undefined;
+      const sessionId = input && input.sessionID;
+      if (sessionId) busySessions.add(sessionId);
+      send('working', {
+        sessionId,
+        toolName,
+        command,
+        taskSummary: toolName ? 'Tool: ' + toolName : undefined,
+      });
+    },
+  };
+};
+`;
+  }
+
   public uninstallHook(toolId: ToolId, projectPath?: string) {
+    if (toolId === 'opencode') {
+      // Delete only our plugin file — never the plugins dir itself, which may
+      // hold the user's own plugins.
+      for (const dir of opencodePluginDirs()) {
+        const file = path.join(dir, OPENCODE_PLUGIN_FILENAME);
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+      return { success: true };
+    }
+
     if (toolId === 'grok') {
       // Delete only our dedicated config + scripts — leaves any other Grok
       // hooks intact.

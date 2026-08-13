@@ -4,6 +4,7 @@ import os from 'os';
 import { execFileSync } from 'child_process';
 import { ToolId, StatusLineRuntime } from '../../common/types';
 import { resolveAugmentedPath } from '../shell-path';
+import { opencodeConfigDir, opencodeDataDirs } from './opencode-paths';
 
 export interface ToolDetection {
   installed: boolean;
@@ -28,6 +29,7 @@ export class ToolDetector {
       'kiro': this.detectKiro(),
       'antigravity-cli': this.detectAntigravityCli(),
       'grok': this.detectGrok(),
+      'opencode': this.detectOpencode(),
     };
   }
 
@@ -221,6 +223,26 @@ export class ToolDetector {
     if (existsSync(configDir)) return { installed: true, location: configDir };
 
     const cliPath = this.whichCommand('grok');
+    if (cliPath) return { installed: true, location: cliPath };
+    return { installed: false };
+  }
+
+  private detectOpencode(): ToolDetection {
+    // OpenCode keeps CONFIG under ~/.config/opencode and DATA under
+    // ~/.local/share/opencode — on every platform including Windows (verified
+    // on 1.18.18; it does not use %APPDATA%). OPENCODE_CONFIG may point the
+    // config dir elsewhere, so honour it first.
+    //
+    // Probe the data dir too: a user who has run OpenCode but never written a
+    // config file still has ~/.local/share/opencode/opencode.db. Checking only
+    // the config dir would read as "not installed" for them.
+    const configDir = opencodeConfigDir();
+    if (existsSync(configDir)) return { installed: true, location: configDir };
+
+    const dataDir = this.firstExisting(opencodeDataDirs());
+    if (dataDir) return { installed: true, location: dataDir };
+
+    const cliPath = this.whichCommand('opencode');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }

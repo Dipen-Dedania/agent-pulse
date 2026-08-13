@@ -65,6 +65,13 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     if (event.payload.sessionId && (event.payload.transcriptPath || event.toolId === 'openai-codex' || event.toolId === 'grok')) {
       transcriptReader.onTranscriptEvent(event.payload.transcriptPath, event.payload.sessionId, event.toolId);
     }
+    // Tools that report usage INLINE (OpenCode's plugin reads the completed
+    // assistant message from inside the process) skip the transcript path
+    // entirely — stage their delta here so the code below treats it identically
+    // to a parsed one. Already sanitized by the bridge.
+    if (event.payload.sessionId && event.payload.tokens) {
+      eventsWriter.stageTokenDelta(event.payload.sessionId, event.payload.tokens);
+    }
     // Take the staged delta (if any) to also feed the session rollup, then
     // re-stage it for the events-writer to consume. (Simpler than wiring two
     // paths through the writer.)

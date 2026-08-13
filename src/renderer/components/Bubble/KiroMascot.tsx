@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import gsap from 'gsap';
 import { AgentState } from '../../../common/types';
+import { MascotRigSnapshot, resetMascotRig, snapshotMascotRig } from './mascotRig';
 
 // ── Kiro ghost mascot ───────────────────────────────────────────────────────
 // An animated stand-in for the Kiro orb — the white ghost from the official
@@ -68,9 +69,17 @@ const EYE_PILL =
 
 export const KiroMascot: React.FC<KiroMascotProps> = ({ state, width }) => {
   const rootRef = useRef<SVGSVGElement>(null);
+  // Authored transforms, captured on mount so every pose can start from them.
+  const rigRef = useRef<MascotRigSnapshot | null>(null);
 
   useEffect(() => {
     if (!rootRef.current) return;
+
+    // GSAP's revert() leaves SVG transform residue behind (see mascotRig.ts):
+    // without this the character drifts a few user units lower on every state
+    // change until it overlaps the usage bars.
+    if (!rigRef.current) rigRef.current = snapshotMascotRig(rootRef.current);
+    resetMascotRig(rigRef.current);
 
     const ctx = gsap.context(() => {
       const show = (sel: string) => gsap.to(sel, { opacity: 1, duration: 0.4 });

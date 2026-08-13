@@ -82,4 +82,9 @@ export const BLOCKABLE_TOOLS: Record<ToolId, boolean> = {
   'cursor': false,
   'vscode-copilot': false,
   'kiro': false,
+  // OpenCode DOES expose a synchronous deny path (the `permission.ask` hook
+  // takes output.status = "deny", and throwing from `tool.execute.before`
+  // aborts the call), but our plugin currently fires and forgets so a slow
+  // bridge can never stall a turn. Warn-only until that round-trip is wired.
+  'opencode': false,
 };

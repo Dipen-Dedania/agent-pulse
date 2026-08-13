@@ -701,6 +701,110 @@ describe('ConfigWriter — grok', () => {
   });
 });
 
+// ── OpenCode ──────────────────────────────────────────────────────────────────
+// OpenCode has no shell-hook config; we install a JS plugin instead. Paths are
+// ~/.config/opencode on every platform (verified on 1.18.18) — Windows does NOT
+// use %APPDATA% here.
+
+describe('ConfigWriter — opencode', () => {
+  // XDG_CONFIG_HOME would redirect the config dir if it happened to be set in
+  // the test environment; pin it off so these assertions are deterministic.
+  let savedXdg: string | undefined;
+  beforeEach(() => {
+    savedXdg = process.env['XDG_CONFIG_HOME'];
+    delete process.env['XDG_CONFIG_HOME'];
+  });
+  afterEach(() => {
+    if (savedXdg !== undefined) process.env['XDG_CONFIG_HOME'] = savedXdg;
+  });
+
+  const pluginPath = () => path.join(tmpDir, '.config', 'opencode', 'plugins', 'agent-pulse.js');
+
+  it('writes the plugin to ~/.config/opencode/plugins/agent-pulse.js', async () => {
+    await withFakeHome(async (writer) => {
+      expect(writer.isHookInstalled('opencode')).toBe(false);
+
+      const result: any = await writer.installHook('opencode');
+      expect(result.success).toBe(true);
+      expect(result.path).toBe(pluginPath());
+      expect(fs.existsSync(pluginPath())).toBe(true);
+      expect(writer.isHookInstalled('opencode')).toBe(true);
+    });
+  });
+
+  it('creates the plugins directory when it does not exist', async () => {
+    await withFakeHome(async (writer) => {
+      expect(fs.existsSync(path.join(tmpDir, '.config'))).toBe(false);
+      await writer.installHook('opencode');
+      expect(fs.existsSync(pluginPath())).toBe(true);
+    });
+  });
+
+  it('emits a dependency-free ESM plugin pointed at the bridge', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('opencode');
+      const src = fs.readFileSync(pluginPath(), 'utf8');
+
+      expect(src).toContain('export const AgentPulse');
+      expect(src).toContain('localhost:4242');
+      // No imports at all: a `@opencode-ai/plugin` import would make OpenCode
+      // install ~49MB of node_modules into the user's config dir on next boot.
+      expect(src).not.toMatch(/^\s*import\s/m);
+      expect(src).not.toContain('require(');
+      // The three signals the bubble depends on.
+      expect(src).toContain('session.status');
+      expect(src).toContain('session.error');
+      expect(src).toContain('permission.asked');
+    });
+  });
+
+  it('is idempotent — reinstalling overwrites in place', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('opencode');
+      const first = fs.readFileSync(pluginPath(), 'utf8');
+      await writer.installHook('opencode');
+      expect(fs.readFileSync(pluginPath(), 'utf8')).toBe(first);
+      expect(fs.readdirSync(path.dirname(pluginPath()))).toEqual(['agent-pulse.js']);
+    });
+  });
+
+  it('detects a plugin installed under the legacy singular plugin/ dir', async () => {
+    await withFakeHome(async (writer) => {
+      const legacy = path.join(tmpDir, '.config', 'opencode', 'plugin');
+      fs.mkdirSync(legacy, { recursive: true });
+      fs.writeFileSync(path.join(legacy, 'agent-pulse.js'), '// placeholder');
+      expect(writer.isHookInstalled('opencode')).toBe(true);
+    });
+  });
+
+  it('uninstall removes our plugin from both dir spellings and leaves others alone', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('opencode');
+      const pluginsDir = path.dirname(pluginPath());
+      fs.writeFileSync(path.join(pluginsDir, 'someone-elses.js'), '// keep me');
+
+      const legacy = path.join(tmpDir, '.config', 'opencode', 'plugin');
+      fs.mkdirSync(legacy, { recursive: true });
+      fs.writeFileSync(path.join(legacy, 'agent-pulse.js'), '// stale copy');
+
+      writer.uninstallHook('opencode');
+
+      expect(fs.existsSync(pluginPath())).toBe(false);
+      expect(fs.existsSync(path.join(legacy, 'agent-pulse.js'))).toBe(false);
+      // The user's own plugin and the directory itself survive.
+      expect(fs.existsSync(path.join(pluginsDir, 'someone-elses.js'))).toBe(true);
+      expect(fs.existsSync(pluginsDir)).toBe(true);
+      expect(writer.isHookInstalled('opencode')).toBe(false);
+    });
+  });
+
+  it('uninstall is safe when nothing is installed', async () => {
+    await withFakeHome(async (writer) => {
+      expect(writer.uninstallHook('opencode')).toEqual({ success: true });
+    });
+  });
+});
+
 // ── Unknown tool throws ───────────────────────────────────────────────────────
 
 describe('ConfigWriter — unknown tool', () => {

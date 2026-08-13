@@ -1,7 +1,7 @@
 import http from 'http';
 import { StatusStateManager } from './state-manager';
 import { BRIDGE_PORT } from './config';
-import { ToolId, AgentState } from '../../common/types';
+import { ToolId, AgentState, NormalizedEvent } from '../../common/types';
 import { GuardrailConfig, GuardrailEvent, GuardrailEvaluation } from '../../common/guardrails';
 import {
   SecretProtectionConfig,
@@ -132,7 +132,7 @@ const GROK_ERROR_EVENTS = new Set([
 ]);
 const GROK_NOTIFICATION_WAITING_TYPES = new Set(['permission', 'permission_prompt', 'permission_request']);
 
-const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'antigravity-cli', 'grok'];
+const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'antigravity-cli', 'grok', 'opencode'];
 const VALID_STATES: AgentState[] = ['working', 'waiting', 'idle', 'idle-active', 'error'];
 
 export class StatusBridgeServer {
@@ -601,12 +601,54 @@ function extractCommonFields(data: any): {
   return { cwd, agentPid, agentPidChain, transcriptPath };
 }
 
+// Coerces a hook-supplied inline token delta into the shape the timeline
+// stages. Counts must be finite, non-negative and integral; anything else is
+// dropped. Returns null when nothing usable survives, so callers can omit the
+// field entirely rather than write a row of zeroes.
+const MAX_INLINE_TOKENS = 100_000_000; // absurd-value guard, ~100x any real turn
+
+export function sanitizeInlineTokens(raw: any): NormalizedEvent['payload']['tokens'] | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const count = (v: unknown): number | undefined => {
+    const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+    if (!Number.isFinite(n) || n < 0 || n > MAX_INLINE_TOKENS) return undefined;
+    return Math.floor(n);
+  };
+  const out: NonNullable<NormalizedEvent['payload']['tokens']> = {
+    tokensIn:   count(raw.tokensIn),
+    tokensOut:  count(raw.tokensOut),
+    cacheRead:  count(raw.cacheRead),
+    cacheWrite: count(raw.cacheWrite),
+  };
+  if (typeof raw.model === 'string' && raw.model.length > 0) {
+    out.model = raw.model.slice(0, 200);
+  }
+  const hasCount =
+    out.tokensIn !== undefined || out.tokensOut !== undefined ||
+    out.cacheRead !== undefined || out.cacheWrite !== undefined;
+  if (!hasCount) return null;
+  // Zero-only deltas carry no information and would still create a usage row.
+  const total = (out.tokensIn ?? 0) + (out.tokensOut ?? 0) + (out.cacheRead ?? 0) + (out.cacheWrite ?? 0);
+  if (total === 0) return null;
+  return out;
+}
+
 // Exported for unit testing
 export function normalizePayload(data: any): { toolId: ToolId; state: AgentState; payload: any } | null {
-    // Format 1 — explicit toolId + state
+    // Format 1 — explicit toolId + state. Used by tools that can normalize on
+    // their own side (OpenCode's in-process plugin) and by manual/test posts.
     if (data.toolId && data.state) {
       if (VALID_TOOLS.includes(data.toolId) && VALID_STATES.includes(data.state)) {
-        return { toolId: data.toolId, state: data.state, payload: data.payload ?? {} };
+        const payload = { ...(data.payload ?? {}) };
+        // `tokens` reaches the timeline DB, so coerce it rather than trusting
+        // whatever arrived on the socket. Dropping it entirely is the safe
+        // direction — a missing delta just means "no usage recorded".
+        if (payload.tokens !== undefined) {
+          const tokens = sanitizeInlineTokens(payload.tokens);
+          if (tokens) payload.tokens = tokens;
+          else delete payload.tokens;
+        }
+        return { toolId: data.toolId, state: data.state, payload };
       }
       return null;
     }

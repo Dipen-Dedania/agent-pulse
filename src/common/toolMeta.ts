@@ -203,6 +203,42 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
       ],
     },
   },
+  'opencode': {
+    label: 'OpenCode',
+    badges: ['CLI', 'TUI'],
+    // NOTE: placeholder artwork — the shipped opencode-logo-*.png files are flat
+    // colour bands with no mark in them. Swap in the real logo when available.
+    icon: './assets/opencode-logo-dark.png',
+    hookInfo: {
+      mechanism: 'Plugin',
+      configFile: '~/.config/opencode/plugins/agent-pulse.js',
+      description:
+        'OpenCode has no shell-hook config — it extends through in-process JavaScript plugins. ' +
+        'Agent Pulse writes a single dependency-free plugin to ~/.config/opencode/plugins/agent-pulse.js. ' +
+        'It subscribes to OpenCode\'s event bus and POSTs already-normalized state to the bridge: ' +
+        'session.status drives Working/Idle, permission.asked drives Waiting, and session.error drives Error. ' +
+        'Because the plugin runs inside OpenCode, it also reads real per-turn token counts and the model id ' +
+        'straight off each completed assistant message — no transcript parsing.',
+      snippet: [
+        '// ~/.config/opencode/plugins/agent-pulse.js  (written for you)',
+        'export const AgentPulse = async ({ directory, worktree }) => ({',
+        '  event: async ({ event }) => {',
+        '    // session.status  → working / idle-active',
+        '    // permission.asked → waiting',
+        '    // session.error    → error',
+        '    // message.updated  → real token counts + model id',
+        '  },',
+        '})',
+      ].join('\n'),
+      troubleshooting: [
+        'Start a new OpenCode session — plugins are loaded when OpenCode boots, not per prompt.',
+        'Confirm ~/.config/opencode/plugins/agent-pulse.js exists (this path is the same on Windows — OpenCode does NOT use %APPDATA%).',
+        'Check ~/.local/share/opencode/log/opencode.log for plugin load errors.',
+        'If you set OPENCODE_CONFIG to a custom config dir, the plugin belongs under that dir\'s plugins/ folder instead.',
+        ...COMMON_TROUBLESHOOTING,
+      ],
+    },
+  },
   'openai-codex': {
     label: 'OpenAI Codex',
     icon: './assets/codex.png',

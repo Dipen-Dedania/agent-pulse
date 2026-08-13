@@ -115,6 +115,8 @@ const TOOL_APP_NAME: Record<ToolId, { mac: string | null; linux: string | null }
   'kiro':           { mac: 'Kiro',                linux: 'kiro' },
   // Grok is a CLI/TUI — terminal-only, nothing to activate/launch by app name.
   'grok':           { mac: null,                  linux: null },
+  // OpenCode is a CLI/TUI — terminal-only, same as Grok and Claude Code.
+  'opencode':       { mac: null,                  linux: null },
 };
 
 // Last-resort click target: the tool's product page. Used only after every
@@ -129,6 +131,7 @@ const TOOL_WEB_URLS: Record<ToolId, string> = {
   'kiro':            'https://kiro.dev',
   'antigravity-cli': 'https://antigravity.google',
   'grok':            'https://grok.com',
+  'opencode':        'https://opencode.ai',
 };
 
 // ─── Windows ─────────────────────────────────────────────────────────────────
@@ -159,6 +162,9 @@ const TOOL_CLI_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
   'openai-codex':   ['codex'],
   'antigravity-cli':['agy'],
   'grok':           ['grok'],
+  // OpenCode's TUI runs as `opencode`; it hosts its own server in-process, so
+  // the one process name covers both surfaces.
+  'opencode':       ['opencode'],
 };
 
 // URI schemes registered by GUI editors (HKCR on Windows, LaunchServices on

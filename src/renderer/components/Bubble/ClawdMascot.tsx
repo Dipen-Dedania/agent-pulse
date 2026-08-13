@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import gsap from 'gsap';
 import { AgentState } from '../../../common/types';
+import { MascotRigSnapshot, resetMascotRig, snapshotMascotRig } from './mascotRig';
 
 // ── Clawd mascot ────────────────────────────────────────────────────────────
 // An animated stand-in for the Claude Code orb. Each AgentState drives a pose,
@@ -50,9 +51,17 @@ const DUMBBELLS = ['#left-dumbbell', '#right-dumbbell'];
 
 export const ClawdMascot: React.FC<ClawdMascotProps> = ({ state, width }) => {
   const rootRef = useRef<SVGSVGElement>(null);
+  // Authored transforms, captured on mount so every pose can start from them.
+  const rigRef = useRef<MascotRigSnapshot | null>(null);
 
   useEffect(() => {
     if (!rootRef.current) return;
+
+    // GSAP's revert() leaves SVG transform residue behind (see mascotRig.ts):
+    // without this the character drifts a few user units lower on every state
+    // change until it overlaps the usage bars.
+    if (!rigRef.current) rigRef.current = snapshotMascotRig(rootRef.current);
+    resetMascotRig(rigRef.current);
 
     const ctx = gsap.context(() => {
       // Squash legs about their FOOT (planted) vs their TOP (so the foot lifts

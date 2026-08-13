@@ -70,6 +70,15 @@ export function extractCommand(toolId: ToolId, data: any): string | null {
       ]);
     }
 
+    case 'opencode': {
+      // OpenCode reaches us through our own in-process plugin, which posts the
+      // bridge's Format 1 envelope ({ toolId, state, payload }) and lifts the
+      // guardrail fields to the TOP level so `payload` stays the typed
+      // NormalizedEvent shape. OpenCode's shell tool is named `bash`.
+      if (!isShellTool(data.toolName ?? data.tool_name)) return null;
+      return pickString(data, ['command', 'payload.command', 'toolInput.command']);
+    }
+
     case 'cursor': {
       // Cursor's hook payload (camelCase events) — empirically the bash tool
       // is sent as `tool_name: 'Terminal'` / 'run_terminal_cmd' / similar with

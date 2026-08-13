@@ -1,4 +1,4 @@
-export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'antigravity-cli' | 'grok';
+export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'antigravity-cli' | 'grok' | 'opencode';
 export type AgentState = 'working' | 'waiting' | 'idle' | 'idle-active' | 'error';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
@@ -164,6 +164,20 @@ export interface NormalizedEvent {
     agentPidChain?: number[];
     transcriptPath?: string;
     model?: string;
+    // Token counts reported INLINE by the tool itself, already scoped to this
+    // event (a per-turn delta, never a running total). Only tools that hand us
+    // real numbers at hook time populate this — OpenCode's plugin reads them
+    // off the completed assistant message, so there is no transcript to parse
+    // and no rollout file to tail. Everything else leaves this undefined and
+    // goes through TranscriptReader instead. The timeline stages this straight
+    // into a TokenDelta (see main/timeline/index.ts).
+    tokens?: {
+      model?: string;
+      tokensIn?: number;
+      tokensOut?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+    };
   };
 }
 

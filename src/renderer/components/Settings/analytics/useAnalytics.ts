@@ -20,6 +20,10 @@ import {
   WindowValuePayload,
   AnalyticsSummaryPayload,
   TimelineRange,
+  CadencePayload,
+  WaitingPayload,
+  CacheEfficiencyPayload,
+  LifecyclePayload,
 } from '../../../../common/timeline-types';
 import { BacklogStatsPayload } from '../../../../common/backlog-types';
 
@@ -159,6 +163,22 @@ export function useGuardrailsAnalytics(range: GuardrailsAnalyticsRange) {
 
 export function useSecretAccessAnalytics(range: GuardrailsAnalyticsRange) {
   return useAnalyticsQuery<SecretAccessAnalyticsPayload>('analytics:get-secret-access', { range }, range);
+}
+
+export function useCadence(range: TimelineRange) {
+  return useAnalyticsQuery<CadencePayload>('analytics:get-cadence', { range }, range);
+}
+
+export function useWaiting(range: TimelineRange) {
+  return useAnalyticsQuery<WaitingPayload>('analytics:get-waiting', { range }, range);
+}
+
+export function useCacheEfficiency(range: TimelineRange) {
+  return useAnalyticsQuery<CacheEfficiencyPayload>('analytics:get-cache-efficiency', { range }, range);
+}
+
+export function useLifecycle(range: TimelineRange) {
+  return useAnalyticsQuery<LifecyclePayload>('analytics:get-lifecycle', { range }, range);
 }
 
 // Overnight Backlog — served from the backlog DB via backlog:get-stats (not the

@@ -37,7 +37,8 @@ exported from its barrel — import them as `from '../Shared'` (see `Shared/READ
 - `Card` — titled glass section panels.
 - `Segmented` — compact mode switches.
 
-Glass surfaces use the `.glass-primary` / `.glass-secondary` / `.glass-modal` utility
+Glass surfaces use the `.glass-control` (small controls) / `.glass-primary` /
+`.glass-secondary` / `.glass-modal` utility
 classes (in `index.css`) — do **not** copy-paste `bg-glass/… backdrop-blur-md …
 rounded-2xl` shells. `npm run lint:ui` enforces these rules and runs as part of `npm test`.
 

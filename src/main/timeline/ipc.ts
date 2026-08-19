@@ -10,6 +10,10 @@ import {
   ProjectBreakdownRange,
   TokensTimelineRange,
   GuardrailsAnalyticsRange,
+  CadenceRange,
+  WaitingRange,
+  CacheEfficiencyRange,
+  LifecycleRange,
 } from '../../common/timeline-types';
 import { logger } from '../../common/logger';
 
@@ -101,6 +105,30 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     try { return queries.getSecretAccess(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-secret-access:', e); return null; }
   });
+
+  ipcMain.handle('analytics:get-cadence', (_e, args: { range: CadenceRange }) => {
+    if (!queries) return null;
+    try { return queries.getCadence(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-cadence:', e); return null; }
+  });
+
+  ipcMain.handle('analytics:get-waiting', (_e, args: { range: WaitingRange }) => {
+    if (!queries) return null;
+    try { return queries.getWaiting(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-waiting:', e); return null; }
+  });
+
+  ipcMain.handle('analytics:get-cache-efficiency', (_e, args: { range: CacheEfficiencyRange }) => {
+    if (!queries) return null;
+    try { return queries.getCacheEfficiency(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-cache-efficiency:', e); return null; }
+  });
+
+  ipcMain.handle('analytics:get-lifecycle', (_e, args: { range: LifecycleRange }) => {
+    if (!queries) return null;
+    try { return queries.getLifecycle(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-lifecycle:', e); return null; }
+  });
 }
 
 /** Called by bootTimeline when the timeline cannot start. */
@@ -122,6 +150,10 @@ export function unregisterTimelineIpc() {
     'analytics:get-tokens-timeline',
     'analytics:get-guardrails',
     'analytics:get-secret-access',
+    'analytics:get-cadence',
+    'analytics:get-waiting',
+    'analytics:get-cache-efficiency',
+    'analytics:get-lifecycle',
   ]) {
     ipcMain.removeHandler(channel);
   }

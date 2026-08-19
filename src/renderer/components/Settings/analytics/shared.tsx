@@ -18,6 +18,32 @@ export function formatCompactNumber(n: number): string {
   return (n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0) + 'M';
 }
 
+// Sub-minute-aware duration, for think-time gaps (e.g. 78_000 → "1m 18s").
+export function formatShortDuration(ms: number): string {
+  if (!ms || ms < 0) return '0s';
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m < 60) return s === 0 ? `${m}m` : `${m}m ${s}s`;
+  return formatDuration(ms);
+}
+
+// Day-aware span, for conversation lifespans that can stretch across days.
+export function formatSpan(ms: number): string {
+  if (!ms || ms < 0) return '0m';
+  const totalMin = Math.round(ms / 60_000);
+  if (totalMin < 60) return `${totalMin}m`;
+  const totalHours = Math.floor(totalMin / 60);
+  if (totalHours < 24) {
+    const m = totalMin % 60;
+    return m === 0 ? `${totalHours}h` : `${totalHours}h ${m}m`;
+  }
+  const d = Math.floor(totalHours / 24);
+  const h = totalHours % 24;
+  return h === 0 ? `${d}d` : `${d}d ${h}h`;
+}
+
 // Card and Segmented are app-wide primitives — their definitions now live in
 // components/Shared. Re-exported here so the analytics cards can keep importing
 // them from './shared' alongside the chart-only helpers below.

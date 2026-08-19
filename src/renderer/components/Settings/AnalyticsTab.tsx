@@ -13,6 +13,10 @@ import { ProjectBreakdownCard } from './analytics/ProjectBreakdownCard';
 import { TokensTimelineCard } from './analytics/TokensTimelineCard';
 import { GuardrailsCard } from './analytics/GuardrailsCard';
 import { SecretProtectionCard } from './analytics/SecretProtectionCard';
+import { CadenceCard } from './analytics/CadenceCard';
+import { WaitingCard } from './analytics/WaitingCard';
+import { CacheEfficiencyCard } from './analytics/CacheEfficiencyCard';
+import { LifecycleCard } from './analytics/LifecycleCard';
 import { SummaryHeroCard } from './analytics/SummaryHeroCard';
 import { Card, Segmented } from './analytics/shared';
 import { refreshAnalytics, useAnalyticsFreshness } from './analytics/useAnalytics';
@@ -190,6 +194,12 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
           <ToolMixCard />
         </div>
         <ModelUsageCard />
+        <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
+          <CadenceCard />
+          <WaitingCard />
+        </div>
+        <CacheEfficiencyCard />
+        <LifecycleCard />
         <ProjectBreakdownCard />
         <GuardrailsCard />
         <SecretProtectionCard />

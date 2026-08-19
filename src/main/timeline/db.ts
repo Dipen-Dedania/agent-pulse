@@ -227,24 +227,23 @@ export interface TimelineDb {
 let cached: TimelineDb | null = null;
 let initFailed = false;
 
-export function initTimelineDb(): TimelineDb | null {
-  if (cached) return cached;
-  if (initFailed) return null;
-
+/**
+ * Open (and migrate) a Timeline DB at an explicit path. Returns null when
+ * better-sqlite3 can't load or the DB can't be opened/migrated. Does NOT cache —
+ * the caller owns the returned handle's lifecycle. `initTimelineDb` wraps this
+ * for the app singleton; tests call it directly with ':memory:'.
+ */
+export function openTimelineDb(dbPath: string): TimelineDb | null {
   let Database: DatabaseConstructor;
   try {
     Database = require('better-sqlite3') as DatabaseConstructor;
   } catch (e: any) {
-    initFailed = true;
     logger.warn(
       '[Timeline] better-sqlite3 not loadable — Pulse Timeline disabled. ' +
       `Run \`npm run rebuild:native\` to rebuild it for Electron. (${e?.message ?? e})`,
     );
     return null;
   }
-
-  const dbPath = path.join(app.getPath('userData'), 'pulse-timeline.db');
-  logger.info(`[Timeline] opening database at ${dbPath}`);
 
   let db: Database;
   try {
@@ -265,7 +264,6 @@ export function initTimelineDb(): TimelineDb | null {
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }
   } catch (e: any) {
-    initFailed = true;
     logger.error('[Timeline] failed to open or migrate DB:', e?.message ?? e);
     return null;
   }
@@ -342,7 +340,7 @@ export function initTimelineDb(): TimelineDb | null {
     return out;
   };
 
-  cached = {
+  return {
     insertEvent: (row) => {
       try { insertEventStmt.run(normalize(row)); }
       catch (e: any) { logger.warn('[Timeline] insertEvent failed:', e?.message ?? e); }
@@ -403,11 +401,24 @@ export function initTimelineDb(): TimelineDb | null {
     },
     close: () => {
       try { db.close(); } catch { /* ignore */ }
-      cached = null;
     },
     raw: db,
   };
+}
 
+export function initTimelineDb(): TimelineDb | null {
+  if (cached) return cached;
+  if (initFailed) return null;
+
+  const dbPath = path.join(app.getPath('userData'), 'pulse-timeline.db');
+  logger.info(`[Timeline] opening database at ${dbPath}`);
+
+  const db = openTimelineDb(dbPath);
+  if (!db) {
+    initFailed = true;
+    return null;
+  }
+  cached = db;
   return cached;
 }
 

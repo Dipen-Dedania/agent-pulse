@@ -256,3 +256,89 @@ export interface WindowValuePayload {
   projected5hUsd: number;         // burnRate × 5, "if the current pace holds"
   queriedAt: number;
 }
+
+// ─── Native-session analytics ────────────────────────────────────────────────
+// These read the raw `events` table grouped by the agent-native `session_id`,
+// unlocking intra- and cross-session stats the idle-gap-derived `sessions`
+// rollup can't express. All four reuse TimelineRange.
+
+export type CadenceRange = TimelineRange;
+export type WaitingRange = TimelineRange;
+export type CacheEfficiencyRange = TimelineRange;
+export type LifecycleRange = TimelineRange;
+
+// Cadence — intra-session rhythm: how long between prompts, how deep sessions go.
+export interface CadenceRow {
+  toolId: ToolId;
+  medianThinkMs: number;         // median gap between prompts, capped at THINK_CAP_MS
+  avgPromptsPerSession: number;
+  sessions: number;
+}
+
+export type CadenceDepthLabel = '1' | '2-3' | '4-9' | '10+';
+
+export interface CadenceDepthBucket {
+  bucket: CadenceDepthLabel;
+  count: number;                 // number of native sessions in this depth band
+}
+
+export interface CadencePayload {
+  range: CadenceRange;
+  rows: CadenceRow[];
+  depth: CadenceDepthBucket[];
+  overallMedianThinkMs: number;
+  overallAvgPromptsPerSession: number;
+  thinkSampleCount: number;      // gaps that fed the think-time stat (post-cap)
+  queriedAt: number;
+}
+
+// Waiting — time an agent sat blocked on the user (permission/elicitation).
+export interface WaitingRow {
+  toolId: ToolId;
+  waitMs: number;
+  episodes: number;              // ≈ number of permission prompts
+  avgWaitMs: number;
+  pctOfActive: number;           // waitMs as % of the tool's engaged (work+wait+error) time
+  hasData: boolean;              // false → this agent never emits a blocked state
+}
+
+export interface WaitingPayload {
+  range: WaitingRange;
+  rows: WaitingRow[];
+  totalWaitMs: number;
+  totalEpisodes: number;
+  queriedAt: number;
+}
+
+// Cache efficiency — how much input was served from cache, and $ saved.
+export interface CacheEfficiencyRow {
+  toolId: ToolId;
+  hitRatio: number;              // cachedTokens / (cachedTokens + freshTokens), 0..1
+  freshTokens: number;           // input tokens billed fresh
+  cachedTokens: number;          // input tokens served from cache (cache_read)
+  savedUsd: number;              // estimated $ saved vs paying full input rate
+  priced: boolean;               // false → none of the tool's models were priced
+  hasData: boolean;              // false → tool exposes no cache/token data
+}
+
+export interface CacheEfficiencyPayload {
+  range: CacheEfficiencyRange;
+  rows: CacheEfficiencyRow[];
+  overallHitRatio: number;
+  totalSavedUsd: number;
+  queriedAt: number;
+}
+
+// Lifecycle — conversation-level: resumes and calendar-span vs active time.
+export interface LifecyclePayload {
+  range: LifecycleRange;
+  totalSessions: number;
+  resumedSessions: number;
+  resumeRatePct: number;
+  avgResumesPerSession: number;
+  medianResumeIntervalMs: number;
+  avgSpanMs: number;             // avg conversation calendar-span (first→last event)
+  avgActiveMs: number;           // avg active time per native session (from rollup)
+  densityPct: number;            // avgActiveMs / avgSpanMs, "engagement density"
+  queriedAt: number;
+}

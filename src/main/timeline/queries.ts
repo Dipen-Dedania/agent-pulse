@@ -35,6 +35,19 @@ import {
   WindowValueSlice,
   AnalyticsSummaryPayload,
   SummarySlice,
+  CadencePayload,
+  CadenceRange,
+  CadenceRow,
+  CadenceDepthLabel,
+  CadenceDepthBucket,
+  WaitingPayload,
+  WaitingRange,
+  WaitingRow,
+  CacheEfficiencyPayload,
+  CacheEfficiencyRange,
+  CacheEfficiencyRow,
+  LifecyclePayload,
+  LifecycleRange,
 } from '../../common/timeline-types';
 import { estimateCost, estimateCostBreakdown, rateForModel, CostBreakdown, TokenCounts } from '../../common/pricing';
 
@@ -64,6 +77,20 @@ function rangeDays(range: TimelineRange): number {
 
 function rangeMs(range: TimelineRange): number {
   return rangeDays(range) * DAY_MS;
+}
+
+// Native-session analytics thresholds (fixed constants — see plan). THINK_CAP_MS
+// matches the default idle gap: gaps at/above it are breaks/resumes, not think
+// time. RESUME_GAP_MS is the intra-session gap that counts as a resume.
+const THINK_CAP_MS = 5 * 60 * 1000;
+const WAIT_SPAN_CAP_MS = 30 * 60 * 1000;
+const RESUME_GAP_MS = 60 * 60 * 1000;
+
+// Median of an already-ascending-sorted array. Returns 0 for an empty array.
+function median(sorted: number[]): number {
+  if (sorted.length === 0) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 interface SessionAggregateRow {
@@ -430,6 +457,276 @@ export class TimelineQueries {
     );
 
     return { range, mode, rows, totalTokens, totalSessions, totalCostUsd, queriedAt: now };
+  }
+
+  // ─── Native-session analytics (grouped by agent-native session_id) ──────────
+  // Unlike the cards above (which read the `sessions` rollup), these read the
+  // raw `events` table grouped by session_id, using SQLite window functions to
+  // detect per-session transitions. JS does the median/bucketing/pricing.
+
+  // Session Cadence — think-time between prompts + prompts-per-session depth.
+  getCadence(range: CadenceRange): CadencePayload {
+    const now = Date.now();
+    const startMs = now - rangeMs(range);
+
+    // A prompt/turn start = an event entering 'working' from a non-working prev
+    // state, within one native session. LAG detects the transition.
+    const rows = this.db.query<{ tool_id: string; session_id: string; timestamp: number }>(
+      `WITH ev AS (
+         SELECT tool_id, session_id, state, timestamp,
+                LAG(state) OVER (PARTITION BY session_id ORDER BY timestamp) AS prev_state
+         FROM events
+         WHERE timestamp >= ? AND session_id IS NOT NULL
+       )
+       SELECT tool_id, session_id, timestamp
+       FROM ev
+       WHERE state = 'working' AND (prev_state IS NULL OR prev_state <> 'working')
+       ORDER BY session_id, timestamp`,
+      [startMs],
+    );
+
+    // Group turn-starts per native session, preserving timestamp order.
+    const bySession = new Map<string, { toolId: string; ts: number[] }>();
+    for (const r of rows) {
+      const s = bySession.get(r.session_id) ?? { toolId: r.tool_id, ts: [] };
+      s.ts.push(r.timestamp);
+      bySession.set(r.session_id, s);
+    }
+
+    const byTool = new Map<string, { gaps: number[]; prompts: number; sessions: number }>();
+    const allGaps: number[] = [];
+    const depthCount: Record<CadenceDepthLabel, number> = { '1': 0, '2-3': 0, '4-9': 0, '10+': 0 };
+    let totalPrompts = 0;
+    let totalSessions = 0;
+
+    for (const s of bySession.values()) {
+      const prompts = s.ts.length;
+      totalPrompts += prompts;
+      totalSessions += 1;
+      const bucket: CadenceDepthLabel =
+        prompts <= 1 ? '1' : prompts <= 3 ? '2-3' : prompts <= 9 ? '4-9' : '10+';
+      depthCount[bucket] += 1;
+
+      const acc = byTool.get(s.toolId) ?? { gaps: [], prompts: 0, sessions: 0 };
+      acc.prompts += prompts;
+      acc.sessions += 1;
+      for (let i = 1; i < s.ts.length; i++) {
+        const gap = s.ts[i] - s.ts[i - 1];
+        // Cap: gaps ≥ THINK_CAP_MS are breaks/resumes, not deliberation.
+        if (gap > 0 && gap < THINK_CAP_MS) { acc.gaps.push(gap); allGaps.push(gap); }
+      }
+      byTool.set(s.toolId, acc);
+    }
+
+    const rowsOut: CadenceRow[] = Array.from(byTool.entries()).map(([toolId, a]) => ({
+      toolId: toolId as ToolId,
+      medianThinkMs: median(a.gaps.slice().sort((x, y) => x - y)),
+      avgPromptsPerSession: a.sessions > 0 ? a.prompts / a.sessions : 0,
+      sessions: a.sessions,
+    })).sort((a, b) => b.sessions - a.sessions);
+
+    const depth: CadenceDepthBucket[] = (['1', '2-3', '4-9', '10+'] as CadenceDepthLabel[])
+      .map((bucket) => ({ bucket, count: depthCount[bucket] }));
+
+    return {
+      range,
+      rows: rowsOut,
+      depth,
+      overallMedianThinkMs: median(allGaps.sort((x, y) => x - y)),
+      overallAvgPromptsPerSession: totalSessions > 0 ? totalPrompts / totalSessions : 0,
+      thinkSampleCount: allGaps.length,
+      queriedAt: now,
+    };
+  }
+
+  // Waiting on You — time an agent sat blocked on the user (permission prompts).
+  getWaiting(range: WaitingRange): WaitingPayload {
+    const now = Date.now();
+    const startMs = now - rangeMs(range);
+
+    // A waiting span = the gap from a 'waiting' event to the next event in the
+    // same session, capped so a walk-away doesn't inflate it. `active_ms` is the
+    // engaged (work+wait+error) time, the denominator for pctOfActive.
+    const rows = this.db.query<{ tool_id: string; wait_ms: number; episodes: number; active_ms: number }>(
+      `WITH ev AS (
+         SELECT tool_id, session_id, state, timestamp,
+                LEAD(timestamp) OVER (PARTITION BY session_id ORDER BY timestamp) AS next_ts
+         FROM events
+         WHERE timestamp >= ? AND session_id IS NOT NULL
+       )
+       SELECT tool_id,
+              SUM(CASE WHEN state = 'waiting' AND next_ts IS NOT NULL
+                       THEN MIN(next_ts - timestamp, ?) ELSE 0 END) AS wait_ms,
+              SUM(CASE WHEN state = 'waiting' THEN 1 ELSE 0 END) AS episodes,
+              SUM(CASE WHEN state IN ('working', 'waiting', 'error') AND next_ts IS NOT NULL
+                       THEN MIN(next_ts - timestamp, ?) ELSE 0 END) AS active_ms
+       FROM ev
+       GROUP BY tool_id`,
+      [startMs, WAIT_SPAN_CAP_MS, WAIT_SPAN_CAP_MS],
+    );
+
+    const out: WaitingRow[] = rows.map((r) => {
+      const waitMs = r.wait_ms ?? 0;
+      const episodes = r.episodes ?? 0;
+      return {
+        toolId: r.tool_id as ToolId,
+        waitMs,
+        episodes,
+        avgWaitMs: episodes > 0 ? waitMs / episodes : 0,
+        pctOfActive: (r.active_ms ?? 0) > 0 ? (waitMs / r.active_ms) * 100 : 0,
+        hasData: episodes > 0,
+      };
+    }).sort((a, b) => b.waitMs - a.waitMs);
+
+    return {
+      range,
+      rows: out,
+      totalWaitMs: out.reduce((s, r) => s + r.waitMs, 0),
+      totalEpisodes: out.reduce((s, r) => s + r.episodes, 0),
+      queriedAt: now,
+    };
+  }
+
+  // Cache Efficiency — share of input served from cache, and estimated $ saved.
+  getCacheEfficiency(range: CacheEfficiencyRange): CacheEfficiencyPayload {
+    const now = Date.now();
+    const startMs = now - rangeMs(range);
+
+    // Read events (more complete than the sessions rollup — the deriver drops
+    // token deltas that arrive after a session closes). Group by tool+model so
+    // savings can be priced per model.
+    const rows = this.db.query<{ tool_id: string; model: string | null; tin: number; cr: number; cw: number }>(
+      `SELECT tool_id, model,
+              SUM(COALESCE(tokens_in, 0))   AS tin,
+              SUM(COALESCE(cache_read, 0))  AS cr,
+              SUM(COALESCE(cache_write, 0)) AS cw
+       FROM events
+       WHERE timestamp >= ?
+       GROUP BY tool_id, model`,
+      [startMs],
+    );
+
+    const byTool = new Map<string, { fresh: number; cached: number; savedUsd: number; priced: boolean; hasData: boolean }>();
+    for (const r of rows) {
+      const acc = byTool.get(r.tool_id) ?? { fresh: 0, cached: 0, savedUsd: 0, priced: false, hasData: false };
+      const fresh = r.tin ?? 0;
+      const cached = r.cr ?? 0;
+      acc.fresh += fresh;
+      acc.cached += cached;
+      if (fresh > 0 || cached > 0 || (r.cw ?? 0) > 0) acc.hasData = true;
+      if (r.model) {
+        const rate = rateForModel(r.model);
+        if (rate) {
+          acc.priced = true;
+          // Saved = what those cache-read tokens WOULD have cost at the full
+          // input rate, minus what they actually cost at the cache-read rate.
+          acc.savedUsd += (cached * (rate.input - rate.cacheRead)) / 1_000_000;
+        }
+      }
+      byTool.set(r.tool_id, acc);
+    }
+
+    const out: CacheEfficiencyRow[] = Array.from(byTool.entries()).map(([toolId, a]) => {
+      const denom = a.fresh + a.cached;
+      return {
+        toolId: toolId as ToolId,
+        hitRatio: denom > 0 ? a.cached / denom : 0,
+        freshTokens: Math.round(a.fresh),
+        cachedTokens: Math.round(a.cached),
+        savedUsd: a.savedUsd,
+        priced: a.priced,
+        hasData: a.hasData,
+      };
+    }).sort((a, b) => (b.freshTokens + b.cachedTokens) - (a.freshTokens + a.cachedTokens));
+
+    const totalFresh = out.reduce((s, r) => s + r.freshTokens, 0);
+    const totalCached = out.reduce((s, r) => s + r.cachedTokens, 0);
+
+    return {
+      range,
+      rows: out,
+      overallHitRatio: (totalFresh + totalCached) > 0 ? totalCached / (totalFresh + totalCached) : 0,
+      totalSavedUsd: out.reduce((s, r) => s + r.savedUsd, 0),
+      queriedAt: now,
+    };
+  }
+
+  // Resume & Lifecycle — resumes per session + calendar-span vs active time.
+  getLifecycle(range: LifecycleRange): LifecyclePayload {
+    const now = Date.now();
+    const startMs = now - rangeMs(range);
+
+    // Per native session: span (first→last event) and resume count (intra-session
+    // gaps ≥ RESUME_GAP_MS).
+    const sessRows = this.db.query<{ session_id: string; first_ts: number; last_ts: number; resumes: number }>(
+      `WITH ev AS (
+         SELECT session_id, timestamp,
+                LAG(timestamp) OVER (PARTITION BY session_id ORDER BY timestamp) AS prev_ts
+         FROM events
+         WHERE timestamp >= ? AND session_id IS NOT NULL
+       )
+       SELECT session_id,
+              MIN(timestamp) AS first_ts,
+              MAX(timestamp) AS last_ts,
+              SUM(CASE WHEN prev_ts IS NOT NULL AND timestamp - prev_ts >= ? THEN 1 ELSE 0 END) AS resumes
+       FROM ev
+       GROUP BY session_id`,
+      [startMs, RESUME_GAP_MS],
+    );
+
+    // The resume-gap lengths themselves, for the median interval.
+    const gapRows = this.db.query<{ gap: number }>(
+      `WITH ev AS (
+         SELECT session_id, timestamp,
+                LAG(timestamp) OVER (PARTITION BY session_id ORDER BY timestamp) AS prev_ts
+         FROM events
+         WHERE timestamp >= ? AND session_id IS NOT NULL
+       )
+       SELECT timestamp - prev_ts AS gap
+       FROM ev
+       WHERE prev_ts IS NOT NULL AND timestamp - prev_ts >= ?`,
+      [startMs, RESUME_GAP_MS],
+    );
+
+    // Active time per native session, from the derived rollup (ties native id
+    // back to the idle-gap active segments).
+    const activeRows = this.db.query<{ session_id: string; active_ms: number }>(
+      `SELECT session_id, SUM(MAX(ended_at - started_at, 0)) AS active_ms
+       FROM sessions
+       WHERE session_id IS NOT NULL AND started_at >= ?
+       GROUP BY session_id`,
+      [startMs],
+    );
+    const activeBySession = new Map<string, number>();
+    for (const r of activeRows) activeBySession.set(r.session_id, r.active_ms ?? 0);
+
+    const totalSessions = sessRows.length;
+    let resumedSessions = 0;
+    let totalResumes = 0;
+    let spanSum = 0;
+    let activeSum = 0;
+    for (const r of sessRows) {
+      if (r.resumes > 0) resumedSessions += 1;
+      totalResumes += r.resumes;
+      spanSum += Math.max(0, r.last_ts - r.first_ts);
+      activeSum += activeBySession.get(r.session_id) ?? 0;
+    }
+
+    const avgSpanMs = totalSessions > 0 ? spanSum / totalSessions : 0;
+    const avgActiveMs = totalSessions > 0 ? activeSum / totalSessions : 0;
+
+    return {
+      range,
+      totalSessions,
+      resumedSessions,
+      resumeRatePct: totalSessions > 0 ? (resumedSessions / totalSessions) * 100 : 0,
+      avgResumesPerSession: totalSessions > 0 ? totalResumes / totalSessions : 0,
+      medianResumeIntervalMs: median(gapRows.map((g) => g.gap).sort((a, b) => a - b)),
+      avgSpanMs,
+      avgActiveMs,
+      densityPct: avgSpanMs > 0 ? (avgActiveMs / avgSpanMs) * 100 : 0,
+      queriedAt: now,
+    };
   }
 
   getProjectBreakdown(range: ProjectBreakdownRange): ProjectBreakdownPayload {

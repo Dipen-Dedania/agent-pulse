@@ -111,6 +111,10 @@ export interface AttentionConfig {
   escalateAfterSeconds: number; // delay in `waiting` before escalating (floor enforced)
   intensifyBubble: boolean;     // visual escalation on the bubble
   osNotification: boolean;      // also fire a native OS notification (default off)
+  // Full-screen blue border that lights up the instant any agent enters
+  // `waiting`, independent of the escalation threshold above. Purely visual,
+  // click-through, on every display. Clears when nothing is waiting.
+  screenEdgeGlow: boolean;
   webhooks: WebhookTarget[];
 }
 

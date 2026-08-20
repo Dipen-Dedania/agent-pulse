@@ -45,6 +45,7 @@ function cfg(partial: Partial<AttentionConfig> = {}): AttentionConfig {
     escalateAfterSeconds: 30,
     intensifyBubble: true,
     osNotification: false,
+    screenEdgeGlow: true,
     webhooks: [],
     ...partial,
   };

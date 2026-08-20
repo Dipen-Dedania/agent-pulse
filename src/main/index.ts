@@ -1,6 +1,7 @@
 import { app, ipcMain, shell, BrowserWindow, Menu, dialog, screen, nativeTheme } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
 import { TooltipManager } from './windows/tooltip-window';
+import { ScreenEdgeManager } from './windows/screen-edge-window';
 import { TourManager } from './windows/tour-manager';
 import { SettingsWindow } from './windows/settings-window';
 import { TrayManager } from './windows/tray';
@@ -75,6 +76,7 @@ class AgentPulseApp {
   private llmPricingPoller: LlmPricingPoller;
   private scheduler: Scheduler;
   private attentionEngine: AttentionEngine;
+  private screenEdgeManager: ScreenEdgeManager;
   private backlogStore: BacklogStore | null = null;
   private backlogEngine: BacklogEngine | null = null;
   private backlogPopulation: PopulationScheduler | null = null;
@@ -180,6 +182,9 @@ class AgentPulseApp {
     // Attention escalation watches state transitions from the bridge's state
     // manager, so it can be built as soon as the state manager exists.
     this.attentionEngine = new AttentionEngine(this.userConfig.attention, { stateManager: this.stateManager });
+    // Full-screen "needs you" border — watches the same waiting-state
+    // transitions but lights up instantly, without the escalation delay.
+    this.screenEdgeManager = new ScreenEdgeManager(this.userConfig.attention, { stateManager: this.stateManager });
   }
 
   // Recover each tool's last-known agent PID from the timeline DB so bubble
@@ -271,6 +276,10 @@ class AgentPulseApp {
       // Attention escalation: arms timers off waiting-state transitions.
       this.attentionEngine.init();
       this.attentionEngine.start();
+
+      // Screen-edge glow: shows a click-through blue border while any agent is
+      // waiting on the user. No init() — it's purely a state-event consumer.
+      this.screenEdgeManager.start();
 
       // Boot Pulse Timeline persistence. Subscribers wire up *after* the
       // pollers are init'd so we don't miss their first emit. If better-
@@ -393,6 +402,7 @@ class AgentPulseApp {
       stopAllPlanWatches();
       closeBacklogDb();
       this.tooltipManager.destroy();
+      this.screenEdgeManager.destroy();
       this.tourManager.destroy();
       this.timeline?.shutdown();
       this.updater.shutdown();
@@ -522,11 +532,18 @@ class AgentPulseApp {
       this.userConfig.attention = { ...this.userConfig.attention, ...partial };
       saveConfig(this.userConfig);
       this.attentionEngine.applyConfig(this.userConfig.attention);
+      this.screenEdgeManager.applyConfig(this.userConfig.attention);
       const updated = this.userConfig.attention;
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send('attention:config-updated', updated);
       }
       return updated;
+    });
+
+    // Settings "Preview" — flash the screen-edge border for a few seconds so
+    // the user can see it without waiting on a real agent.
+    ipcMain.handle('screen-edge:preview', () => {
+      this.screenEdgeManager.previewFlash();
     });
 
     ipcMain.handle('detect-tools', async () => {

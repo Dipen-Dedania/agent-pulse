@@ -72,6 +72,24 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
         label='Escalate when an agent waits for you'
       />
 
+      {/* Ambient screen-edge glow — fires the instant an agent waits, so it
+          lives outside the escalation block (independent of the threshold). */}
+      <div className='flex flex-col gap-3'>
+        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Ambient screen border</p>
+        <Toggle
+          checked={config.screenEdgeGlow}
+          onChange={(v) => onChange({ screenEdgeGlow: v })}
+          label='Glow the screen edges while waiting'
+          hint='Instant · all displays'
+        />
+        <div className='flex items-center gap-3'>
+          <Button variant='secondary' onClick={() => window.electron.invoke('screen-edge:preview')}>
+            Preview
+          </Button>
+          <span className='text-xs text-faint'>Flashes the blue border for a few seconds.</span>
+        </div>
+      </div>
+
       <div className={`flex flex-col gap-7 transition-opacity ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
         {/* Threshold */}
         <div className='flex flex-col gap-3'>

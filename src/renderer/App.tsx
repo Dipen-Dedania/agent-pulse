@@ -3,6 +3,7 @@ import { Bubble } from './components/Bubble/Bubble';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { TooltipOverlay, Tooltip } from './components/Shared';
 import { TourCard } from './components/Tour/TourCard';
+import { ScreenEdgeOverlay } from './components/ScreenEdge/ScreenEdgeOverlay';
 import { ToolId, TourState } from '../common/types';
 import { motion, MotionConfig } from 'framer-motion';
 
@@ -301,6 +302,8 @@ const App: React.FC = () => {
       <TooltipOverlay />
     ) : view === 'tour' ? (
       <TourCard />
+    ) : view === 'screen-edge' ? (
+      <ScreenEdgeOverlay />
     ) : (
       <Landing />
     );

@@ -188,6 +188,7 @@ const DEFAULTS: UserConfig = {
     escalateAfterSeconds: 30,
     intensifyBubble: true,
     osNotification: false,
+    screenEdgeGlow: true,
     webhooks: [],
   },
   usage: {
@@ -688,6 +689,7 @@ function migrateAttention(raw: unknown): AttentionConfig {
     escalateAfterSeconds: seconds,
     intensifyBubble: typeof a.intensifyBubble === 'boolean' ? a.intensifyBubble : d.intensifyBubble,
     osNotification: typeof a.osNotification === 'boolean' ? a.osNotification : d.osNotification,
+    screenEdgeGlow: typeof a.screenEdgeGlow === 'boolean' ? a.screenEdgeGlow : d.screenEdgeGlow,
     webhooks,
   };
 }

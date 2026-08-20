@@ -332,22 +332,44 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
   const pruneGuardrailStmt: Statement = db.prepare('DELETE FROM guardrail_events WHERE ts < ?');
   const pruneSecretStmt: Statement    = db.prepare('DELETE FROM secret_access_events WHERE ts < ?');
 
-  const normalize = (row: object): Record<string, unknown> => {
+  // better-sqlite3 throws "Missing named parameter" if a bound object omits any
+  // @named parameter the statement declares. Our row interfaces mark most fields
+  // optional, so callers legitimately pass partial rows — fill every expected
+  // key with null (and coerce explicit `undefined` to null) so those inserts
+  // bind cleanly instead of throwing and getting swallowed.
+  const normalize = (row: object, keys: readonly string[]): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
+    for (const k of keys) out[k] = null;
     for (const [k, v] of Object.entries(row)) {
       out[k] = v === undefined ? null : v;
     }
     return out;
   };
 
+  const EVENT_KEYS = [
+    'toolId', 'state', 'timestamp', 'sessionId', 'agentPid', 'taskSummary',
+    'activeAgents', 'projectId', 'projectPath', 'model',
+    'tokensIn', 'tokensOut', 'cacheRead', 'cacheWrite', 'errorMessage',
+  ] as const;
+  const SESSION_KEYS = [
+    'toolId', 'projectId', 'projectPath', 'startedAt', 'endedAt', 'turns',
+    'peakState', 'taskSummary', 'hadError', 'sessionId', 'agentPid',
+    'totalTokensIn', 'totalTokensOut', 'totalCacheRead', 'totalCacheWrite',
+    'modelsUsed',
+  ] as const;
+  const QUOTA_KEYS = ['toolId', 'windowKey', 'pctRemaining', 'resetsAt', 'sampledAt'] as const;
+  const GUARDRAIL_KEYS = ['ts', 'toolId', 'decision', 'blockable', 'command', 'ruleIds', 'ruleMessages'] as const;
+  const SECRET_KEYS = ['ts', 'toolId', 'decision', 'blockable', 'filePath', 'viaShell', 'ruleIds', 'ruleMessages'] as const;
+  const OFFSET_KEYS = ['path', 'offset', 'sessionId', 'codexSnapshot'] as const;
+
   return {
     insertEvent: (row) => {
-      try { insertEventStmt.run(normalize(row)); }
+      try { insertEventStmt.run(normalize(row, EVENT_KEYS)); }
       catch (e: any) { logger.warn('[Timeline] insertEvent failed:', e?.message ?? e); }
     },
     insertSession: (row) => {
       try {
-        const info = insertSessionStmt.run(normalize(row));
+        const info = insertSessionStmt.run(normalize(row, SESSION_KEYS));
         return Number(info.lastInsertRowid);
       } catch (e: any) {
         logger.warn('[Timeline] insertSession failed:', e?.message ?? e);
@@ -355,15 +377,15 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
       }
     },
     insertQuotaSample: (row) => {
-      try { insertQuotaStmt.run(normalize(row)); }
+      try { insertQuotaStmt.run(normalize(row, QUOTA_KEYS)); }
       catch (e: any) { logger.warn('[Timeline] insertQuotaSample failed:', e?.message ?? e); }
     },
     insertGuardrailEvent: (row) => {
-      try { insertGuardrailStmt.run(normalize(row)); }
+      try { insertGuardrailStmt.run(normalize(row, GUARDRAIL_KEYS)); }
       catch (e: any) { logger.warn('[Timeline] insertGuardrailEvent failed:', e?.message ?? e); }
     },
     insertSecretAccessEvent: (row) => {
-      try { insertSecretAccessStmt.run(normalize(row)); }
+      try { insertSecretAccessStmt.run(normalize(row, SECRET_KEYS)); }
       catch (e: any) { logger.warn('[Timeline] insertSecretAccessEvent failed:', e?.message ?? e); }
     },
     loadTranscriptOffsets: () => {
@@ -371,7 +393,7 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
       catch (e: any) { logger.warn('[Timeline] loadTranscriptOffsets failed:', e?.message ?? e); return []; }
     },
     saveTranscriptOffset: (row) => {
-      try { upsertOffsetStmt.run(normalize(row)); }
+      try { upsertOffsetStmt.run(normalize(row, OFFSET_KEYS)); }
       catch (e: any) { logger.warn('[Timeline] saveTranscriptOffset failed:', e?.message ?? e); }
     },
     prune: (eventsOlderThanMs, quotaOlderThanMs, guardrailOlderThanMs, secretOlderThanMs) => {

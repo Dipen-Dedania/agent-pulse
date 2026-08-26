@@ -21,10 +21,10 @@ const COVERAGE: Record<ToolId, { ignoreFile: boolean; hookBlock: boolean; badge:
   // Grok: no Agent Pulse ignore-file writer yet; blocking rides the native HTTP
   // PreToolUse deny (Claude-compatible response shape).
   'grok':            { ignoreFile: false, hookBlock: true,  badge: 'Hook deny (soft)',        tone: 'soft' },
-  // OpenCode: our plugin currently fires and forgets, so nothing round-trips a
-  // deny verdict yet. It CAN block (the permission.ask hook accepts
-  // status:"deny"), which is why this is 'none' rather than a hard limitation.
-  'opencode':        { ignoreFile: false, hookBlock: false, badge: 'Monitor only',            tone: 'none' },
+  // OpenCode: the plugin awaits a bounded bridge verdict in tool.execute.before
+  // and throws on deny, aborting the call. No ignore-file writer yet (lands
+  // with the opencode.json permission.read Layer-1 writer).
+  'opencode':        { ignoreFile: false, hookBlock: true,  badge: 'Hook deny (soft)',        tone: 'soft' },
 };
 
 // How strong a tool's protection is, mapped onto the shared Badge palette.

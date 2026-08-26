@@ -218,7 +218,9 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
         'It subscribes to OpenCode\'s event bus and POSTs already-normalized state to the bridge: ' +
         'session.status drives Working/Idle, permission.asked drives Waiting, and session.error drives Error. ' +
         'Because the plugin runs inside OpenCode, it also reads real per-turn token counts and the model id ' +
-        'straight off each completed assistant message — no transcript parsing.',
+        'straight off each completed assistant message — no transcript parsing. ' +
+        'bash/read/grep/glob tool calls additionally round-trip a bounded (400ms, fail-open) verdict from ' +
+        'the bridge, so Guardrails and Secret Protection can abort a denied call outright.',
       snippet: [
         '// ~/.config/opencode/plugins/agent-pulse.js  (written for you)',
         'export const AgentPulse = async ({ directory, worktree }) => ({',
@@ -227,6 +229,10 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
         '    // permission.asked → waiting',
         '    // session.error    → error',
         '    // message.updated  → real token counts + model id',
+        '  },',
+        "  'tool.execute.before': async (input, output) => {",
+        '    // bash/read/grep/glob → awaited bridge verdict; throws on deny',
+        '    // (aborts the tool call). Fails open if Agent Pulse is closed.',
         '  },',
         '})',
       ].join('\n'),

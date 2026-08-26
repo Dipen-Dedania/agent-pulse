@@ -22,6 +22,12 @@ export interface EvaluateContext {
   os: GuardrailOs;            // 'win' | 'mac' | 'linux'
   toolId: ToolId;
   config?: GuardrailConfig;   // when omitted, uses defaults (enabled + core rules only)
+  // Per-event blockability override. When defined it replaces the static
+  // BLOCKABLE_TOOLS lookup — used for tools whose enforcement lives in an
+  // installed artifact that may be stale (OpenCode's plugin marks capable
+  // posts with `canBlock`; an old plugin can't honour a deny, so its events
+  // must be evaluated — and logged — as warn, never as a false "blocked").
+  blockable?: boolean;
 }
 
 // Compile a rule's pattern. Built-in rules may already carry a RegExp; user
@@ -60,7 +66,7 @@ export function isPatternSafe(pattern: string): { ok: boolean; reason?: string }
 // To add a new rule: edit src/main/guardrails/rules.core.ts (or persist a
 // user rule via the Settings UI). The engine itself is rule-agnostic.
 export function evaluateCommand(command: string, ctx: EvaluateContext): GuardrailEvaluation {
-  const blockable = BLOCKABLE_TOOLS[ctx.toolId] ?? false;
+  const blockable = ctx.blockable ?? BLOCKABLE_TOOLS[ctx.toolId] ?? false;
   const config = ctx.config ?? { enabled: true, disabledRuleIds: [], customRules: [] };
 
   if (!config.enabled || !command || command.trim() === '') {

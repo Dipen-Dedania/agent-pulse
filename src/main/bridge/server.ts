@@ -386,6 +386,15 @@ export class StatusBridgeServer {
     res.end();
   }
 
+  // OpenCode's enforcement lives in its installed plugin: a plugin that
+  // predates the block round-trip never marks its posts `canBlock`, and can't
+  // honour a deny — so its events must be evaluated (and logged) as warn,
+  // never as a false "blocked" while the command actually runs. Other tools
+  // keep the static BLOCKABLE_TOOLS lookup (undefined = no override).
+  private blockableOverride(toolId: ToolId, raw: any): boolean | undefined {
+    return toolId === 'opencode' ? raw?.canBlock === true : undefined;
+  }
+
   // Run extracted command (if any) through the guardrail engine and emit
   // a guardrail event via the options callback when the decision isn't allow.
   // Returns the evaluation + extracted command so the request handler can
@@ -396,7 +405,12 @@ export class StatusBridgeServer {
     if (!command) return null;
 
     const config = this.options.getGuardrailConfig?.();
-    const evaluation = evaluateCommand(command, { os: detectOs(), toolId, config });
+    const evaluation = evaluateCommand(command, {
+      os: detectOs(),
+      toolId,
+      config,
+      blockable: this.blockableOverride(toolId, raw),
+    });
     if (evaluation.decision === 'allow') {
       return { command, eval: evaluation };
     }
@@ -441,7 +455,11 @@ export class StatusBridgeServer {
     const read = extractReadPath(toolId, raw, rules.length ? { isProtected } : undefined);
     if (!read) return null;
 
-    const evaluation = evaluateSecretAccess(read.path, { toolId, config });
+    const evaluation = evaluateSecretAccess(read.path, {
+      toolId,
+      config,
+      blockable: this.blockableOverride(toolId, raw),
+    });
     if (evaluation.decision === 'allow') {
       return { filePath: read.path, viaShell: read.viaShell, enforce, eval: evaluation };
     }

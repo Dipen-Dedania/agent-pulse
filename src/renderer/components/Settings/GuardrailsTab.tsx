@@ -115,8 +115,8 @@ export const GuardrailsTab: React.FC = () => {
         <div>
           <h2 className='text-xl font-bold tracking-tight'>Command Guardrails</h2>
           <p className='text-sm text-muted mt-1'>
-            Inspect shell commands before tools run them. Some agents (Claude Code, Codex, Grok, Antigravity)
-            can block a risky command outright; others just get a warning.
+            Inspect shell commands before tools run them. Some agents (Claude Code, Codex, Grok, Antigravity,
+            OpenCode) can block a risky command outright; others just get a warning.
           </p>
         </div>
         <GlassToggle

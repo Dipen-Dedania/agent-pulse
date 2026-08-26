@@ -60,6 +60,46 @@ describe('guardrail flow — Antigravity', () => {
   });
 });
 
+describe('guardrail flow — OpenCode', () => {
+  // The plugin's envelope: guardrail fields at the TOP level, payload typed.
+  const envelope = (canBlock: boolean) => ({
+    toolId: 'opencode',
+    state: 'working',
+    toolName: 'bash',
+    command: DANGEROUS,
+    ...(canBlock ? { canBlock: true } : {}),
+    payload: {},
+  });
+
+  it('a canBlock-marked post evaluates to an enforceable block', () => {
+    const raw = envelope(true);
+    const normalized = normalizePayload(raw);
+    expect(normalized?.toolId).toBe('opencode');
+    const command = extractCommand('opencode', raw);
+    expect(command).toBe(DANGEROUS);
+    // Mirrors the handler's blockableOverride: opencode posts carry canBlock
+    // only when the installed plugin can honour a deny.
+    const evaluation = evaluateCommand(command!, {
+      os: 'linux', toolId: 'opencode', config: cfg, blockable: raw.canBlock === true,
+    });
+    expect(evaluation.decision).toBe('block');
+    expect(evaluation.blockable).toBe(true);
+    const body = buildBlockResponse('opencode', evaluation);
+    expect(body.status).toBe('blocked'); // the marker the plugin checks before throwing
+    expect(body.reason).toContain('[Agent Pulse]');
+  });
+
+  it('a stale plugin post (no canBlock) downgrades to warn — never a false "blocked"', () => {
+    const raw = envelope(false) as any;
+    const command = extractCommand('opencode', raw);
+    const evaluation = evaluateCommand(command!, {
+      os: 'linux', toolId: 'opencode', config: cfg, blockable: raw.canBlock === true,
+    });
+    expect(evaluation.decision).toBe('warn');
+    expect(evaluation.blockable).toBe(false);
+  });
+});
+
 describe('guardrail flow — safe command allows', () => {
   it('a benign Codex command does not block', () => {
     const raw = {

@@ -22,6 +22,10 @@ import { CORE_SECRET_RULES } from './rules.core';
 export interface EvaluateSecretContext {
   toolId: ToolId;
   config?: SecretProtectionConfig; // when omitted, uses defaults (enabled + core rules)
+  // Per-event blockability override; mirrors guardrails/engine.ts. When
+  // defined it replaces the static BLOCKABLE_TOOLS lookup (stale-plugin
+  // downgrade for OpenCode).
+  blockable?: boolean;
 }
 
 const DEFAULT_CONFIG: SecretProtectionConfig = {
@@ -139,7 +143,7 @@ export function effectiveSecretRules(config?: SecretProtectionConfig): SecretRul
 // downgraded to `warn` when the tool can't honour a deny (mirrors
 // guardrails/engine.ts:101).
 export function evaluateSecretAccess(filePath: string, ctx: EvaluateSecretContext): SecretAccessEvaluation {
-  const blockable = BLOCKABLE_TOOLS[ctx.toolId] ?? false;
+  const blockable = ctx.blockable ?? BLOCKABLE_TOOLS[ctx.toolId] ?? false;
   const config = ctx.config ?? DEFAULT_CONFIG;
 
   if (!config.enabled || !filePath || !filePath.trim()) {

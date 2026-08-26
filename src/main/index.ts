@@ -374,6 +374,17 @@ class AgentPulseApp {
       // the app was closed (or a newly-installed agent) picks up the current set.
       void this.syncSecretFiles();
 
+      // Refresh a stale OpenCode plugin: unlike shell hooks, the plugin carries
+      // real behavior (the gated block round-trip), so old installs must be
+      // brought forward or enforcement silently downgrades to warn-only.
+      try {
+        if (this.writer.refreshOpencodePlugin()) {
+          logger.info('[AgentPulseApp] refreshed stale OpenCode plugin');
+        }
+      } catch (e) {
+        logger.warn(`[AgentPulseApp] OpenCode plugin resync failed: ${e}`);
+      }
+
       this.settingsWindow.show();
     });
 

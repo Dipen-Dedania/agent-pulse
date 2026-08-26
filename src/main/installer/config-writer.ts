@@ -1089,6 +1089,35 @@ exit 0
   }
 
   /**
+   * Rewrites an already-installed OpenCode plugin whose content is stale (older
+   * template, changed bridge URL). Called on app start: unlike shell-hook tools
+   * whose scripts just POST, the OpenCode plugin carries real behavior (the
+   * gated block round-trip), so an old copy silently downgrades enforcement.
+   * Never installs uninvited — no-op when the plugin isn't present. OpenCode
+   * loads plugins at boot, so a rewrite takes effect on the user's next
+   * OpenCode session.
+   *
+   * Returns true when at least one file was rewritten.
+   */
+  public refreshOpencodePlugin(): boolean {
+    if (!this.isOpencodeHookInstalled()) return false;
+    const fresh = this.buildOpencodePlugin();
+    let rewrote = false;
+    // The user may have relocated the file into the legacy `plugin/` dir —
+    // refresh it wherever it actually lives rather than only the canonical path.
+    for (const dir of opencodePluginDirs()) {
+      const file = path.join(dir, OPENCODE_PLUGIN_FILENAME);
+      if (!fs.existsSync(file)) continue;
+      let existing = '';
+      try { existing = fs.readFileSync(file, 'utf8'); } catch { continue; }
+      if (existing === fresh) continue;
+      fs.writeFileSync(file, fresh, 'utf8');
+      rewrote = true;
+    }
+    return rewrote;
+  }
+
+  /**
    * The OpenCode plugin. Runs INSIDE OpenCode (Bun runtime), so unlike every
    * other tool we support there is no shell script, no stdin parsing, and no
    * transcript to tail — the event bus hands us typed state and real token
@@ -1109,10 +1138,13 @@ exit 0
     // NOTE: no backticks / ${} inside the emitted source — this is a TS
     // template literal, so the plugin body uses plain concatenation.
     return `// Agent Pulse — OpenCode plugin (auto-generated; safe to delete)
+// Plugin format v2 — gated tool calls (blocking round-trip).
 //
-// Reports agent state to the Agent Pulse bridge on localhost. Fire-and-forget:
-// every POST swallows its own errors so Agent Pulse being closed can never slow
-// down or break an OpenCode turn.
+// Reports agent state to the Agent Pulse bridge on localhost. Status events are
+// fire-and-forget (each POST swallows its own errors), but bash/read/grep/glob
+// tool calls await a bounded verdict from the bridge so guardrails and Secret
+// Protection can abort a denied call. The wait fails OPEN on timeout, error, or
+// missing bridge — Agent Pulse being closed can never stall an OpenCode turn.
 //
 // Docs: https://opencode.ai/docs/plugins/
 
@@ -1121,6 +1153,12 @@ const BRIDGE_URL = ${JSON.stringify(this.bridgeUrl)};
 // Cap the reported-message set so a very long-lived server can't grow it
 // without bound.
 const MAX_TRACKED_MESSAGES = 500;
+
+// Upper bound on how long a gated tool call may wait for the bridge's verdict.
+// Evaluation is in-memory regex on localhost (single-digit ms); this budget only
+// absorbs Electron main-process stalls. When Agent Pulse isn't running the
+// fetch fails in a few ms, so this is NOT the no-bridge latency.
+const GATE_TIMEOUT_MS = 400;
 
 export const AgentPulse = async ({ directory, worktree }) => {
   const cwd = worktree || directory || undefined;
@@ -1161,7 +1199,32 @@ export const AgentPulse = async ({ directory, worktree }) => {
     }
   };
 
-  const send = (state, extra) => {
+  // Awaited, bounded POST used only for gated tool calls. Returns the parsed
+  // response body, or null on ANY failure (timeout, no bridge, bad JSON) so the
+  // caller fails open — a missing Agent Pulse must never stall a turn.
+  const postWait = async (body) => {
+    try {
+      if (typeof fetch !== 'function') return null;
+      const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => { ctrl.abort(); }, GATE_TIMEOUT_MS) : null;
+      try {
+        const res = await fetch(BRIDGE_URL, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: ctrl ? ctrl.signal : undefined,
+        });
+        if (!res || typeof res.json !== 'function') return null;
+        return await res.json();
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    } catch {
+      return null;
+    }
+  };
+
+  const buildBody = (state, extra) => {
     const payload = {
       cwd,
       agentPid: typeof process !== 'undefined' ? process.pid : undefined,
@@ -1170,16 +1233,23 @@ export const AgentPulse = async ({ directory, worktree }) => {
     };
     const body = { toolId: 'opencode', state, payload };
     if (extra) {
-      // Guardrail fields live at the TOP level: the bridge's extractCommand
-      // reads the raw body, while payload stays the typed NormalizedEvent shape.
+      // Guardrail fields live at the TOP level: the bridge's extractCommand /
+      // extractReadPath read the raw body, while payload stays the typed
+      // NormalizedEvent shape.
       if (extra.toolName) body.toolName = extra.toolName;
       if (extra.command) body.command = extra.command;
+      if (extra.filePath) body.filePath = extra.filePath;
+      if (extra.canBlock) body.canBlock = true;
       if (extra.sessionId) payload.sessionId = extra.sessionId;
       if (extra.taskSummary) payload.taskSummary = extra.taskSummary;
       if (extra.errorMessage) payload.errorMessage = extra.errorMessage;
       if (extra.tokens) payload.tokens = extra.tokens;
     }
-    post(body);
+    return body;
+  };
+
+  const send = (state, extra) => {
+    post(buildBody(state, extra));
   };
 
   // The state the session is ACTUALLY in right now, derived from the busy count
@@ -1316,20 +1386,43 @@ export const AgentPulse = async ({ directory, worktree }) => {
       }
     },
 
-    // Surfaces the running command so the bubble can show what the agent is
-    // doing, and lets the bridge's guardrails warn on dangerous shell calls.
+    // Surfaces the running command/file so the bubble can show what the agent
+    // is doing. bash/read/grep/glob calls are GATED: the POST doubles as the
+    // 'working' status event and the bridge's verdict is awaited (bounded by
+    // GATE_TIMEOUT_MS, failing open). On a deny the hook THROWS, which makes
+    // OpenCode abort the tool call — this is how guardrails and Secret
+    // Protection enforce. grep/glob visibility is limited to their optional
+    // 'path' arg; content patterns are never forwarded.
     'tool.execute.before': async (input, output) => {
       const toolName = input && input.tool;
       const args = (output && output.args) || {};
       const command = typeof args.command === 'string' ? args.command : undefined;
+      const filePath = typeof args.filePath === 'string' ? args.filePath
+        : (typeof args.path === 'string' ? args.path : undefined);
       const sessionId = input && input.sessionID;
-      if (sessionId) busySessions.add(sessionId);
-      send('working', {
+      const extra = {
         sessionId,
         toolName,
         command,
+        filePath,
         taskSummary: toolName ? 'Tool: ' + toolName : undefined,
-      });
+      };
+      if (sessionId) busySessions.add(sessionId);
+      const gated = toolName === 'bash' || toolName === 'read'
+        || toolName === 'grep' || toolName === 'glob';
+      if (!gated) {
+        send('working', extra);
+        return;
+      }
+      extra.canBlock = true;
+      const resp = await postWait(buildBody('working', extra));
+      if (resp && resp.status === 'blocked') {
+        // The bridge refused the call and skipped its status update; don't
+        // leave this session latched busy — OpenCode's own session.status
+        // events re-drive state after the abort.
+        if (sessionId) busySessions.delete(sessionId);
+        throw new Error('Agent Pulse: ' + (resp.reason || 'blocked by guardrails'));
+      }
     },
   };
 };

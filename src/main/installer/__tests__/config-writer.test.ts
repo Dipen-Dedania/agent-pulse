@@ -803,6 +803,57 @@ describe('ConfigWriter — opencode', () => {
       expect(writer.uninstallHook('opencode')).toEqual({ success: true });
     });
   });
+
+  it('emits the gated block round-trip machinery', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('opencode');
+      const src = fs.readFileSync(pluginPath(), 'utf8');
+
+      expect(src).toContain('AbortController');
+      expect(src).toContain('GATE_TIMEOUT_MS');
+      expect(src).toContain('canBlock');
+      expect(src).toContain('filePath');
+      // The plugin body is emitted from a TS template literal — a stray
+      // backtick or ${} would corrupt the generated source.
+      expect(src).not.toContain('`');
+      expect(src).not.toContain('${');
+    });
+  });
+
+  describe('refreshOpencodePlugin', () => {
+    it('does nothing when the plugin is not installed', async () => {
+      await withFakeHome(async (writer) => {
+        expect(writer.refreshOpencodePlugin()).toBe(false);
+        expect(fs.existsSync(pluginPath())).toBe(false);
+      });
+    });
+
+    it('rewrites stale copies in both dir spellings', async () => {
+      await withFakeHome(async (writer) => {
+        await writer.installHook('opencode');
+        fs.writeFileSync(pluginPath(), '// stale v1 plugin');
+        const legacy = path.join(tmpDir, '.config', 'opencode', 'plugin');
+        fs.mkdirSync(legacy, { recursive: true });
+        const legacyFile = path.join(legacy, 'agent-pulse.js');
+        fs.writeFileSync(legacyFile, '// stale v1 plugin');
+
+        expect(writer.refreshOpencodePlugin()).toBe(true);
+
+        const fresh = fs.readFileSync(pluginPath(), 'utf8');
+        expect(fresh).toContain('GATE_TIMEOUT_MS');
+        expect(fs.readFileSync(legacyFile, 'utf8')).toBe(fresh);
+      });
+    });
+
+    it('leaves an up-to-date plugin untouched', async () => {
+      await withFakeHome(async (writer) => {
+        await writer.installHook('opencode');
+        const before = fs.statSync(pluginPath()).mtimeMs;
+        expect(writer.refreshOpencodePlugin()).toBe(false);
+        expect(fs.statSync(pluginPath()).mtimeMs).toBe(before);
+      });
+    });
+  });
 });
 
 // ── Unknown tool throws ───────────────────────────────────────────────────────

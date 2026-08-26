@@ -119,6 +119,10 @@ export function extractReadPath(
       'input.path',
       'parameters.file_path',
       'parameters.path',
+      // OpenCode's plugin envelope lifts the path to the TOP level (mirroring
+      // its top-level `command`), sourced from args.filePath / args.path.
+      'filePath',
+      'payload.filePath',
       // Antigravity nests args under toolCall.
       'toolCall.args.path',
       'toolCall.args.file_path',

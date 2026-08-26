@@ -52,6 +52,53 @@ describe('extractReadPath — structured tools', () => {
     });
     expect(r).toBeNull();
   });
+
+  // OpenCode's plugin envelope lifts toolName and filePath to the TOP level.
+  it('opencode read tool → top-level filePath, not viaShell', () => {
+    const r = extractReadPath('opencode', {
+      toolId: 'opencode',
+      state: 'working',
+      toolName: 'read',
+      filePath: 'C:/repo/.env',
+      canBlock: true,
+      payload: {},
+    });
+    expect(r).toEqual({ path: 'C:/repo/.env', viaShell: false });
+  });
+
+  it('opencode grep with a path arg → extracted', () => {
+    const r = extractReadPath('opencode', {
+      toolId: 'opencode',
+      state: 'working',
+      toolName: 'grep',
+      filePath: '/repo/config',
+      payload: {},
+    });
+    expect(r?.path).toBe('/repo/config');
+    expect(r?.viaShell).toBe(false);
+  });
+
+  it('opencode edit tool → null (not a read tool)', () => {
+    const r = extractReadPath('opencode', {
+      toolId: 'opencode',
+      state: 'working',
+      toolName: 'edit',
+      filePath: '/repo/.env',
+      payload: {},
+    });
+    expect(r).toBeNull();
+  });
+
+  it('opencode bash shell read still trips via top-level command', () => {
+    const r = extractReadPath('opencode', {
+      toolId: 'opencode',
+      state: 'working',
+      toolName: 'bash',
+      command: 'cat .env',
+      payload: {},
+    }, { isProtected });
+    expect(r).toEqual({ path: '.env', viaShell: true });
+  });
 });
 
 // ── Shell reads (best-effort) ───────────────────────────────────────────────────

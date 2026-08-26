@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { ToolId } from '../../common/types';
+import { opencodeConfigDir } from './opencode-paths';
 
 const BLOCK_START = '# >>> agent-pulse secret-protection (managed) >>>';
 const BLOCK_END = '# <<< agent-pulse secret-protection (managed) <<<';
@@ -28,7 +29,10 @@ export interface SecretFileResult {
   path?: string;
   // Why nothing was written, when applicable.
   skipped?: 'unsupported' | 'no-globs';
-  format?: 'gitignore' | 'claude-json' | 'codex-toml';
+  format?: 'gitignore' | 'claude-json' | 'codex-toml' | 'opencode-json';
+  // Globs that could not be expressed in the target's pattern dialect (e.g.
+  // home-anchored globs for OpenCode's worktree-relative permission.read).
+  skippedGlobs?: string[];
 }
 
 // ── Managed-block helpers (gitignore-style text files) ─────────────────────────
@@ -174,6 +178,158 @@ function removeCodexToml(): SecretFileResult {
   return removeManagedText(tomlPath);
 }
 
+// ── OpenCode — permission.read deny merge in opencode.json ─────────────────────
+// OpenCode enforces read denies in core via `permission.read` — a map of
+// wildcard patterns to 'allow' | 'ask' | 'deny'. Its dialect differs from our
+// canonical .gitignore-style globs: there is NO `**`, a single `*` crosses `/`,
+// evaluation is LAST-match-wins (fallback `ask`), and patterns are matched
+// against worktree-relative paths. The managed-key marker lives in a sidecar
+// file rather than inside opencode.json, which is schema-validated — an
+// unknown top-level key risks boot warnings. OpenCode never reads the sidecar.
+
+const OPENCODE_MARKER_FILENAME = 'agent-pulse-managed-read-deny.json';
+
+/**
+ * Translates one canonical .gitignore-style glob into OpenCode
+ * `permission.read` pattern keys. Returns [] when the glob can't be expressed
+ * (home-anchored / absolute paths — permission.read patterns are
+ * worktree-relative; Layer 2 hook blocking still covers those reads).
+ *
+ * Our engine treats every glob as matching at any depth (basenames anywhere;
+ * slash-globs as path suffixes — see secretProtection/engine.compileGlob), so
+ * each pattern is emitted in a root form plus a star-slash-prefixed deeper
+ * form, unless it already starts with `*` (which crosses `/` on its own).
+ */
+export function globToOpencodeDeny(glob: string): string[] {
+  let g = glob.trim();
+  if (!g) return [];
+  if (g.startsWith('~') || g.startsWith('/') || /^[A-Za-z]:[\\/]/.test(g)) return [];
+  if (g.startsWith('./')) g = g.slice(2);
+  if (g.startsWith('**/')) g = g.slice(3);
+  if (!g) return [];
+
+  // Trailing `/**` (everything under a dir): one star suffices — it crosses `/`.
+  g = g.replace(/\/\*\*$/, '/*');
+
+  // Interior `/**/`: gitignore's `**` matches zero directories too, so emit
+  // both the collapsed form and a one-star form (which still crosses `/`).
+  const variants = /\/\*\*\//.test(g)
+    ? [g.replace(/\/\*\*\//g, '/'), g.replace(/\/\*\*\//g, '/*/')]
+    : [g];
+
+  const out: string[] = [];
+  for (const v of variants) {
+    if (!v) continue;
+    out.push(v);
+    if (!v.startsWith('*')) out.push(`*/${v}`);
+  }
+  return [...new Set(out)];
+}
+
+function readOpencodeMarker(markerPath: string): string[] {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeOpencodeDeny(globs: string[]): SecretFileResult {
+  const dir = opencodeConfigDir();
+  const configPath = path.join(dir, 'opencode.json');
+  const markerPath = path.join(dir, OPENCODE_MARKER_FILENAME);
+  fs.mkdirSync(dir, { recursive: true });
+
+  let config: any = {};
+  if (fs.existsSync(configPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    } catch {
+      // Unparseable (possibly jsonc with comments) — never risk clobbering.
+      return { success: false, path: configPath, format: 'opencode-json' };
+    }
+  }
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) {
+    return { success: false, path: configPath, format: 'opencode-json' };
+  }
+
+  const skippedGlobs: string[] = [];
+  const ourKeys: string[] = [];
+  for (const g of globs) {
+    const translated = globToOpencodeDeny(g);
+    if (translated.length === 0) skippedGlobs.push(g);
+    else ourKeys.push(...translated);
+  }
+  const ourSet = new Set(ourKeys);
+  const prevSet = new Set(readOpencodeMarker(markerPath));
+
+  config.permission =
+    config.permission && typeof config.permission === 'object' && !Array.isArray(config.permission)
+      ? config.permission
+      : {};
+  const existingRead = config.permission.read;
+  // A bare string is OpenCode shorthand for { '*': action } — normalize so the
+  // user's global choice survives the merge.
+  const userEntries: [string, unknown][] =
+    typeof existingRead === 'string'
+      ? [['*', existingRead]]
+      : existingRead && typeof existingRead === 'object' && !Array.isArray(existingRead)
+        ? Object.entries(existingRead)
+        : [];
+
+  // Rebuild with user keys first (original order) and ours appended LAST:
+  // evaluation is last-match-wins, and the feature's contract is that a
+  // protected glob stays denied while its rule is enabled — an earlier user
+  // `"*": "allow"` must not silently void it. A user entry for the exact same
+  // key is dropped (a JSON object can't hold it twice, and keeping it in its
+  // earlier position would let it win); the escape hatch is disabling the rule
+  // in Agent Pulse, which retracts our key on the next sync.
+  const read: Record<string, unknown> = {};
+  for (const [k, v] of userEntries) {
+    if (prevSet.has(k)) continue; // previously ours — retract; re-added below if still wanted
+    if (ourSet.has(k)) continue;
+    read[k] = v;
+  }
+  for (const k of ourSet) read[k] = 'deny';
+
+  if (Object.keys(read).length > 0) config.permission.read = read;
+  else delete config.permission.read;
+  if (Object.keys(config.permission).length === 0) delete config.permission;
+
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  if (ourSet.size > 0) fs.writeFileSync(markerPath, JSON.stringify([...ourSet], null, 2));
+  else { try { fs.unlinkSync(markerPath); } catch { /* ignore */ } }
+
+  return {
+    success: true,
+    path: configPath,
+    format: 'opencode-json',
+    ...(skippedGlobs.length ? { skippedGlobs } : {}),
+  };
+}
+
+function removeOpencodeDeny(): SecretFileResult {
+  const dir = opencodeConfigDir();
+  const configPath = path.join(dir, 'opencode.json');
+  const markerPath = path.join(dir, OPENCODE_MARKER_FILENAME);
+  const prevManaged = readOpencodeMarker(markerPath);
+  if (prevManaged.length && fs.existsSync(configPath)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const read = config?.permission?.read;
+      if (read && typeof read === 'object' && !Array.isArray(read)) {
+        for (const k of prevManaged) delete read[k];
+        if (Object.keys(read).length === 0) delete config.permission.read;
+        if (config.permission && Object.keys(config.permission).length === 0) delete config.permission;
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      }
+    } catch { /* unparseable — leave the user's file alone */ }
+  }
+  try { fs.unlinkSync(markerPath); } catch { /* ignore */ }
+  return { success: true, path: configPath };
+}
+
 // ── Per-tool artifact resolution ────────────────────────────────────────────────
 // Resolves the gitignore-style ignore file for tools that use one. Returns null
 // for tools handled by a structured writer (claude/codex) or unsupported (kiro).
@@ -207,6 +363,8 @@ export function writeSecretFilesForTool(
       return writeClaudeDeny(globs);
     case 'openai-codex':
       return writeCodexToml(globs);
+    case 'opencode':
+      return writeOpencodeDeny(globs);
     case 'kiro':
       return { success: true, skipped: 'unsupported' };
     default: {
@@ -245,6 +403,8 @@ export function removeSecretFilesForTool(
       return removeClaudeDeny();
     case 'openai-codex':
       return removeCodexToml();
+    case 'opencode':
+      return removeOpencodeDeny();
     case 'kiro':
       return { success: true, skipped: 'unsupported' };
     default: {

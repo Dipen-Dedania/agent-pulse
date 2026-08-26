@@ -22,9 +22,9 @@ const COVERAGE: Record<ToolId, { ignoreFile: boolean; hookBlock: boolean; badge:
   // PreToolUse deny (Claude-compatible response shape).
   'grok':            { ignoreFile: false, hookBlock: true,  badge: 'Hook deny (soft)',        tone: 'soft' },
   // OpenCode: the plugin awaits a bounded bridge verdict in tool.execute.before
-  // and throws on deny, aborting the call. No ignore-file writer yet (lands
-  // with the opencode.json permission.read Layer-1 writer).
-  'opencode':        { ignoreFile: false, hookBlock: true,  badge: 'Hook deny (soft)',        tone: 'soft' },
+  // and throws on deny (hook block), and Agent Pulse writes permission.read
+  // deny patterns into opencode.json (config deny, enforced by OpenCode core).
+  'opencode':        { ignoreFile: true,  hookBlock: true,  badge: 'Hook deny + config deny', tone: 'soft' },
 };
 
 // How strong a tool's protection is, mapped onto the shared Badge palette.

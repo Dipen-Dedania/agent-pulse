@@ -84,6 +84,45 @@ describe('aggregateAssistantTurns', () => {
     };
     expect(aggregateAssistantTurns(JSON.stringify(row), 's1')?.tokensIn).toBe(5);
   });
+
+  it('does not let a trailing <synthetic> notice steal the model attribution', () => {
+    // A session-limit notice is Claude Code's locally-generated message: model
+    // "<synthetic>" with an all-zero usage block. It must not overwrite the
+    // real model for the chunk (the token-misattribution bug).
+    const real = {
+      type: 'assistant',
+      sessionId: 's1',
+      message: {
+        model: 'claude-opus-4-7',
+        usage: { input_tokens: 300, output_tokens: 120, cache_read_input_tokens: 40, cache_creation_input_tokens: 0 },
+      },
+    };
+    const synthetic = {
+      type: 'assistant',
+      sessionId: 's1',
+      message: {
+        model: '<synthetic>',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      },
+    };
+    const text = `${JSON.stringify(real)}\n${JSON.stringify(synthetic)}\n`;
+    expect(aggregateAssistantTurns(text, 's1')).toEqual({
+      model: 'claude-opus-4-7',
+      tokensIn: 300,
+      tokensOut: 120,
+      cacheRead: 40,
+      cacheWrite: 0,
+    });
+  });
+
+  it('returns null when a chunk contains only a <synthetic> notice', () => {
+    const synthetic = {
+      type: 'assistant',
+      sessionId: 's1',
+      message: { model: '<synthetic>', usage: { input_tokens: 0, output_tokens: 0 } },
+    };
+    expect(aggregateAssistantTurns(JSON.stringify(synthetic), 's1')).toBeNull();
+  });
 });
 
 describe('aggregateCodexTokenCounts', () => {

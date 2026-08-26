@@ -14,6 +14,7 @@ import {
   WaitingRange,
   CacheEfficiencyRange,
   LifecycleRange,
+  LimitHitsRange,
 } from '../../common/timeline-types';
 import { logger } from '../../common/logger';
 
@@ -129,6 +130,12 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     try { return queries.getLifecycle(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-lifecycle:', e); return null; }
   });
+
+  ipcMain.handle('analytics:get-limit-hits', (_e, args: { range: LimitHitsRange }) => {
+    if (!queries) return null;
+    try { return queries.getLimitHits(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-limit-hits:', e); return null; }
+  });
 }
 
 /** Called by bootTimeline when the timeline cannot start. */
@@ -154,6 +161,7 @@ export function unregisterTimelineIpc() {
     'analytics:get-waiting',
     'analytics:get-cache-efficiency',
     'analytics:get-lifecycle',
+    'analytics:get-limit-hits',
   ]) {
     ipcMain.removeHandler(channel);
   }

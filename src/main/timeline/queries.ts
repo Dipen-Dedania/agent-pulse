@@ -48,6 +48,9 @@ import {
   CacheEfficiencyRow,
   LifecyclePayload,
   LifecycleRange,
+  LimitHitsPayload,
+  LimitHitsRange,
+  LimitHitKind,
 } from '../../common/timeline-types';
 import { estimateCost, estimateCostBreakdown, rateForModel, CostBreakdown, TokenCounts } from '../../common/pricing';
 
@@ -979,6 +982,56 @@ export class TimelineQueries {
     const byFile = Array.from(byFileMap.values()).sort((a, b) => b.count - a.count);
 
     return { range, total, warn, block, byTool, byRule, byFile, queriedAt: now };
+  }
+
+  // Session-limit hits — how often an agent told the user they'd hit a usage
+  // limit, from the limit_events table (populated by the transcript reader and
+  // the one-time backfill scan). Totals + per-kind split for the window, a
+  // per-day series for the trend bars, and the most-recent hit across all time.
+  getLimitHits(range: LimitHitsRange): LimitHitsPayload {
+    const now = Date.now();
+    const dayStart = startOfLocalDay(now);
+    // Inclusive day window: e.g. 7d = today + the 6 prior days.
+    const days = rangeDays(range);
+    const windowStart = dayStart - (days - 1) * DAY_MS;
+
+    const rows = this.db.query<{ ts: number; kind: string }>(
+      `SELECT ts, kind FROM limit_events WHERE ts >= ? ORDER BY ts`,
+      [windowStart],
+    );
+
+    const kindOrder: LimitHitKind[] = ['session', 'weekly', 'usage', 'other'];
+    const byKindMap = new Map<LimitHitKind, number>();
+    // Pre-seed every local day in the window so the trend bars are gap-free.
+    const byDayMap = new Map<string, number>();
+    for (let i = 0; i < days; i++) {
+      byDayMap.set(formatLocalDate(windowStart + i * DAY_MS), 0);
+    }
+
+    for (const r of rows) {
+      const kind = (kindOrder.includes(r.kind as LimitHitKind) ? r.kind : 'other') as LimitHitKind;
+      byKindMap.set(kind, (byKindMap.get(kind) ?? 0) + 1);
+      const key = formatLocalDate(r.ts);
+      if (byDayMap.has(key)) byDayMap.set(key, (byDayMap.get(key) ?? 0) + 1);
+    }
+
+    const byKind = kindOrder
+      .filter((k) => (byKindMap.get(k) ?? 0) > 0)
+      .map((k) => ({ kind: k, count: byKindMap.get(k) ?? 0 }));
+    const byDay = Array.from(byDayMap.entries()).map(([date, count]) => ({ date, count }));
+
+    const lastRow = this.db.query<{ ts: number }>(
+      `SELECT ts FROM limit_events ORDER BY ts DESC LIMIT 1`,
+    )[0];
+
+    return {
+      range,
+      total: rows.length,
+      byKind,
+      byDay,
+      lastHitAt: lastRow?.ts ?? null,
+      queriedAt: now,
+    };
   }
 
   getWindowValue(toolId: ToolId = 'claude-code'): WindowValuePayload {

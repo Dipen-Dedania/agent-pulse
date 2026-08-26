@@ -23,7 +23,7 @@ interface Database {
 }
 type DatabaseConstructor = new (path: string) => Database;
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -118,6 +118,29 @@ CREATE TABLE IF NOT EXISTS secret_access_events (
 CREATE INDEX IF NOT EXISTS idx_secret_access_ts      ON secret_access_events (ts);
 CREATE INDEX IF NOT EXISTS idx_secret_access_tool_ts ON secret_access_events (tool_id, ts);
 
+-- Usage-limit hits (v5). One row per "You've hit your … limit" notice Claude
+-- Code writes into a transcript. Keyed on the transcript's per-message uuid so
+-- the one-time backfill scan and the live tail reader can both insert the same
+-- hit idempotently (INSERT OR IGNORE). Volume is tiny (a handful ever), so this
+-- table is not pruned.
+CREATE TABLE IF NOT EXISTS limit_events (
+  uuid       TEXT PRIMARY KEY,
+  ts         INTEGER NOT NULL,
+  tool_id    TEXT    NOT NULL,
+  session_id TEXT,
+  kind       TEXT    NOT NULL,
+  reset_text TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_limit_ts ON limit_events (ts);
+
+-- Small key/value store for one-off migration/bootstrap markers (e.g. whether
+-- the limit_events backfill scan has run). Avoids re-scanning every boot.
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
+
 -- Persisted transcript read offsets. The TranscriptReader tracks how far it has
 -- read each transcript/rollout file so reruns only consume the new tail.
 -- Without persistence the in-memory map resets on every app restart, and the
@@ -198,6 +221,15 @@ export interface SecretAccessEventRow {
   ruleMessages: string;  // JSON-encoded [{ ruleId, message }]
 }
 
+export interface LimitEventRow {
+  uuid: string;
+  ts: number;
+  toolId: string;
+  sessionId?: string | null;
+  kind: string;
+  resetText?: string | null;
+}
+
 export interface TranscriptOffsetRow {
   path: string;
   offset: number;
@@ -211,6 +243,9 @@ export interface TimelineDb {
   insertQuotaSample: (row: QuotaSampleRow) => void;
   insertGuardrailEvent: (row: GuardrailEventRow) => void;
   insertSecretAccessEvent: (row: SecretAccessEventRow) => void;
+  insertLimitEvent: (row: LimitEventRow) => void;
+  getMeta: (key: string) => string | null;
+  setMeta: (key: string, value: string) => void;
   loadTranscriptOffsets: () => TranscriptOffsetRow[];
   saveTranscriptOffset: (row: TranscriptOffsetRow) => void;
   prune: (
@@ -257,9 +292,11 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     if (current === undefined) {
       db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
     } else if (current !== SCHEMA_VERSION) {
-      // v1 → v2 and v2 → v3 only add new tables (CREATE TABLE IF NOT EXISTS in
-      // SCHEMA_SQL already created them above), so just bump the recorded
-      // version. Future breaking migrations should branch on `current` here.
+      // Every migration so far (through v5, which adds limit_events + meta) only
+      // adds new tables (CREATE TABLE IF NOT EXISTS in SCHEMA_SQL already created
+      // them above), so just bump the recorded version. The one-time limit-hit
+      // backfill is triggered separately in bootTimeline via the `meta` marker,
+      // not here. Future breaking migrations should branch on `current`.
       logger.info(`[Timeline] migrating schema_version ${current} → ${SCHEMA_VERSION}`);
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }
@@ -315,6 +352,16 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     )
   `);
 
+  const insertLimitStmt: Statement = db.prepare(`
+    INSERT OR IGNORE INTO limit_events (uuid, ts, tool_id, session_id, kind, reset_text)
+    VALUES (@uuid, @ts, @toolId, @sessionId, @kind, @resetText)
+  `);
+
+  const getMetaStmt: Statement = db.prepare('SELECT value FROM meta WHERE key = ?');
+  const setMetaStmt: Statement = db.prepare(
+    'INSERT INTO meta (key, value) VALUES (@key, @value) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  );
+
   const selectOffsetsStmt: Statement = db.prepare(
     'SELECT path, offset, session_id AS sessionId, codex_snapshot AS codexSnapshot FROM transcript_offsets',
   );
@@ -360,6 +407,7 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
   const QUOTA_KEYS = ['toolId', 'windowKey', 'pctRemaining', 'resetsAt', 'sampledAt'] as const;
   const GUARDRAIL_KEYS = ['ts', 'toolId', 'decision', 'blockable', 'command', 'ruleIds', 'ruleMessages'] as const;
   const SECRET_KEYS = ['ts', 'toolId', 'decision', 'blockable', 'filePath', 'viaShell', 'ruleIds', 'ruleMessages'] as const;
+  const LIMIT_KEYS = ['uuid', 'ts', 'toolId', 'sessionId', 'kind', 'resetText'] as const;
   const OFFSET_KEYS = ['path', 'offset', 'sessionId', 'codexSnapshot'] as const;
 
   return {
@@ -387,6 +435,18 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     insertSecretAccessEvent: (row) => {
       try { insertSecretAccessStmt.run(normalize(row, SECRET_KEYS)); }
       catch (e: any) { logger.warn('[Timeline] insertSecretAccessEvent failed:', e?.message ?? e); }
+    },
+    insertLimitEvent: (row) => {
+      try { insertLimitStmt.run(normalize(row, LIMIT_KEYS)); }
+      catch (e: any) { logger.warn('[Timeline] insertLimitEvent failed:', e?.message ?? e); }
+    },
+    getMeta: (key) => {
+      try { return ((getMetaStmt.get(key) as { value?: string } | undefined)?.value) ?? null; }
+      catch (e: any) { logger.warn('[Timeline] getMeta failed:', e?.message ?? e); return null; }
+    },
+    setMeta: (key, value) => {
+      try { setMetaStmt.run({ key, value }); }
+      catch (e: any) { logger.warn('[Timeline] setMeta failed:', e?.message ?? e); }
     },
     loadTranscriptOffsets: () => {
       try { return selectOffsetsStmt.all() as TranscriptOffsetRow[]; }

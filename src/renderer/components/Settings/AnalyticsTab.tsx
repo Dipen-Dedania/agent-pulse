@@ -4,6 +4,7 @@ import { GlassToggle, IconButton, Tooltip } from '../Shared';
 import { logger } from '../../../common/logger';
 import { DigestCard } from './analytics/DigestCard';
 import { WindowValueCard } from './analytics/WindowValueCard';
+import { LimitHitsCard } from './analytics/LimitHitsCard';
 import { BacklogShippedCard } from './analytics/BacklogShippedCard';
 import { HeatmapCard } from './analytics/HeatmapCard';
 import { HourRhythmCard } from './analytics/HourRhythmCard';
@@ -186,6 +187,7 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
         <SummaryHeroCard />
         <DigestCard />
         <WindowValueCard />
+        <LimitHitsCard />
         <BacklogShippedCard />
         <HeatmapCard />
         <TokensTimelineCard />

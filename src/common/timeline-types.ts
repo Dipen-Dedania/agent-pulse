@@ -228,6 +228,39 @@ export interface SecretAccessAnalyticsPayload {
   queriedAt: number;
 }
 
+// ─── Session-limit hits ──────────────────────────────────────────────────────
+// How often Claude Code (or another agent) told the user they'd hit a usage
+// limit. Detected from the transcript's locally-generated "<synthetic>" notices
+// ("You've hit your session limit · resets …"), so it reflects real interruptions
+// rather than estimated quota.
+export type LimitHitsRange = TimelineRange;
+
+// Which limit was hit. "session" is the 5-hour window; "weekly" the 7-day one;
+// "usage" a generic usage-limit phrasing; "other" anything matching the limit
+// pattern we couldn't classify.
+export type LimitHitKind = 'session' | 'weekly' | 'usage' | 'other';
+
+export interface LimitHitKindCount {
+  kind: LimitHitKind;
+  count: number;
+}
+
+export interface LimitHitDayBucket {
+  date: string; // YYYY-MM-DD (local)
+  count: number;
+}
+
+export interface LimitHitsPayload {
+  range: LimitHitsRange;
+  total: number;
+  byKind: LimitHitKindCount[];
+  byDay: LimitHitDayBucket[];
+  // Most recent hit across ALL history (not just the window), so the card can
+  // say "last hit 3 days ago" even when the window is empty. null if never.
+  lastHitAt: number | null;
+  queriedAt: number;
+}
+
 // ─── Claude usage-window value ────────────────────────────────────────────────
 // Estimated API-equivalent spend for Claude Code over the trailing usage
 // windows, so users can see how much of their flat-rate plan they're actually

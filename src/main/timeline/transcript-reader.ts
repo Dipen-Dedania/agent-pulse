@@ -5,6 +5,11 @@ import { ToolId } from '../../common/types';
 import { logger } from '../../common/logger';
 import { EventsWriter, TokenDelta } from './events-writer';
 import { SessionsDeriver } from './sessions-deriver';
+import { detectLimitHits, LimitHitRecord } from './limit-detector';
+
+// Sink for usage-limit notices the reader spots while tailing a transcript.
+// bootTimeline wires this to db.insertLimitEvent; tests can pass a spy.
+export type LimitHitSink = (hits: LimitHitRecord[]) => void;
 
 // Cumulative usage snapshot for a Codex rollout file. Codex reports a running
 // total in every token_count event, so we diff successive snapshots rather than
@@ -69,6 +74,7 @@ export class TranscriptReader {
     private eventsWriter: EventsWriter,
     private sessionsDeriver: SessionsDeriver,
     private offsetStore?: TranscriptOffsetStore,
+    private limitSink?: LimitHitSink,
   ) {
     // Restore persisted offsets so reads resume where they left off across
     // restarts instead of re-reading each file from byte 0 (which double-counts).
@@ -229,6 +235,13 @@ export class TranscriptReader {
       delta = aggregateGrokTurnCompleted(parseableText);
     } else {
       delta = aggregateAssistantTurns(parseableText, sessionId);
+      // Usage-limit notices ("<synthetic>" messages) only appear in Claude
+      // Code–style transcripts. Detect over the same fresh tail so each notice
+      // is emitted once; the DB dedups on uuid regardless.
+      if (this.limitSink) {
+        const hits = detectLimitHits(parseableText, sessionId, toolId);
+        if (hits.length > 0) this.limitSink(hits);
+      }
     }
 
     this.setOffset(transcriptPath, nextEntry);
@@ -272,6 +285,12 @@ export function aggregateAssistantTurns(text: string, sessionId: string): TokenD
     catch { continue; }
 
     if (row?.type !== 'assistant') continue;
+    // Skip Claude Code's locally-generated notices (session-limit messages,
+    // interrupts, errors). They carry a zero-usage `usage` block and the model
+    // tag "<synthetic>" — if we let them through, the guard below counts their
+    // (zero) tokens but last-writer-wins would stamp the whole chunk's real
+    // tokens as "<synthetic>", hiding real spend under an unpriced pseudo-model.
+    if (row.message?.model === '<synthetic>') continue;
     // Some Claude Code versions use sessionId, some session_id. Tolerate both.
     const rowSession: string | undefined = row.sessionId ?? row.session_id;
     if (rowSession && rowSession !== sessionId) continue;

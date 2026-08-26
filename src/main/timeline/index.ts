@@ -8,6 +8,7 @@ import { TranscriptReader } from './transcript-reader';
 import { TimelineQueries } from './queries';
 import { registerTimelineIpc, registerTimelineIpcUnavailable, unregisterTimelineIpc } from './ipc';
 import { PruneScheduler } from './prune';
+import { maybeBackfillLimitEvents } from './limit-backfill';
 import { StatusStateManager } from '../bridge/state-manager';
 import { UsagePoller } from '../usage/poller';
 import { CodexUsagePoller } from '../codex-usage/poller';
@@ -49,9 +50,22 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     (opts.idleGapMinutes ? opts.idleGapMinutes * 60_000 : DEFAULT_IDLE_GAP_MS),
   );
   const quotaWriter = new QuotaWriter(db);
-  const transcriptReader = new TranscriptReader(eventsWriter, sessionsDeriver, {
-    loadAll: () => db.loadTranscriptOffsets(),
-    save: (row) => db.saveTranscriptOffset(row),
+  const transcriptReader = new TranscriptReader(
+    eventsWriter,
+    sessionsDeriver,
+    {
+      loadAll: () => db.loadTranscriptOffsets(),
+      save: (row) => db.saveTranscriptOffset(row),
+    },
+    (hits) => { for (const h of hits) db.insertLimitEvent(h); },
+  );
+
+  // One-time scan of existing transcripts so the Session Limits card shows
+  // history that predates this feature. Deferred off the boot path and guarded
+  // by a meta marker, so it runs at most once and never blocks startup.
+  setImmediate(() => {
+    try { maybeBackfillLimitEvents(db); }
+    catch (e) { logger.warn('[Timeline] limit backfill failed:', e); }
   });
   const queries = new TimelineQueries(db);
   const prune = new PruneScheduler(db);

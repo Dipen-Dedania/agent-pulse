@@ -9,6 +9,7 @@ import { TimelineQueries } from './queries';
 import { registerTimelineIpc, registerTimelineIpcUnavailable, unregisterTimelineIpc } from './ipc';
 import { PruneScheduler } from './prune';
 import { maybeBackfillLimitEvents } from './limit-backfill';
+import { maybeCleanupSyntheticModels } from './synthetic-cleanup';
 import { StatusStateManager } from '../bridge/state-manager';
 import { UsagePoller } from '../usage/poller';
 import { CodexUsagePoller } from '../codex-usage/poller';
@@ -66,6 +67,14 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
   setImmediate(() => {
     try { maybeBackfillLimitEvents(db); }
     catch (e) { logger.warn('[Timeline] limit backfill failed:', e); }
+  });
+
+  // One-time rewrite of sessions recorded before the "<synthetic>" guard, so
+  // the pseudo-model stops appearing as a phantom row in Model usage. Same
+  // deferred, marker-guarded pattern as the limit backfill above.
+  setImmediate(() => {
+    try { maybeCleanupSyntheticModels(db); }
+    catch (e) { logger.warn('[Timeline] synthetic-model cleanup failed:', e); }
   });
   const queries = new TimelineQueries(db);
   const prune = new PruneScheduler(db);

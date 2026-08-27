@@ -53,6 +53,7 @@ import {
   LimitHitKind,
 } from '../../common/timeline-types';
 import { estimateCost, estimateCostBreakdown, rateForModel, CostBreakdown, TokenCounts } from '../../common/pricing';
+import { realModels } from './models';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -118,7 +119,7 @@ export class TimelineQueries {
   // (same best-effort attribution getModelUsage uses). `priced` is true when
   // at least one of the session's models was in the price table.
   private costForSession(modelsUsed: string | null | undefined, tokens: TokenCounts): { costUsd: number; priced: boolean } {
-    const models = (modelsUsed ?? '').split(',').map((m) => m.trim()).filter(Boolean);
+    const models = realModels(modelsUsed);
     if (models.length === 0) return { costUsd: 0, priced: false };
     const share = 1 / models.length;
     let costUsd = 0;
@@ -140,7 +141,7 @@ export class TimelineQueries {
   // the cost broken out per token class so the UI can explain the total.
   private breakdownForSession(modelsUsed: string | null | undefined, tokens: TokenCounts): CostBreakdown {
     const acc: CostBreakdown = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
-    const models = (modelsUsed ?? '').split(',').map((m) => m.trim()).filter(Boolean);
+    const models = realModels(modelsUsed);
     if (models.length === 0) return acc;
     const share = 1 / models.length;
     for (const model of models) {
@@ -413,7 +414,10 @@ export class TimelineQueries {
     const perModel = new Map<string, ModelUsageRow>();
     for (const row of sessionRows) {
       if (!row.models_used) continue;
-      const models = row.models_used.split(',').filter(Boolean);
+      // Drop pseudo-models like "<synthetic>" before splitting — otherwise the
+      // even-split attribution hands them a phantom share of real tokens (see
+      // ./models). A session with only pseudo-models contributes nothing.
+      const models = realModels(row.models_used);
       if (models.length === 0) continue;
       const share = 1 / models.length;
       for (const model of models) {

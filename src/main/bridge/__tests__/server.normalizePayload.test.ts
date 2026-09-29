@@ -110,6 +110,80 @@ describe('Claude Code events', () => {
   });
 });
 
+// ── Claude Code lifecycle events (SessionStart/SubagentStop + depth hints) ──
+
+// The lifecycle events may omit permission_mode; routing then rides on the
+// transcript path. Worst-case variant: no permission_mode at all.
+const ccBare = (hook_event_name: string, extra: object = {}) => ({
+  hook_event_name,
+  session_id: 'sess-cc',
+  transcript_path: 'C:\\Users\\test\\.claude\\projects\\my-project\\sess-cc.jsonl',
+  cwd: '/workspace',
+  ...extra,
+});
+
+describe('Claude Code lifecycle events', () => {
+  it('SessionStart → idle-active with agentReset', () => {
+    const r = normalizePayload(cc('SessionStart'));
+    expect(r?.toolId).toBe('claude-code');
+    expect(r?.state).toBe('idle-active');
+    expect((r?.payload as any).agentReset).toBe(true);
+  });
+
+  it('SubagentStart carries agentDelta +1', () => {
+    const r = normalizePayload(cc('SubagentStart'));
+    expect(r?.state).toBe('working');
+    expect((r?.payload as any).agentDelta).toBe(1);
+  });
+
+  it('SubagentStop → working with agentDelta -1', () => {
+    const r = normalizePayload(cc('SubagentStop'));
+    expect(r?.toolId).toBe('claude-code');
+    expect(r?.state).toBe('working');
+    expect((r?.payload as any).agentDelta).toBe(-1);
+  });
+
+  it('Stop and SessionEnd carry agentReset', () => {
+    expect((normalizePayload(cc('Stop'))?.payload as any).agentReset).toBe(true);
+    expect((normalizePayload(cc('SessionEnd'))?.payload as any).agentReset).toBe(true);
+  });
+
+  it.each(['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'SubagentStart', 'SubagentStop'])(
+    '%s without permission_mode still routes to claude-code',
+    (event) => {
+      expect(normalizePayload(ccBare(event))?.toolId).toBe('claude-code');
+    },
+  );
+
+  it('SessionStart with source "compact" is dropped (mid-turn compaction, not a boundary)', () => {
+    expect(normalizePayload(cc('SessionStart', { source: 'compact' }))).toBeNull();
+    expect(normalizePayload(ccBare('SessionStart', { source: 'compact' }))).toBeNull();
+  });
+
+  it.each(['startup', 'resume', 'clear'])(
+    'SessionStart with source "%s" stays a boundary (idle-active + agentReset)',
+    (source) => {
+      const r = normalizePayload(cc('SessionStart', { source }));
+      expect(r?.state).toBe('idle-active');
+      expect((r?.payload as any).agentReset).toBe(true);
+    },
+  );
+
+  it('non-standard .claude layout (no /projects/) still routes to claude-code', () => {
+    const r = normalizePayload(ccBare('SessionStart', {
+      transcript_path: '/home/user/.claude/sessions/sess-cc.jsonl',
+    }));
+    expect(r?.toolId).toBe('claude-code');
+  });
+
+  it('Copilot SessionStart/SubagentStop payloads still route to vscode-copilot', () => {
+    // Copilot transcripts never live under a .claude dir; the widened CC
+    // regex must not steal them.
+    expect(normalizePayload(copilot('SessionStart'))?.toolId).toBe('vscode-copilot');
+    expect(normalizePayload(copilot('SubagentStop'))?.toolId).toBe('vscode-copilot');
+  });
+});
+
 // ── Cursor ────────────────────────────────────────────────────────────────────
 
 describe('Cursor events', () => {

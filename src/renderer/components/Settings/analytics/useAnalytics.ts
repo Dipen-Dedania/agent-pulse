@@ -26,6 +26,8 @@ import {
   LifecyclePayload,
   LimitHitsPayload,
   LimitHitsRange,
+  CacheHealthPayload,
+  ContextPressurePayload,
 } from '../../../../common/timeline-types';
 import { BacklogStatsPayload } from '../../../../common/backlog-types';
 
@@ -185,6 +187,14 @@ export function useLifecycle(range: TimelineRange) {
 
 export function useLimitHits(range: LimitHitsRange) {
   return useAnalyticsQuery<LimitHitsPayload>('analytics:get-limit-hits', { range }, range);
+}
+
+export function useCacheHealth(range: TimelineRange) {
+  return useAnalyticsQuery<CacheHealthPayload>('analytics:get-cache-health', { range }, range);
+}
+
+export function useContextPressure(range: TimelineRange) {
+  return useAnalyticsQuery<ContextPressurePayload>('analytics:get-context-pressure', { range }, range);
 }
 
 // Overnight Backlog — served from the backlog DB via backlog:get-stats (not the

@@ -4,6 +4,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 const listenerMap = new WeakMap<Function, (...args: any[]) => void>();
 
 contextBridge.exposeInMainWorld('electron', {
+  // Static, safe-to-expose facts about the host OS so the renderer can gate
+  // platform-specific UI (e.g. the screen-edge glow is unavailable on Linux).
+  platform: process.platform,
   invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
   send: (channel: string, ...args: any[]) => ipcRenderer.send(channel, ...args),
   on: (channel: string, callback: (event: any, ...args: any[]) => void) => {

@@ -20,6 +20,7 @@ import {
   redactTranscriptPath,
 } from './security';
 import { tokensMatch } from '../mcp/connection';
+import { parseStatusLinePayload, StatusLineFeedSnapshot } from './statusline';
 import type { McpCardRequest, McpCardResult } from '../backlog/mcp-intake';
 
 // Backlog capture from a Claude Code terminal chat. The MCP server
@@ -47,6 +48,16 @@ export interface BridgeOptions {
   // listen error escape as a fatal uncaught exception ("A JavaScript error
   // occurred in the main process").
   onListenError?: (err: NodeJS.ErrnoException, port: number) => void;
+  // Claude Code statusline feed (POST /statusline): the deployed statusline
+  // script forwards its stdin JSON here. Quota goes to the usage pipeline,
+  // the rest to timeline analytics. Token-gated like /backlog/* — the payload
+  // drives the usage meter, OS notifications, scheduler gates, and DB writes,
+  // so a drive-by no-preflight fetch from a web page must not reach it. The
+  // deployed scripts read the token from statusline.config.json.
+  onStatusLine?: (snap: StatusLineFeedSnapshot) => void;
+  // Test-only override: bind an explicit port (0 = ephemeral). Defaults to
+  // BRIDGE_PORT in production.
+  port?: number;
 }
 
 // How many times to retry binding when the port is busy, and how long to wait
@@ -63,13 +74,33 @@ const LISTEN_RETRY_DELAY_MS = 500;
 // `idle_prompt` is CC's 60s-idle nudge that fires after Stop; not blocking, so we ignore it
 // and let the prior Stop's idle-active state stand.
 // Stop / PostToolUse / SessionEnd / TeammateIdle = turn boundary → idle-active
+// SessionStart = session open, awaiting a prompt → idle-active
+// SubagentStop nominally maps to working, but the state manager treats it as
+// state-preserving (see agentDelta handling there): a background subagent can
+// finish after the main turn's Stop, and must not revive an idle bubble.
 const CC_WAITING_EVENTS = new Set(['PermissionRequest', 'Elicitation']);
-const CC_WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SubagentStart']);
-const CC_IDLE_EVENTS    = new Set(['Stop', 'PostToolUse', 'SessionEnd', 'TeammateIdle']);
+const CC_WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SubagentStart', 'SubagentStop']);
+const CC_IDLE_EVENTS    = new Set(['Stop', 'PostToolUse', 'SessionStart', 'SessionEnd', 'TeammateIdle']);
 const CC_ERROR_EVENTS   = new Set(['StopFailure', 'PostToolUseFailure']);
 const CC_NOTIFICATION_WAITING_TYPES = new Set(['permission_prompt']);
 
+// Subagent depth hints for the state manager: SubagentStart/Stop move a
+// per-session counter (activeAgents) instead of anything absolute, and
+// turn/session boundaries reset it so a missed SubagentStop can't wedge the
+// count above zero.
+function ccAgentDepthHints(eventName: string): { agentDelta?: 1 | -1; agentReset?: boolean } {
+  if (eventName === 'SubagentStart') return { agentDelta: 1 };
+  if (eventName === 'SubagentStop')  return { agentDelta: -1 };
+  if (eventName === 'Stop' || eventName === 'SessionStart' || eventName === 'SessionEnd') return { agentReset: true };
+  return {};
+}
+
 function mapClaudeCodeEvent(eventName: string, data: any): AgentState | null {
+  // Claude Code fires SessionStart mid-turn on auto-compaction (source:
+  // 'compact'). That's not a session boundary — mapping it would flip a
+  // working bubble to idle and agentReset live subagent depth, so drop it.
+  // Other sources (startup/resume/clear/absent) are real boundaries.
+  if (eventName === 'SessionStart' && data?.source === 'compact') return null;
   if (eventName === 'Notification') {
     return CC_NOTIFICATION_WAITING_TYPES.has(data.notification_type) ? 'waiting' : null;
   }
@@ -145,6 +176,7 @@ export class StatusBridgeServer {
   constructor(stateManager: StatusStateManager, options: BridgeOptions = {}) {
     this.stateManager = stateManager;
     this.options = options;
+    this.port = options.port ?? BRIDGE_PORT;
     // Wrap with .catch so an async-handler rejection doesn't escape as an
     // unhandled promise — we still want a clean 500 on the wire.
     this.server = http.createServer((req, res) => {
@@ -184,8 +216,16 @@ export class StatusBridgeServer {
   // re-bind by editing this file.
   private listen() {
     this.server.listen(this.port, '127.0.0.1', () => {
+      // Re-read the bound port so `port: 0` (ephemeral, tests) resolves to the
+      // real one — the Host allowlist compares against it.
+      const addr = this.server.address();
+      if (addr && typeof addr === 'object') this.port = addr.port;
       logger.info(`Status Bridge running on 127.0.0.1:${this.port}`);
     });
+  }
+
+  public getPort(): number {
+    return this.port;
   }
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -253,6 +293,39 @@ export class StatusBridgeServer {
         res.end(JSON.stringify({ status: 'ok' }));
       } catch (e) {
         logger.error(`JSON parse error: ${e}`);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    } else if (req.method === 'POST' && req.url === '/statusline') {
+      // Token gate, checked before the body is read. The payload drives the
+      // usage meter, OS notifications, scheduler gates, and analytics DB
+      // writes — and repeated pushes suppress the authoritative poll — so it
+      // must not be reachable by a no-preflight fetch from a web page. The
+      // custom header also forces a CORS preflight this server never answers.
+      const header = req.headers['x-pulse-token'];
+      const provided = Array.isArray(header) ? header[0] : header;
+      if (!tokensMatch(this.options.getMcpToken?.() ?? null, provided)) {
+        logger.warn('[Bridge/StatusLine] rejected request with missing or invalid token');
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, reason: 'unauthorized' }));
+        return;
+      }
+      const result = await readBody(req);
+      if (!result.ok) {
+        res.writeHead(result.reason === 'too-large' ? 413 : 400);
+        res.end();
+        return;
+      }
+      let body = result.body;
+      try {
+        // Strip UTF-8 BOM — the PowerShell statusline script posts UTF-8 bytes
+        // and PS 5.1 file/console plumbing likes to prepend one.
+        if (body.charCodeAt(0) === 0xFEFF) body = body.slice(1);
+        const snap = parseStatusLinePayload(JSON.parse(body));
+        if (snap) this.options.onStatusLine?.(snap);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+      } catch {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON' }));
       }
@@ -838,12 +911,16 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
       }
 
       // Format 5a — Claude Code CLI (has permission_mode, a CLI-specific field,
-      // or a transcript_path under `.claude/projects/`). MUST be checked before
-      // Copilot because both send transcript_path; some CC events (e.g.
-      // Notification) omit permission_mode, so the path pattern is the fallback.
+      // or a transcript_path under a `.claude/` directory). MUST be checked
+      // before Copilot because both send transcript_path; several CC events
+      // (Notification, and the lifecycle events like SessionStart/SubagentStop)
+      // can omit permission_mode, so the path pattern is the fallback. The
+      // pattern is any `.claude` dir (not just `.claude/projects/`) so custom
+      // config layouts don't leak CC events into Copilot's transcript_path
+      // catch-all below.
       const isClaudeCodeTranscript =
         typeof data.transcript_path === 'string' &&
-        /[\\/]\.claude[\\/]projects[\\/]/.test(data.transcript_path);
+        /[\\/]\.claude[\\/]/.test(data.transcript_path);
       if (data.permission_mode !== undefined || isClaudeCodeTranscript) {
         const state = mapClaudeCodeEvent(eventName, data);
         if (state === null) {
@@ -857,6 +934,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
             sessionId:    data.session_id,
             taskSummary:  data.tool_name ? `Tool: ${data.tool_name}` : undefined,
             errorMessage: data.error,
+            ...ccAgentDepthHints(eventName),
             ...common,
           },
         };
@@ -922,6 +1000,7 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
           sessionId:    data.session_id,
           taskSummary:  data.tool_name ? `Tool: ${data.tool_name}` : undefined,
           errorMessage: data.error,
+          ...ccAgentDepthHints(eventName),
           ...common,
         },
       };

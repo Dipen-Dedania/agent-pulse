@@ -4,6 +4,7 @@ import { initTimelineDb, TimelineDb } from './db';
 import { EventsWriter } from './events-writer';
 import { SessionsDeriver, DEFAULT_IDLE_GAP_MS } from './sessions-deriver';
 import { QuotaWriter } from './quota-writer';
+import { StatuslineWriter } from './statusline-writer';
 import { TranscriptReader } from './transcript-reader';
 import { TimelineQueries } from './queries';
 import { registerTimelineIpc, registerTimelineIpcUnavailable, unregisterTimelineIpc } from './ipc';
@@ -11,6 +12,7 @@ import { PruneScheduler } from './prune';
 import { maybeBackfillLimitEvents } from './limit-backfill';
 import { maybeCleanupSyntheticModels } from './synthetic-cleanup';
 import { StatusStateManager } from '../bridge/state-manager';
+import { StatusLineFeedSnapshot } from '../bridge/statusline';
 import { UsagePoller } from '../usage/poller';
 import { CodexUsagePoller } from '../codex-usage/poller';
 import { CursorUsagePoller } from '../cursor-usage/poller';
@@ -28,6 +30,8 @@ export interface TimelineBootOptions {
 
 export interface TimelineHandle {
   db: TimelineDb;
+  // Claude Code statusline feed → statusline_samples (throttled per session).
+  ingestStatusline: (snap: StatusLineFeedSnapshot) => void;
   flushSessions: () => void;
   updateOptions: (opts: { redactTaskText?: boolean; idleGapMinutes?: number }) => void;
   shutdown: () => void;
@@ -51,6 +55,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     (opts.idleGapMinutes ? opts.idleGapMinutes * 60_000 : DEFAULT_IDLE_GAP_MS),
   );
   const quotaWriter = new QuotaWriter(db);
+  const statuslineWriter = new StatuslineWriter(db);
   const transcriptReader = new TranscriptReader(
     eventsWriter,
     sessionsDeriver,
@@ -124,6 +129,10 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
 
   return {
     db,
+    ingestStatusline: (snap) => {
+      try { statuslineWriter.onSnapshot(snap); }
+      catch (e) { logger.warn('[Timeline] statusline ingest failed:', e); }
+    },
     flushSessions,
     updateOptions: (next) => {
       if (next.redactTaskText !== undefined) {

@@ -19,6 +19,13 @@ export function parseUsageResponse(raw: unknown): UsageSnapshot | null {
   return { fiveHour, sevenDay };
 }
 
+// Exported for the statusline ingest path (src/main/bridge/statusline.ts):
+// Claude Code's statusline JSON carries the same window shape under
+// rate_limits.five_hour / seven_day, with the same field-name variants.
+export function parseRateLimitWindow(raw: unknown): UsageWindow | null {
+  return parseWindow(raw);
+}
+
 function parseWindow(raw: unknown): UsageWindow | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;

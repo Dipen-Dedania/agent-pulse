@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
-import { BRIDGE_URL } from '../bridge/config';
+import { BRIDGE_URL, STATUSLINE_INGEST_URL } from '../bridge/config';
+import { readConnectionFile } from '../mcp/connection';
 import { ToolId, StatusLineConfig, StatusLineRuntime, StatusLineState } from '../../common/types';
 import {
   OPENCODE_PLUGIN_FILENAME,
@@ -149,6 +150,36 @@ export class ConfigWriter {
     );
   }
 
+  // Lenient ownership test used for REMOVAL: any localhost http hook posting
+  // to /event is ours, whatever the port, so legacy installs written under a
+  // different AGENT_PULSE_PORT are still cleaned up. Detection
+  // (hookArrayHasAgentPulseHttp above) deliberately stays exact against
+  // bridgeUrl — a hook pointing at a stale port must read as "not installed"
+  // so install/upgrade rewrites it to the current URL.
+  private static isAgentPulseHttpHook(h: any): boolean {
+    if (h?.type !== 'http' || typeof h?.url !== 'string') return false;
+    try {
+      const u = new URL(h.url);
+      return /^https?:$/.test(u.protocol) &&
+        ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname.toLowerCase()) &&
+        u.pathname === '/event';
+    } catch {
+      return false;
+    }
+  }
+
+  // Strip our http hooks out of a Claude-Code-shaped entry array, preserving
+  // foreign entries AND foreign hooks living inside a mixed entry (possible
+  // after the old clobbering write, when users hand-edited our entry).
+  private stripAgentPulseHttpEntries(entries: any): any[] {
+    if (!Array.isArray(entries)) return [];
+    return entries
+      .map((e) => Array.isArray(e?.hooks)
+        ? { ...e, hooks: e.hooks.filter((h: any) => !ConfigWriter.isAgentPulseHttpHook(h)) }
+        : e)
+      .filter((e) => !Array.isArray(e?.hooks) || e.hooks.length > 0);
+  }
+
   private isClaudeCodeHookInstalled(): boolean {
     const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
     const settings = this.readJson(settingsPath);
@@ -157,6 +188,24 @@ export class ConfigWriter {
     return ['PreToolUse', 'Stop', 'StopFailure'].every((event) =>
       this.hookArrayHasAgentPulseHttp(settings.hooks[event]),
     );
+  }
+
+  // True when the Claude Code hook is ours (installed) but was written by an
+  // older app version that registered fewer events. Foreign or absent hooks
+  // are never considered upgradable — we only rewrite what we own.
+  public claudeCodeHookNeedsUpgrade(): boolean {
+    if (!this.isClaudeCodeHookInstalled()) return false;
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    const settings = this.readJson(settingsPath);
+    if (!settings?.hooks) return false;
+    return ConfigWriter.allClaudeCodeHookEvents().some(
+      (event) => !this.hookArrayHasAgentPulseHttp(settings.hooks[event]),
+    );
+  }
+
+  public upgradeClaudeCodeHook(): { success: boolean } {
+    const result = this.writeClaudeCodeHook();
+    return { success: result.success };
   }
 
   // Grok home dir, honoring the documented GROK_HOME override (falls back to
@@ -877,6 +926,21 @@ exit 0
 `;
   }
 
+  // Canonical Claude Code hook event set. Single source of truth for write,
+  // uninstall, and the staleness check (`claudeCodeHookNeedsUpgrade`).
+  // `matcher` events are registered with `matcher: '*'`; `plain` events without.
+  // PostToolUse and PreCompact are deliberately absent: PostToolUse would flap
+  // working↔idle on every tool call (and inflate derived turn counts), and
+  // PreCompact needs shrunk-transcript offset handling first.
+  private static readonly CLAUDE_CODE_HOOK_EVENTS = {
+    matcher: ['PreToolUse', 'PermissionRequest', 'Elicitation', 'Notification'],
+    plain:   ['Stop', 'StopFailure', 'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'SubagentStart', 'SubagentStop'],
+  } as const;
+
+  private static allClaudeCodeHookEvents(): string[] {
+    return [...ConfigWriter.CLAUDE_CODE_HOOK_EVENTS.matcher, ...ConfigWriter.CLAUDE_CODE_HOOK_EVENTS.plain];
+  }
+
   private writeClaudeCodeHook() {
     const claudeDir = path.join(os.homedir(), '.claude');
     if (!fs.existsSync(claudeDir)) {
@@ -898,15 +962,19 @@ exit 0
     // to the URL with no shell involved (no curl, no quoting, cross-platform safe).
     const httpHook = { type: 'http', url: this.bridgeUrl, timeout: 5 };
 
-    settings.hooks = {
-      ...(settings.hooks || {}),
-      PreToolUse:        [{ matcher: '*', hooks: [httpHook] }],
-      Stop:              [{ hooks: [httpHook] }],
-      StopFailure:       [{ hooks: [httpHook] }],
-      PermissionRequest: [{ matcher: '*', hooks: [httpHook] }],
-      Elicitation:       [{ matcher: '*', hooks: [httpHook] }],
-      Notification:      [{ matcher: '*', hooks: [httpHook] }],
-    };
+    // Merge per event: strip any prior agent-pulse entry (including legacy
+    // other-port ones), keep foreign entries, append ours as a separate entry.
+    // Strip-then-append makes this idempotent, so the boot-time upgrade can
+    // run every launch without duplicating entries or destroying user hooks.
+    if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
+      settings.hooks = {};
+    }
+    for (const event of ConfigWriter.CLAUDE_CODE_HOOK_EVENTS.matcher) {
+      settings.hooks[event] = [...this.stripAgentPulseHttpEntries(settings.hooks[event]), { matcher: '*', hooks: [httpHook] }];
+    }
+    for (const event of ConfigWriter.CLAUDE_CODE_HOOK_EVENTS.plain) {
+      settings.hooks[event] = [...this.stripAgentPulseHttpEntries(settings.hooks[event]), { hooks: [httpHook] }];
+    }
 
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
     return { success: true, path: settingsPath };
@@ -1458,12 +1526,16 @@ export const AgentPulse = async ({ directory, worktree }) => {
       if (!fs.existsSync(settingsPath)) return { success: true };
       try {
         const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-        delete settings.hooks?.PreToolUse;
-        delete settings.hooks?.Stop;
-        delete settings.hooks?.StopFailure;
-        delete settings.hooks?.PermissionRequest;
-        delete settings.hooks?.Elicitation;
-        delete settings.hooks?.Notification;
+        // Remove only our own http entries; user-authored hooks sharing the
+        // same event keys must survive uninstall.
+        if (settings.hooks && typeof settings.hooks === 'object') {
+          for (const event of ConfigWriter.allClaudeCodeHookEvents()) {
+            if (!(event in settings.hooks)) continue;
+            const kept = this.stripAgentPulseHttpEntries(settings.hooks[event]);
+            if (kept.length === 0) delete settings.hooks[event];
+            else settings.hooks[event] = kept;
+          }
+        }
         if (settings.hooks && Object.keys(settings.hooks).length === 0) {
           delete settings.hooks;
         }
@@ -1482,8 +1554,14 @@ export const AgentPulse = async ({ directory, worktree }) => {
       if (fs.existsSync(hooksConfigPath)) {
         try {
           const config = JSON.parse(fs.readFileSync(hooksConfigPath, 'utf8'));
+          // Same filter as writeCursorHook's write-side merge: drop only our
+          // own entries, keep user-authored ones.
           for (const event of ['preToolUse', 'postToolUse', 'postToolUseFailure', 'sessionStart', 'sessionEnd', 'stop']) {
-            delete config.hooks?.[event];
+            const arr = config.hooks?.[event];
+            if (!Array.isArray(arr)) continue;
+            const kept = arr.filter((h: any) => !h?.command?.includes('agent-pulse'));
+            if (kept.length === 0) delete config.hooks[event];
+            else config.hooks[event] = kept;
           }
           if (config.hooks && Object.keys(config.hooks).length === 0) delete config.hooks;
           fs.writeFileSync(hooksConfigPath, JSON.stringify(config, null, 2));
@@ -1636,12 +1714,23 @@ export const AgentPulse = async ({ directory, worktree }) => {
     return norm.includes('/agent-pulse/statusline') ? 'ours' : 'foreign';
   }
 
-  // Write the projected config the deployed script reads at runtime.
+  // Write the projected config the deployed script reads at runtime. The
+  // projection carries `bridgeStatusUrl` and `pulseToken` (not part of
+  // StatusLineConfig — the in-app preview renderer ignores unknown keys) so
+  // the script knows where to forward its stdin JSON for quota/cost/cache
+  // analytics, and can authenticate: POST /statusline is token-gated. The
+  // token is the same shared secret as ~/.agent-pulse/mcp.json, so the file
+  // gets the same 0o600 (advisory on Windows).
   public writeStatusLineConfig(cfg: StatusLineConfig): string {
     const dir = this.statusLineDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const p = this.statusLineConfigPath();
-    fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+    const token = readConnectionFile()?.token;
+    fs.writeFileSync(p, JSON.stringify({
+      ...cfg,
+      bridgeStatusUrl: STATUSLINE_INGEST_URL,
+      ...(token ? { pulseToken: token } : {}),
+    }, null, 2), { mode: 0o600 });
     return p;
   }
 
@@ -1802,6 +1891,21 @@ for (var li = 0; li < cfg.lines.length; li++){
   }
 }
 process.stdout.write(out.join(NL));
+// Forward the raw session JSON to the Agent Pulse bridge (quota/cost/cache
+// analytics). Fire-and-forget on loopback AFTER the line is rendered; every
+// failure is swallowed so the status line never breaks when the app is closed.
+if (cfg && typeof cfg.bridgeStatusUrl === 'string' && raw) {
+  try {
+    var url = require('url');
+    var u = new url.URL(cfg.bridgeStatusUrl);
+    var hdrs = { 'Content-Type': 'application/json' };
+    if (typeof cfg.pulseToken === 'string' && cfg.pulseToken) hdrs['x-pulse-token'] = cfg.pulseToken;
+    var req = require('http').request({ host: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: hdrs });
+    req.on('error', function(){});
+    req.setTimeout(250, function(){ req.destroy(); });
+    req.end(raw);
+  } catch (e) {}
+}
 `;
   }
 
@@ -1965,6 +2069,22 @@ for row in cfg['lines']:
 # Write UTF-8 bytes directly: Windows Python defaults stdout to the locale
 # codepage (cp1252), which cannot encode the bar glyphs.
 sys.stdout.buffer.write(NL.join(out).encode('utf-8'))
+sys.stdout.buffer.flush()
+# Forward the raw session JSON to the Agent Pulse bridge (quota/cost/cache
+# analytics). Runs AFTER the line is flushed; every failure is swallowed so the
+# status line never breaks when the app is closed.
+try:
+    _bsu = cfg.get('bridgeStatusUrl') if cfg else None
+    if isinstance(_bsu, str) and raw:
+        import urllib.request
+        _hdrs = {'Content-Type': 'application/json'}
+        _tok = cfg.get('pulseToken') if cfg else None
+        if isinstance(_tok, str) and _tok:
+            _hdrs['x-pulse-token'] = _tok
+        _req = urllib.request.Request(_bsu, data=raw.encode('utf-8'), headers=_hdrs, method='POST')
+        urllib.request.urlopen(_req, timeout=0.25).close()
+except Exception:
+    pass
 `;
   }
 
@@ -2102,6 +2222,25 @@ foreach ($row in $cfg.lines){
   }
 }
 [Console]::Out.Write($out -join $NL)
+# Forward the raw session JSON to the Agent Pulse bridge (quota/cost/cache
+# analytics). Runs AFTER the line is written; every failure is swallowed so the
+# status line never breaks when the app is closed. WebRequest (not
+# Invoke-RestMethod) so the timeout can sit well under a second.
+if ($null -ne $cfg -and $null -ne $cfg.PSObject.Properties['bridgeStatusUrl'] -and $raw){
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($raw)
+    $wr = [System.Net.WebRequest]::Create([string]$cfg.bridgeStatusUrl)
+    $wr.Method = 'POST'
+    $wr.ContentType = 'application/json; charset=utf-8'
+    if ($null -ne $cfg.PSObject.Properties['pulseToken']) { $wr.Headers.Add('x-pulse-token', [string]$cfg.pulseToken) }
+    $wr.Timeout = 500
+    $wr.ReadWriteTimeout = 500
+    $rs = $wr.GetRequestStream()
+    $rs.Write($bytes, 0, $bytes.Length)
+    $rs.Close()
+    $wr.GetResponse().Close()
+  } catch { }
+}
 `;
   }
 }

@@ -17,6 +17,8 @@ import { SecretProtectionCard } from './analytics/SecretProtectionCard';
 import { CadenceCard } from './analytics/CadenceCard';
 import { WaitingCard } from './analytics/WaitingCard';
 import { CacheEfficiencyCard } from './analytics/CacheEfficiencyCard';
+import { CacheHealthCard } from './analytics/CacheHealthCard';
+import { ContextPressureCard } from './analytics/ContextPressureCard';
 import { LifecycleCard } from './analytics/LifecycleCard';
 import { SummaryHeroCard } from './analytics/SummaryHeroCard';
 import { Card, Segmented } from './analytics/shared';
@@ -201,6 +203,10 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
           <WaitingCard />
         </div>
         <CacheEfficiencyCard />
+        <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
+          <CacheHealthCard />
+          <ContextPressureCard />
+        </div>
         <LifecycleCard />
         <ProjectBreakdownCard />
         <GuardrailsCard />

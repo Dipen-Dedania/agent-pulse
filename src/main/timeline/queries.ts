@@ -51,6 +51,12 @@ import {
   LimitHitsPayload,
   LimitHitsRange,
   LimitHitKind,
+  CacheHealthPayload,
+  CacheHealthRange,
+  CacheHealthSessionRow,
+  ContextPressurePayload,
+  ContextPressureRange,
+  ContextPressureSessionRow,
 } from '../../common/timeline-types';
 import { estimateCost, estimateCostBreakdown, rateForModel, CostBreakdown, TokenCounts } from '../../common/pricing';
 import { realModels } from './models';
@@ -1034,6 +1040,131 @@ export class TimelineQueries {
       byKind,
       byDay,
       lastHitAt: lastRow?.ts ?? null,
+      queriedAt: now,
+    };
+  }
+
+  // Latest statusline sample per session within the range. Shared by the two
+  // statusline-feed cards: statusline_samples rows are throttled snapshots, and
+  // per-session stats (hit ratio, misses, context %) are running values where
+  // only the newest sample matters.
+  private latestStatuslineSamples(startMs: number): Array<{
+    session_id: string; model: string | null; sampled_at: number;
+    cost_usd: number | null; context_used_pct: number | null;
+    cache_warm: number | null; cache_hit_ratio: number | null; cache_misses: number | null;
+  }> {
+    return this.db.query(
+      `SELECT s.session_id, s.model, s.sampled_at, s.cost_usd, s.context_used_pct,
+              s.cache_warm, s.cache_hit_ratio, s.cache_misses
+       FROM statusline_samples s
+       JOIN (
+         SELECT session_id, MAX(sampled_at) AS latest
+         FROM statusline_samples
+         WHERE sampled_at >= ?
+         GROUP BY session_id
+       ) t ON s.session_id = t.session_id AND s.sampled_at = t.latest
+       ORDER BY s.sampled_at DESC`,
+      [startMs],
+    );
+  }
+
+  getCacheHealth(range: CacheHealthRange): CacheHealthPayload {
+    const now = Date.now();
+    const dayStart = startOfLocalDay(now);
+    const days = rangeDays(range);
+    const windowStart = dayStart - (days - 1) * DAY_MS;
+
+    const latest = this.latestStatuslineSamples(windowStart)
+      .filter((r) => r.cache_hit_ratio !== null || r.cache_warm !== null || r.cache_misses !== null);
+
+    const rows: CacheHealthSessionRow[] = latest.slice(0, 8).map((r) => ({
+      sessionId: r.session_id,
+      model: r.model,
+      hitRatio: r.cache_hit_ratio,
+      warm: r.cache_warm === null ? null : r.cache_warm === 1,
+      misses: r.cache_misses,
+      lastSampledAt: r.sampled_at,
+    }));
+
+    const ratios = latest.map((r) => r.cache_hit_ratio).filter((v): v is number => v !== null);
+    const warms = latest.map((r) => r.cache_warm).filter((v): v is number => v !== null);
+    const totalMisses = latest.reduce((s, r) => s + (r.cache_misses ?? 0), 0);
+
+    // Day-bucketed average hit ratio over ALL samples (not just latest), so
+    // the trend reflects intra-day movement. Pre-seeded for gap-free bars.
+    const byDayMap = new Map<string, { sum: number; n: number }>();
+    for (let i = 0; i < days; i++) byDayMap.set(formatLocalDate(windowStart + i * DAY_MS), { sum: 0, n: 0 });
+    const samples = this.db.query<{ sampled_at: number; cache_hit_ratio: number }>(
+      `SELECT sampled_at, cache_hit_ratio FROM statusline_samples
+       WHERE sampled_at >= ? AND cache_hit_ratio IS NOT NULL`,
+      [windowStart],
+    );
+    for (const s of samples) {
+      const key = formatLocalDate(s.sampled_at);
+      const acc = byDayMap.get(key);
+      if (acc) { acc.sum += s.cache_hit_ratio; acc.n += 1; }
+    }
+    const byDay = Array.from(byDayMap.entries()).map(([date, a]) => ({
+      date,
+      avgHitRatio: a.n > 0 ? a.sum / a.n : null,
+      samples: a.n,
+    }));
+
+    return {
+      range,
+      rows,
+      avgHitRatio: ratios.length ? ratios.reduce((s, v) => s + v, 0) / ratios.length : null,
+      warmPct: warms.length ? (warms.filter((w) => w === 1).length / warms.length) * 100 : null,
+      totalMisses,
+      sessions: latest.length,
+      byDay,
+      queriedAt: now,
+    };
+  }
+
+  getContextPressure(range: ContextPressureRange): ContextPressurePayload {
+    const now = Date.now();
+    const dayStart = startOfLocalDay(now);
+    const days = rangeDays(range);
+    const windowStart = dayStart - (days - 1) * DAY_MS;
+
+    const latest = this.latestStatuslineSamples(windowStart)
+      .filter((r) => r.context_used_pct !== null);
+
+    const rows: ContextPressureSessionRow[] = latest.slice(0, 8).map((r) => ({
+      sessionId: r.session_id,
+      model: r.model,
+      usedPct: r.context_used_pct as number,
+      sampledAt: r.sampled_at,
+    }));
+
+    const pcts = latest.map((r) => r.context_used_pct as number);
+
+    const byDayMap = new Map<string, { sum: number; max: number; n: number }>();
+    for (let i = 0; i < days; i++) byDayMap.set(formatLocalDate(windowStart + i * DAY_MS), { sum: 0, max: 0, n: 0 });
+    const samples = this.db.query<{ sampled_at: number; context_used_pct: number }>(
+      `SELECT sampled_at, context_used_pct FROM statusline_samples
+       WHERE sampled_at >= ? AND context_used_pct IS NOT NULL`,
+      [windowStart],
+    );
+    for (const s of samples) {
+      const key = formatLocalDate(s.sampled_at);
+      const acc = byDayMap.get(key);
+      if (acc) { acc.sum += s.context_used_pct; acc.max = Math.max(acc.max, s.context_used_pct); acc.n += 1; }
+    }
+    const byDay = Array.from(byDayMap.entries()).map(([date, a]) => ({
+      date,
+      avgUsedPct: a.n > 0 ? a.sum / a.n : null,
+      maxUsedPct: a.n > 0 ? a.max : null,
+    }));
+
+    return {
+      range,
+      rows,
+      avgUsedPct: pcts.length ? pcts.reduce((s, v) => s + v, 0) / pcts.length : null,
+      maxUsedPct: pcts.length ? Math.max(...pcts) : null,
+      highPressureSessions: pcts.filter((p) => p >= 80).length,
+      byDay,
       queriedAt: now,
     };
   }

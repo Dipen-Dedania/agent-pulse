@@ -84,6 +84,180 @@ describe('ConfigWriter — claude-code', () => {
       expect(writer.isHookInstalled('claude-code')).toBe(true);
     });
   });
+
+  it('registers all 11 Claude Code lifecycle events', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('claude-code');
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.json');
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      const events = Object.keys(settings.hooks);
+      expect(events).toEqual(expect.arrayContaining([
+        'PreToolUse', 'PermissionRequest', 'Elicitation', 'Notification',
+        'Stop', 'StopFailure', 'SessionStart', 'SessionEnd',
+        'UserPromptSubmit', 'SubagentStart', 'SubagentStop',
+      ]));
+      expect(events).toHaveLength(11);
+      // Matcher events carry matcher '*'; lifecycle events don't.
+      expect(settings.hooks.Notification[0].matcher).toBe('*');
+      expect(settings.hooks.SessionStart[0].matcher).toBeUndefined();
+    });
+  });
+
+  it('claudeCodeHookNeedsUpgrade: legacy → true, full → false, foreign/none → false', async () => {
+    await withFakeHome(async (writer) => {
+      // No settings.json at all.
+      expect(writer.claudeCodeHookNeedsUpgrade()).toBe(false);
+
+      // Legacy 3-event install: ours, but stale.
+      const claudeDir = path.join(tmpDir, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      const httpHook = { type: 'http', url: 'http://localhost:4242/event', timeout: 5 };
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: {
+          PreToolUse: [{ matcher: '*', hooks: [httpHook] }],
+          Stop: [{ hooks: [httpHook] }],
+          StopFailure: [{ hooks: [httpHook] }],
+        },
+      }, null, 2));
+      expect(writer.claudeCodeHookNeedsUpgrade()).toBe(true);
+
+      // Upgrade brings it to the full set and clears the flag.
+      expect(writer.upgradeClaudeCodeHook().success).toBe(true);
+      expect(writer.claudeCodeHookNeedsUpgrade()).toBe(false);
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(Object.keys(settings.hooks)).toHaveLength(11);
+
+      // Foreign hooks (someone else's command hook) are never "upgradable".
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'my-tool' }] }] },
+      }, null, 2));
+      expect(writer.claudeCodeHookNeedsUpgrade()).toBe(false);
+    });
+  });
+
+  it('upgrade preserves foreign hook keys and unrelated settings', async () => {
+    await withFakeHome(async (writer) => {
+      const claudeDir = path.join(tmpDir, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      const httpHook = { type: 'http', url: 'http://localhost:4242/event', timeout: 5 };
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        model: 'opus',
+        hooks: {
+          PreToolUse: [{ matcher: '*', hooks: [httpHook] }],
+          Stop: [{ hooks: [httpHook] }],
+          StopFailure: [{ hooks: [httpHook] }],
+          PostToolUse: [{ hooks: [{ type: 'command', command: 'user-audit.sh' }] }],
+        },
+      }, null, 2));
+
+      writer.upgradeClaudeCodeHook();
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.model).toBe('opus');
+      expect(settings.hooks.PostToolUse[0].hooks[0].command).toBe('user-audit.sh');
+      expect(settings.hooks.SessionStart).toBeDefined();
+      expect(settings.hooks.SubagentStop).toBeDefined();
+    });
+  });
+
+  it('install preserves a user hook under one of our own event keys', async () => {
+    await withFakeHome(async (writer) => {
+      const claudeDir = path.join(tmpDir, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      const userEntry = { hooks: [{ type: 'command', command: 'log-stop.sh' }] };
+      fs.writeFileSync(settingsPath, JSON.stringify({ hooks: { Stop: [userEntry] } }, null, 2));
+
+      await writer.installHook('claude-code');
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.hooks.Stop).toHaveLength(2);
+      expect(settings.hooks.Stop[0].hooks[0].command).toBe('log-stop.sh');
+      expect(settings.hooks.Stop[1].hooks[0].url).toBe('http://localhost:4242/event');
+    });
+  });
+
+  it('repeated install/upgrade is idempotent and keeps foreign entries', async () => {
+    await withFakeHome(async (writer) => {
+      const claudeDir = path.join(tmpDir, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      const userEntry = { hooks: [{ type: 'command', command: 'log-stop.sh' }] };
+      fs.writeFileSync(settingsPath, JSON.stringify({ hooks: { Stop: [userEntry] } }, null, 2));
+
+      await writer.installHook('claude-code');
+      writer.upgradeClaudeCodeHook();
+      writer.upgradeClaudeCodeHook();
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      const ours = settings.hooks.Stop.filter((e: any) =>
+        e.hooks?.some((h: any) => h.type === 'http' && h.url === 'http://localhost:4242/event'));
+      expect(ours).toHaveLength(1);
+      expect(settings.hooks.Stop[0].hooks[0].command).toBe('log-stop.sh');
+      expect(settings.hooks.Stop).toHaveLength(2);
+    });
+  });
+
+  it('install cleans legacy entries written under a different bridge port', async () => {
+    await withFakeHome(async (writer) => {
+      const claudeDir = path.join(tmpDir, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: { Stop: [{ hooks: [{ type: 'http', url: 'http://localhost:5151/event', timeout: 5 }] }] },
+      }, null, 2));
+
+      await writer.installHook('claude-code');
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.hooks.Stop).toHaveLength(1);
+      expect(settings.hooks.Stop[0].hooks[0].url).toBe('http://localhost:4242/event');
+    });
+  });
+
+  it('install keeps a user hook that was hand-added inside our old entry', async () => {
+    await withFakeHome(async (writer) => {
+      const claudeDir = path.join(tmpDir, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: {
+          Stop: [{
+            hooks: [
+              { type: 'http', url: 'http://localhost:4242/event', timeout: 5 },
+              { type: 'command', command: 'user.sh' },
+            ],
+          }],
+        },
+      }, null, 2));
+
+      await writer.installHook('claude-code');
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      const commands = settings.hooks.Stop.flatMap((e: any) => e.hooks ?? [])
+        .filter((h: any) => h.type === 'command').map((h: any) => h.command);
+      expect(commands).toEqual(['user.sh']);
+      const urls = settings.hooks.Stop.flatMap((e: any) => e.hooks ?? [])
+        .filter((h: any) => h.type === 'http').map((h: any) => h.url);
+      expect(urls).toEqual(['http://localhost:4242/event']);
+    });
+  });
+
+  it('uninstall preserves user hooks under our keys and foreign-only keys', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('claude-code');
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.json');
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      settings.hooks.PreToolUse.unshift({ matcher: '*', hooks: [{ type: 'command', command: 'lint.sh' }] });
+      settings.hooks.PostToolUse = [{ hooks: [{ type: 'command', command: 'audit.sh' }] }];
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+      writer.uninstallHook('claude-code');
+      const after = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(after.hooks.PreToolUse).toHaveLength(1);
+      expect(after.hooks.PreToolUse[0].hooks[0].command).toBe('lint.sh');
+      expect(after.hooks.PostToolUse[0].hooks[0].command).toBe('audit.sh');
+      expect(after.hooks.Stop).toBeUndefined();
+      expect(writer.isHookInstalled('claude-code')).toBe(false);
+    });
+  });
 });
 
 // ── Cursor ────────────────────────────────────────────────────────────────────
@@ -121,6 +295,24 @@ describe('ConfigWriter — cursor', () => {
     const config = JSON.parse(fs.readFileSync(hooksJson, 'utf8'));
     // hooks key is removed entirely when all events are deleted
     expect(config.hooks).toBeUndefined();
+  });
+
+  it('uninstall preserves foreign cursor hook entries', async () => {
+    const projectPath = path.join(tmpDir, 'my-project');
+    const writer = new ConfigWriter();
+    await writer.installHook('cursor', projectPath);
+
+    const hooksJson = path.join(projectPath, '.cursor', 'hooks.json');
+    const config = JSON.parse(fs.readFileSync(hooksJson, 'utf8'));
+    config.hooks.preToolUse.unshift({ command: 'my-linter.sh', timeout: 5 });
+    fs.writeFileSync(hooksJson, JSON.stringify(config, null, 2));
+
+    writer.uninstallHook('cursor', projectPath);
+    const after = JSON.parse(fs.readFileSync(hooksJson, 'utf8'));
+    expect(after.hooks.preToolUse).toHaveLength(1);
+    expect(after.hooks.preToolUse[0].command).toBe('my-linter.sh');
+    expect(after.hooks.sessionStart).toBeUndefined();
+    expect(writer.isHookInstalled('cursor', projectPath)).toBe(false);
   });
 
   it('does not treat a bare hooks.json as an installed hook', async () => {
@@ -982,6 +1174,79 @@ describe('ConfigWriter — status line', () => {
       const settings = JSON.parse(fs.readFileSync(path.join(tmpDir, '.claude', 'settings.json'), 'utf8'));
       expect(settings.statusLine.command).toContain('-ExecutionPolicy Bypass -File');
       expect(settings.statusLine.command).toContain('statusline.ps1');
+    });
+  });
+
+  it('projects bridgeStatusUrl into statusline.config.json (not into UserConfig)', async () => {
+    await withFakeHome(async (writer) => {
+      writer.installStatusLine(sampleStatusLine, 'node', '/usr/bin/node');
+      const cfgPath = path.join(tmpDir, '.claude', 'agent-pulse', 'statusline.config.json');
+      const projected = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      expect(projected.bridgeStatusUrl).toBe('http://127.0.0.1:4242/statusline');
+      // The rest of the projection is still the user's statusline config.
+      expect(projected.lines).toEqual(sampleStatusLine.lines);
+    });
+  });
+
+  it('projects pulseToken from ~/.agent-pulse/mcp.json into statusline.config.json and scripts send it', async () => {
+    await withFakeHome(async (writer) => {
+      const prevPort = process.env.AGENT_PULSE_BRIDGE_PORT;
+      const prevToken = process.env.AGENT_PULSE_MCP_TOKEN;
+      delete process.env.AGENT_PULSE_BRIDGE_PORT;
+      delete process.env.AGENT_PULSE_MCP_TOKEN;
+      try {
+        const connDir = path.join(tmpDir, '.agent-pulse');
+        fs.mkdirSync(connDir, { recursive: true });
+        fs.writeFileSync(path.join(connDir, 'mcp.json'), JSON.stringify({ port: 4242, token: 'abc' }));
+
+        writer.installStatusLine(sampleStatusLine, 'node', '/usr/bin/node');
+        const cfgPath = path.join(tmpDir, '.claude', 'agent-pulse', 'statusline.config.json');
+        const projected = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        expect(projected.pulseToken).toBe('abc');
+
+        for (const runtime of ['node', 'python', 'powershell'] as const) {
+          const scriptPath = writer.deployStatusLineScript(runtime);
+          expect(fs.readFileSync(scriptPath, 'utf8')).toContain('x-pulse-token');
+        }
+      } finally {
+        if (prevPort !== undefined) process.env.AGENT_PULSE_BRIDGE_PORT = prevPort;
+        if (prevToken !== undefined) process.env.AGENT_PULSE_MCP_TOKEN = prevToken;
+      }
+    });
+  });
+
+  it('omits pulseToken when no connection file exists', async () => {
+    await withFakeHome(async (writer) => {
+      const prevPort = process.env.AGENT_PULSE_BRIDGE_PORT;
+      const prevToken = process.env.AGENT_PULSE_MCP_TOKEN;
+      delete process.env.AGENT_PULSE_BRIDGE_PORT;
+      delete process.env.AGENT_PULSE_MCP_TOKEN;
+      try {
+        writer.installStatusLine(sampleStatusLine, 'node', '/usr/bin/node');
+        const cfgPath = path.join(tmpDir, '.claude', 'agent-pulse', 'statusline.config.json');
+        const projected = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        expect('pulseToken' in projected).toBe(false);
+      } finally {
+        if (prevPort !== undefined) process.env.AGENT_PULSE_BRIDGE_PORT = prevPort;
+        if (prevToken !== undefined) process.env.AGENT_PULSE_MCP_TOKEN = prevToken;
+      }
+    });
+  });
+
+  it('all three deployed scripts contain the bridge POST and stay template-safe', async () => {
+    await withFakeHome(async (writer) => {
+      for (const runtime of ['node', 'python', 'powershell'] as const) {
+        const scriptPath = writer.deployStatusLineScript(runtime);
+        const script = fs.readFileSync(scriptPath, 'utf8');
+        expect(script).toContain('bridgeStatusUrl');
+        // The generating template literals forbid backslash, backtick, and
+        // "${" in the script bodies (see the comment above the builders).
+        // The PowerShell BOM prefix is the only allowed non-template byte.
+        const body = runtime === 'powershell' ? script.replace(/^﻿/, '') : script;
+        expect(body.includes('\\')).toBe(false);
+        expect(body.includes('`')).toBe(false);
+        expect(body.includes('${')).toBe(false);
+      }
     });
   });
 });

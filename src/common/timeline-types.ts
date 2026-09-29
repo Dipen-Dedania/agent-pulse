@@ -261,6 +261,63 @@ export interface LimitHitsPayload {
   queriedAt: number;
 }
 
+// ─── Statusline feed analytics (Claude Code) ─────────────────────────────────
+// Backed by statusline_samples — throttled snapshots of what Claude Code feeds
+// its statusline command (prompt-cache health, context-window pressure). Only
+// Claude Code reports this today, so rows are per native session, not per tool.
+
+export type CacheHealthRange = TimelineRange;
+export type ContextPressureRange = TimelineRange;
+
+export interface CacheHealthSessionRow {
+  sessionId: string;
+  model: string | null;
+  hitRatio: number | null;   // 0..1, from the session's latest sample
+  warm: boolean | null;
+  misses: number | null;     // cumulative per session (latest sample)
+  lastSampledAt: number;
+}
+
+export interface CacheHealthDayBucket {
+  date: string;              // YYYY-MM-DD (local)
+  avgHitRatio: number | null;
+  samples: number;
+}
+
+export interface CacheHealthPayload {
+  range: CacheHealthRange;
+  rows: CacheHealthSessionRow[];  // latest sample per session, most recent first
+  avgHitRatio: number | null;     // across the latest-per-session rows
+  warmPct: number | null;         // % of those rows currently warm
+  totalMisses: number;            // sum of latest-per-session miss counters
+  sessions: number;
+  byDay: CacheHealthDayBucket[];
+  queriedAt: number;
+}
+
+export interface ContextPressureSessionRow {
+  sessionId: string;
+  model: string | null;
+  usedPct: number;           // 0..100, from the session's latest sample
+  sampledAt: number;
+}
+
+export interface ContextPressureDayBucket {
+  date: string;              // YYYY-MM-DD (local)
+  avgUsedPct: number | null;
+  maxUsedPct: number | null;
+}
+
+export interface ContextPressurePayload {
+  range: ContextPressureRange;
+  rows: ContextPressureSessionRow[]; // latest sample per session, most recent first
+  avgUsedPct: number | null;
+  maxUsedPct: number | null;
+  highPressureSessions: number;      // latest sample ≥ 80% used
+  byDay: ContextPressureDayBucket[];
+  queriedAt: number;
+}
+
 // ─── Claude usage-window value ────────────────────────────────────────────────
 // Estimated API-equivalent spend for Claude Code over the trailing usage
 // windows, so users can see how much of their flat-rate plan they're actually

@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { AttentionConfig, WebhookTarget } from '../../../common/types';
 import { WebhookRow } from './WebhookRow';
-import { GlassToggle, Button } from '../Shared';
+import { GlassToggle, Button, Tooltip } from '../Shared';
 
 interface Props {
   config: AttentionConfig;
@@ -14,18 +14,20 @@ const THRESHOLD_MIN = 5;
 const THRESHOLD_MAX = 300;
 
 // A small pill toggle reused for the boolean rows.
-const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }> = ({
-  checked,
-  onChange,
-  label,
-  hint,
-}) => (
+const Toggle: React.FC<{
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  hint?: string;
+  disabled?: boolean;
+}> = ({ checked, onChange, label, hint, disabled }) => (
   <div className='flex items-center gap-3'>
     <GlassToggle
       checked={checked}
       onChange={onChange}
       size='sm'
       label={label}
+      disabled={disabled}
     />
     <span>
       <span className='text-sm font-medium text-primary'>{label}</span>
@@ -51,6 +53,7 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
     updateWebhooks(config.webhooks.filter((w) => w.id !== id));
 
   const disabled = !config.enabled;
+  const isLinux = window.electron.platform === 'linux';
 
   return (
     <motion.section
@@ -73,21 +76,40 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
       />
 
       {/* Ambient screen-edge glow — fires the instant an agent waits, so it
-          lives outside the escalation block (independent of the threshold). */}
+          lives outside the escalation block (independent of the threshold).
+          Unavailable on Linux: click-through overlays are unreliable there and
+          a non-click-through full-screen window locks the whole desktop, so the
+          main process hard-disables it (ScreenEdgeManager.SUPPORTED) and this
+          UI greys out with an explanatory tooltip. */}
       <div className='flex flex-col gap-3'>
         <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Ambient screen border</p>
-        <Toggle
-          checked={config.screenEdgeGlow}
-          onChange={(v) => onChange({ screenEdgeGlow: v })}
-          label='Glow the screen edges while waiting'
-          hint='Instant · all displays'
-        />
-        <div className='flex items-center gap-3'>
-          <Button variant='secondary' onClick={() => window.electron.invoke('screen-edge:preview')}>
-            Preview
-          </Button>
-          <span className='text-xs text-faint'>Flashes the blue border for a few seconds.</span>
-        </div>
+        <Tooltip
+          content={
+            isLinux
+              ? 'Not available on Linux — the full-screen overlay can’t reliably let clicks through, which would block the mouse on the whole desktop.'
+              : undefined
+          }
+        >
+          <div className={`flex flex-col gap-3 ${isLinux ? 'opacity-40' : ''}`}>
+            <Toggle
+              checked={!isLinux && config.screenEdgeGlow}
+              onChange={(v) => onChange({ screenEdgeGlow: v })}
+              label='Glow the screen edges while waiting'
+              hint={isLinux ? 'Not available on Linux' : 'Instant · all displays'}
+              disabled={isLinux}
+            />
+            <div className='flex items-center gap-3'>
+              <Button
+                variant='secondary'
+                disabled={isLinux}
+                onClick={() => window.electron.invoke('screen-edge:preview')}
+              >
+                Preview
+              </Button>
+              <span className='text-xs text-faint'>Flashes the blue border for a few seconds.</span>
+            </div>
+          </div>
+        </Tooltip>
       </div>
 
       <div className={`flex flex-col gap-7 transition-opacity ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>

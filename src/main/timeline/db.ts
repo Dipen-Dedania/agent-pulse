@@ -23,7 +23,7 @@ interface Database {
 }
 type DatabaseConstructor = new (path: string) => Database;
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -134,6 +134,27 @@ CREATE TABLE IF NOT EXISTS limit_events (
 
 CREATE INDEX IF NOT EXISTS idx_limit_ts ON limit_events (ts);
 
+-- Claude Code statusline samples (v6). One row per session per throttle window
+-- (see StatuslineWriter), carrying the cost/context/prompt-cache stats the
+-- statusline feed reports. Quota from the same feed goes to quota_samples via
+-- the UsagePoller, not here. Pruned on the quota retention cutoff.
+CREATE TABLE IF NOT EXISTS statusline_samples (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id       TEXT    NOT NULL,
+  sampled_at       INTEGER NOT NULL,
+  model            TEXT,
+  cost_usd         REAL,
+  context_used_pct REAL,
+  cache_warm       INTEGER,
+  cache_hit_ratio  REAL,
+  cache_misses     INTEGER,
+  cache_ttl_s      INTEGER,
+  cache_expires_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_statusline_session ON statusline_samples (session_id, sampled_at);
+CREATE INDEX IF NOT EXISTS idx_statusline_sampled ON statusline_samples (sampled_at);
+
 -- Small key/value store for one-off migration/bootstrap markers (e.g. whether
 -- the limit_events backfill scan has run). Avoids re-scanning every boot.
 CREATE TABLE IF NOT EXISTS meta (
@@ -230,6 +251,19 @@ export interface LimitEventRow {
   resetText?: string | null;
 }
 
+export interface StatuslineSampleRow {
+  sessionId: string;
+  sampledAt: number;
+  model?: string | null;
+  costUsd?: number | null;
+  contextUsedPct?: number | null;
+  cacheWarm?: 0 | 1 | null;
+  cacheHitRatio?: number | null;
+  cacheMisses?: number | null;
+  cacheTtlS?: number | null;
+  cacheExpiresAt?: number | null;
+}
+
 export interface TranscriptOffsetRow {
   path: string;
   offset: number;
@@ -241,6 +275,7 @@ export interface TimelineDb {
   insertEvent: (row: EventRow) => void;
   insertSession: (row: SessionRow) => number;
   insertQuotaSample: (row: QuotaSampleRow) => void;
+  insertStatuslineSample: (row: StatuslineSampleRow) => void;
   insertGuardrailEvent: (row: GuardrailEventRow) => void;
   insertSecretAccessEvent: (row: SecretAccessEventRow) => void;
   insertLimitEvent: (row: LimitEventRow) => void;
@@ -336,6 +371,16 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     VALUES (@toolId, @windowKey, @pctRemaining, @resetsAt, @sampledAt)
   `);
 
+  const insertStatuslineStmt: Statement = db.prepare(`
+    INSERT INTO statusline_samples (
+      session_id, sampled_at, model, cost_usd, context_used_pct,
+      cache_warm, cache_hit_ratio, cache_misses, cache_ttl_s, cache_expires_at
+    ) VALUES (
+      @sessionId, @sampledAt, @model, @costUsd, @contextUsedPct,
+      @cacheWarm, @cacheHitRatio, @cacheMisses, @cacheTtlS, @cacheExpiresAt
+    )
+  `);
+
   const insertGuardrailStmt: Statement = db.prepare(`
     INSERT INTO guardrail_events (
       ts, tool_id, decision, blockable, command, rule_ids, rule_messages
@@ -376,6 +421,7 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
 
   const pruneEventsStmt: Statement    = db.prepare('DELETE FROM events WHERE timestamp < ?');
   const pruneQuotaStmt: Statement     = db.prepare('DELETE FROM quota_samples WHERE sampled_at < ?');
+  const pruneStatuslineStmt: Statement = db.prepare('DELETE FROM statusline_samples WHERE sampled_at < ?');
   const pruneGuardrailStmt: Statement = db.prepare('DELETE FROM guardrail_events WHERE ts < ?');
   const pruneSecretStmt: Statement    = db.prepare('DELETE FROM secret_access_events WHERE ts < ?');
 
@@ -405,6 +451,10 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     'modelsUsed',
   ] as const;
   const QUOTA_KEYS = ['toolId', 'windowKey', 'pctRemaining', 'resetsAt', 'sampledAt'] as const;
+  const STATUSLINE_KEYS = [
+    'sessionId', 'sampledAt', 'model', 'costUsd', 'contextUsedPct',
+    'cacheWarm', 'cacheHitRatio', 'cacheMisses', 'cacheTtlS', 'cacheExpiresAt',
+  ] as const;
   const GUARDRAIL_KEYS = ['ts', 'toolId', 'decision', 'blockable', 'command', 'ruleIds', 'ruleMessages'] as const;
   const SECRET_KEYS = ['ts', 'toolId', 'decision', 'blockable', 'filePath', 'viaShell', 'ruleIds', 'ruleMessages'] as const;
   const LIMIT_KEYS = ['uuid', 'ts', 'toolId', 'sessionId', 'kind', 'resetText'] as const;
@@ -427,6 +477,10 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     insertQuotaSample: (row) => {
       try { insertQuotaStmt.run(normalize(row, QUOTA_KEYS)); }
       catch (e: any) { logger.warn('[Timeline] insertQuotaSample failed:', e?.message ?? e); }
+    },
+    insertStatuslineSample: (row) => {
+      try { insertStatuslineStmt.run(normalize(row, STATUSLINE_KEYS)); }
+      catch (e: any) { logger.warn('[Timeline] insertStatuslineSample failed:', e?.message ?? e); }
     },
     insertGuardrailEvent: (row) => {
       try { insertGuardrailStmt.run(normalize(row, GUARDRAIL_KEYS)); }
@@ -460,6 +514,9 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
       try {
         const evInfo = pruneEventsStmt.run(eventsOlderThanMs);
         const quInfo = pruneQuotaStmt.run(quotaOlderThanMs);
+        // Statusline samples share the quota retention window (same cadence,
+        // same purpose); their count isn't reported separately.
+        pruneStatuslineStmt.run(quotaOlderThanMs);
         const grInfo = pruneGuardrailStmt.run(guardrailOlderThanMs);
         const seInfo = pruneSecretStmt.run(secretOlderThanMs);
         return {

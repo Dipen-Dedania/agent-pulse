@@ -25,6 +25,13 @@ export interface ScreenEdgeDeps {
  * process and appears immediately, independent of the escalation threshold.
  */
 export class ScreenEdgeManager {
+  // Unavailable on Linux: `setIgnoreMouseEvents` is unreliable there (broken on
+  // Wayland, timing-sensitive on X11), and when click-through fails this
+  // full-screen overlay swallows every mouse click — the desktop becomes
+  // unusable until the app is killed from the keyboard. Never light the frame
+  // on Linux, even if a config from another OS carries `screenEdgeGlow: true`.
+  public static readonly SUPPORTED = process.platform !== 'linux';
+
   private readonly stateManager: StatusStateManager;
   private config: AttentionConfig;
   private windows: BrowserWindow[] = [];
@@ -63,7 +70,9 @@ export class ScreenEdgeManager {
     // where a broadcast right after window creation lands before React has
     // subscribed (which made the very first Preview click do nothing).
     ipcMain.on('screen-edge:ready', this.onRendererReady);
-    logger.info(`[ScreenEdge] started, enabled=${this.config.screenEdgeGlow}`);
+    logger.info(
+      `[ScreenEdge] started, enabled=${this.config.screenEdgeGlow}, supported=${ScreenEdgeManager.SUPPORTED}`,
+    );
   }
 
   public stop() {
@@ -92,7 +101,7 @@ export class ScreenEdgeManager {
   // Works regardless of the toggle so the user can see it before committing;
   // reverts to whatever the live waiting state dictates when it elapses.
   public previewFlash() {
-    if (this.stopped) return;
+    if (this.stopped || !ScreenEdgeManager.SUPPORTED) return;
     this.clearPreviewTimer();
     this.preview = true;
     this.refresh();
@@ -125,7 +134,9 @@ export class ScreenEdgeManager {
   // Recompute whether the frame should be lit from the live inputs: a manual
   // preview forces it on; otherwise it's on iff enabled AND something's waiting.
   private refresh() {
-    const shouldShow = this.preview || (this.config.screenEdgeGlow && this.waiting.size > 0);
+    const shouldShow =
+      ScreenEdgeManager.SUPPORTED &&
+      (this.preview || (this.config.screenEdgeGlow && this.waiting.size > 0));
     this.setActive(shouldShow);
   }
 

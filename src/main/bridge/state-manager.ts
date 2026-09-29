@@ -7,17 +7,36 @@ export type EventStreamListener = (event: NormalizedEvent) => void;
 export class StatusStateManager {
   private statuses: Map<ToolId, ToolStatus> = new Map();
   private eventListeners: Set<EventStreamListener> = new Set();
+  // Subagent depth per tool, driven by agentDelta/agentReset hints in the
+  // normalized payload (Claude Code SubagentStart/Stop). Keyed alongside the
+  // sessionId that produced it so a new session never inherits a stale count.
+  private agentDepth: Map<ToolId, { sessionId?: string; depth: number }> = new Map();
 
   public updateStatus(toolId: ToolId, state: AgentState, details: any) {
     const current = this.statuses.get(toolId);
     const timestamp = Date.now();
     logger.debug(`[StateManager] updateStatus called: toolId=${toolId} state=${state}`);
 
+    let resolvedState = state;
+    let depthAgents: number | undefined;
+    if (details.agentDelta !== undefined || details.agentReset) {
+      const tracked = this.agentDepth.get(toolId);
+      let depth = tracked && tracked.sessionId === details.sessionId ? tracked.depth : 0;
+      if (details.agentReset) depth = 0;
+      if (typeof details.agentDelta === 'number') depth = Math.max(0, depth + details.agentDelta);
+      this.agentDepth.set(toolId, { sessionId: details.sessionId, depth });
+      depthAgents = depth;
+      // A finishing subagent only moves the counter — background subagents can
+      // outlive the main turn's Stop, and letting SubagentStop's nominal
+      // "working" through would revive an idle bubble.
+      if (details.agentDelta === -1 && current) resolvedState = current.state;
+    }
+
     const updatedStatus: ToolStatus = {
       toolId,
-      state,
+      state: resolvedState,
       lastUpdated: timestamp,
-      activeAgents: details.activeAgents || (current?.activeAgents || 0),
+      activeAgents: details.activeAgents || (depthAgents !== undefined ? depthAgents : (current?.activeAgents || 0)),
       currentTask: details.taskSummary,
       // Latch the most recent agentPid + chain; preserve the previous ones
       // if this event didn't carry them (e.g. Notification events lack
@@ -36,17 +55,20 @@ export class StatusStateManager {
     // bridge handler — the bridge already responded before this returns.
     const eventPayload: NormalizedEvent = {
       toolId,
-      state,
+      state: resolvedState,
       timestamp,
       payload: {
         sessionId:      details.sessionId,
         taskSummary:    details.taskSummary,
-        activeAgents:   details.activeAgents,
+        activeAgents:   details.activeAgents ?? depthAgents,
         errorMessage:   details.errorMessage,
         cwd:            details.cwd,
         agentPid:       details.agentPid,
         transcriptPath: details.transcriptPath,
         model:          details.model,
+        // Inline token deltas (OpenCode's plugin) must survive this rebuild —
+        // the timeline stages them off event.payload.tokens.
+        tokens:         details.tokens,
       },
     };
     setImmediate(() => {

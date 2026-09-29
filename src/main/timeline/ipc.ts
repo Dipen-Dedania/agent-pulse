@@ -15,6 +15,8 @@ import {
   CacheEfficiencyRange,
   LifecycleRange,
   LimitHitsRange,
+  CacheHealthRange,
+  ContextPressureRange,
 } from '../../common/timeline-types';
 import { logger } from '../../common/logger';
 
@@ -136,6 +138,18 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     try { return queries.getLimitHits(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-limit-hits:', e); return null; }
   });
+
+  ipcMain.handle('analytics:get-cache-health', (_e, args: { range: CacheHealthRange }) => {
+    if (!queries) return null;
+    try { return queries.getCacheHealth(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-cache-health:', e); return null; }
+  });
+
+  ipcMain.handle('analytics:get-context-pressure', (_e, args: { range: ContextPressureRange }) => {
+    if (!queries) return null;
+    try { return queries.getContextPressure(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-context-pressure:', e); return null; }
+  });
 }
 
 /** Called by bootTimeline when the timeline cannot start. */
@@ -162,6 +176,8 @@ export function unregisterTimelineIpc() {
     'analytics:get-cache-efficiency',
     'analytics:get-lifecycle',
     'analytics:get-limit-hits',
+    'analytics:get-cache-health',
+    'analytics:get-context-pressure',
   ]) {
     ipcMain.removeHandler(channel);
   }

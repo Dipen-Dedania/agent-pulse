@@ -52,6 +52,12 @@ export class UsagePoller {
   /** Tracks whether the current scheduled wakeup is in a backoff state. */
   private currentDelayMs: number;
   private stopped = false;
+  /** Last time a statusline push arrived (0 = never / manual refresh reset). */
+  private lastExternalAt = 0;
+  /** While a push is this fresh, skip the undocumented HTTP endpoint. */
+  private static readonly EXTERNAL_FRESH_MS = 5 * 60_000;
+  /** Min interval between status re-broadcasts for identical pushed data. */
+  private static readonly INGEST_MIN_INTERVAL_MS = 15_000;
 
   constructor(config: UsageConfig) {
     this.config = config;
@@ -114,7 +120,57 @@ export class UsagePoller {
       this.timer = null;
     }
     this.currentDelayMs = Math.max(MIN_INTERVAL_MS, this.config.intervalMs);
+    // Manual refresh always hits the endpoint, even when statusline pushes
+    // are fresh — the user asked for an authoritative re-read.
+    this.lastExternalAt = 0;
     this.poll().catch((e) => logger.warn('[UsagePoller] refresh error:', e));
+  }
+
+  /**
+   * Pushed quota from the Claude Code statusline feed (POST /statusline).
+   * Runs the same notify+broadcast path as a successful poll, so every
+   * consumer — quota writer, scheduler, backlog gate, renderer — sees it
+   * exactly like polled data. While pushes stay fresh the HTTP poll is
+   * skipped (see poll()); it resumes automatically once Claude Code goes
+   * quiet for EXTERNAL_FRESH_MS.
+   *
+   * A push may set 'ok' while the poller sits in 'unauthenticated' — that's
+   * deliberate: pushed rateLimits are genuine Anthropic data relayed by
+   * Claude Code, more truthful than a stale "sign in required". The rearm
+   * below guarantees it self-corrects: once pushes go quiet, a real poll
+   * runs and 'unauthenticated' resurfaces instead of freezing at stale 'ok'.
+   */
+  public ingestExternal(snapshot: UsageSnapshot): void {
+    if (this.stopped || !this.config.enabled) return;
+    // The 401/no-creds poll paths disarm the timer. Rearm it here (before the
+    // dedupe early-return — post-401 pushes are typically identical) so the
+    // endpoint is re-checked once pushes stop. `!this.timer` never stomps a
+    // live 429-backoff or normal-cadence timer.
+    if (!this.timer) {
+      this.scheduleNext(Math.max(MIN_INTERVAL_MS, this.config.intervalMs));
+    }
+    const now = Date.now();
+    const cur = this.status.snapshot;
+    const unchanged = !!cur &&
+      cur.fiveHour.utilization === snapshot.fiveHour.utilization &&
+      cur.fiveHour.resetsAt    === snapshot.fiveHour.resetsAt &&
+      cur.sevenDay.utilization === snapshot.sevenDay.utilization &&
+      cur.sevenDay.resetsAt    === snapshot.sevenDay.resetsAt;
+    if (unchanged && now - this.lastExternalAt < UsagePoller.INGEST_MIN_INTERVAL_MS) {
+      // Statusline fires on every assistant message; identical data only
+      // refreshes the freshness clock (keeps poll suppression alive) without
+      // re-broadcasting or re-inserting quota samples.
+      this.lastExternalAt = now;
+      return;
+    }
+    this.lastExternalAt = now;
+    const nudgeActive = this.evaluateAndNotify(snapshot);
+    this.setStatus({
+      state: 'ok',
+      snapshot,
+      lastUpdated: now,
+      nudgeActive,
+    });
   }
 
   public getStatus(): UsageStatus {
@@ -131,6 +187,13 @@ export class UsagePoller {
 
   private async poll() {
     if (this.stopped || !this.config.enabled) return;
+
+    // Fresh statusline pushes make the endpoint call redundant (and it's
+    // undocumented — the less we hit it, the better). Just reschedule.
+    if (Date.now() - this.lastExternalAt < UsagePoller.EXTERNAL_FRESH_MS) {
+      this.scheduleNext(Math.max(MIN_INTERVAL_MS, this.config.intervalMs));
+      return;
+    }
 
     const creds = await readAccessToken();
     if (!creds.ok) {

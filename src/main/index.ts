@@ -116,6 +116,15 @@ class AgentPulseApp {
       getMcpToken: () => this.mcpConnection?.token ?? null,
       // Resolved per call: the backlog store boots long after the bridge.
       getBacklogMcpApi: () => this.backlogMcpApi(),
+      // Claude Code statusline feed: quota goes to the usage pipeline (which
+      // suppresses the undocumented endpoint poll while pushes stay fresh);
+      // cost/context/cache samples go to timeline analytics. The timeline
+      // boots after the bridge — the optional chain covers the gap and the
+      // DB-unavailable case.
+      onStatusLine: (snap) => {
+        if (snap.rateLimits) this.usagePoller.ingestExternal(snap.rateLimits);
+        this.timeline?.ingestStatusline(snap);
+      },
     });
     this.bubbleManager = new BubbleManager(this.userConfig.bubble);
     // Bubble clicks resolve focus PIDs from the bridge's state, not just the
@@ -240,6 +249,17 @@ class AgentPulseApp {
       // improvements (e.g. icon rendering) propagate on upgrade without a manual
       // re-apply. No-ops unless we own the installed status line.
       this.refreshDeployedStatusLine();
+      // Same staleness treatment for the Claude Code hook set: if the installed
+      // hook is ours but from an app version that registered fewer events,
+      // rewrite it to the full set. Foreign/absent hooks are never touched.
+      try {
+        if (this.writer.claudeCodeHookNeedsUpgrade()) {
+          this.writer.upgradeClaudeCodeHook();
+          logger.info('[AgentPulseApp] upgraded Claude Code hooks to full event set');
+        }
+      } catch (err) {
+        logger.warn('[AgentPulseApp] Claude Code hook upgrade failed', err);
+      }
       this.bubbleManager.init();
       this.tooltipManager.init();
       this.tourManager.init();

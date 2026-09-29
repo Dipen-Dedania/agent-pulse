@@ -24,4 +24,8 @@ function resolvePort(): number {
 
 export const BRIDGE_PORT = resolvePort();
 export const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}/event`;
+// Where the deployed Claude Code statusline script POSTs its stdin JSON.
+// Baked into statusline.config.json at deploy time (like hook URLs, a port
+// change requires re-deploy — refreshDeployedStatusLine covers that on boot).
+export const STATUSLINE_INGEST_URL = `http://127.0.0.1:${BRIDGE_PORT}/statusline`;
 export const UPDATE_PROVIDER = 'firebase'; // github or firebase

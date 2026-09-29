@@ -32,18 +32,27 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
       configFile: '~/.claude/settings.json',
       description:
         'Agent Pulse registers HTTP lifecycle hooks in Claude Code\'s global settings file. ' +
-        'Claude Code POSTs event JSON directly to the bridge on PreToolUse, Stop, and StopFailure — ' +
-        'no shell script or curl required, making it cross-platform safe.',
+        'Claude Code POSTs event JSON directly to the bridge across the session lifecycle — ' +
+        'session start/end, prompt submit, tool use, permission prompts, subagent start/stop, ' +
+        'and turn stop/failure — no shell script or curl required, making it cross-platform safe.',
       snippet: JSON.stringify({
         hooks: {
-          PreToolUse:  [{ matcher: '*', hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
-          Stop:        [{ hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
-          StopFailure: [{ hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          PreToolUse:        [{ matcher: '*', hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          PermissionRequest: [{ matcher: '*', hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          Elicitation:       [{ matcher: '*', hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          Notification:      [{ matcher: '*', hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          Stop:              [{ hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          StopFailure:       [{ hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          SessionStart:      [{ hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          SessionEnd:        [{ hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          UserPromptSubmit:  [{ hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          SubagentStart:     [{ hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
+          SubagentStop:      [{ hooks: [{ type: 'http', url: 'http://localhost:4242/event', timeout: 5 }] }],
         },
       }, null, 2),
       troubleshooting: [
         'Start a new Claude Code session — hooks are only registered when the CLI starts.',
-        'Open ~/.claude/settings.json and confirm the http hook entries under PreToolUse, Stop, and StopFailure are present.',
+        'Open ~/.claude/settings.json and confirm the http hook entries (PreToolUse, Stop, StopFailure, SessionStart, and the other lifecycle events) are present.',
         ...COMMON_TROUBLESHOOTING,
       ],
     },

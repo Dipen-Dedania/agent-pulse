@@ -1,5 +1,9 @@
-export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'antigravity-cli' | 'grok' | 'opencode';
+export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'antigravity-cli' | 'grok' | 'opencode' | 'muse-code';
 export type AgentState = 'working' | 'waiting' | 'idle' | 'idle-active' | 'error';
+
+// Animated characters that can replace a bubble's orb. 'none' = show the orb.
+// Data per id lives in src/common/mascotGeometry.ts; components in the renderer.
+export type MascotId = 'none' | 'clawd' | 'frog' | 'gigi' | 'ghost' | 'mico' | 'merc' | 'jolly' | 'byte' | 'rusty' | 'knight' | 'sensei' | 'sprout' | 'droid';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 export interface AppearanceConfig { theme: ThemeMode; }
@@ -73,11 +77,13 @@ export interface BubbleConfig {
   fillColor: string;          // CSS color used when fillMode === 'solid' (e.g. '#ffffff')
   quotaStyle: BubbleQuotaStyle; // bars under the orb vs an arc gauge around it. 'arc' shows one window per tool (the primary) and shrinks the window to a square, since the bars strip is no longer needed. Mascot bubbles ignore this and always render bars.
   hidden: boolean;            // master visibility switch — true hides every bubble window while leaving the bridge, hooks, pollers, and guardrails running
-  mascotClaudeCode: boolean;  // when true, the Claude Code bubble swaps its orb for the animated Clawd mascot, whose pose tracks the agent state. Other tools are unaffected. The Claude bubble window grows to fit the mascot (see MASCOT_DIMENSIONS in bubble-manager).
-  mascotOpenaiCodex: boolean; // when true, the OpenAI Codex bubble swaps its orb for the animated frog mascot, whose pose tracks the agent state. Other tools are unaffected. The Codex bubble window grows to fit the mascot (see MASCOT_DIMENSIONS_CODEX in bubble-manager).
-  mascotAntigravity: boolean; // when true, the Antigravity bubble swaps its orb for the animated GIGI droplet mascot, whose pose tracks the agent state. Other tools are unaffected. The Antigravity bubble window grows to fit the mascot (see MASCOT_DIMENSIONS_ANTIGRAVITY in bubble-manager).
-  mascotKiro: boolean;        // when true, the Kiro bubble swaps its orb for the animated ghost mascot, whose pose tracks the agent state. Other tools are unaffected. The Kiro bubble window grows to fit the mascot (see MASCOT_DIMENSIONS_KIRO in bubble-manager).
-  mascotVscodeCopilot: boolean; // when true, the VS Code Copilot bubble swaps its orb for the animated Mico blob mascot, whose pose tracks the agent state. Other tools are unaffected. The Copilot bubble window grows to fit the mascot (see MASCOT_DIMENSIONS_COPILOT in bubble-manager).
+  // Per-agent mascot choice. A tool mapped to a mascot id swaps its orb for that
+  // animated character, whose pose tracks the agent state; the bubble window
+  // grows to that mascot's footprint (MASCOT_GEOMETRY in src/common). Missing or
+  // 'none' → the orb. Any mascot may be assigned to any agent; MASCOT_HOME holds
+  // the vendor defaults. Replaces the per-tool mascot* booleans (migrated in
+  // user-config.migrateBubble).
+  mascots: Partial<Record<ToolId, MascotId>>;
   opacity: number;            // whole-bubble window opacity (0.3–1). Applied via Electron setOpacity, so it dims the orb/mascot, usage bars, and badges uniformly. 1 = fully opaque.
 }
 

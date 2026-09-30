@@ -254,6 +254,49 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
       ],
     },
   },
+  'muse-code': {
+    label: 'Muse Code',
+    badges: ['CLI', 'TUI'],
+    // NOTE: placeholder artwork — an original stylised mark in the spirit of
+    // Muse's cream mascot. Swap in official brand art if Meta publishes any.
+    icon: './assets/muse.svg',
+    hookInfo: {
+      mechanism: 'Shell Hook',
+      configFile: '~/.config/muse/settings.json',
+      description:
+        'Muse Code implements Claude Code\'s hook contract but only supports command hooks, and it runs ' +
+        'them with a cleared environment. Agent Pulse merges a hooks block into ~/.config/muse/settings.json ' +
+        '(the same path on Windows, macOS and Linux; XDG_CONFIG_HOME is honoured) pointing at a small ' +
+        'script pair (~/.config/muse/hooks/agent-pulse.sh / .ps1) that POSTs each event to the bridge on ' +
+        'SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, PostToolUseFailure, ' +
+        'Notification, Stop and SessionEnd. Guardrail and Secret Protection denies are relayed back as a ' +
+        'Claude-style permissionDecision so Muse aborts the tool call. Only Agent Pulse\'s own entries are ' +
+        'touched on install/uninstall; every other setting and hook in the file is preserved.',
+      snippet: JSON.stringify({
+        schema_version: 1,
+        hooks: {
+          SessionStart:       [{ hooks: [{ type: 'command', command: '~/.config/muse/hooks/agent-pulse.sh', commandWindows: 'powershell.exe … -EncodedCommand …', timeout: 10, statusMessage: 'Agent Pulse' }] }],
+          UserPromptSubmit:   [{ hooks: [{ type: 'command', command: '~/.config/muse/hooks/agent-pulse.sh', commandWindows: '…', timeout: 10, statusMessage: 'Agent Pulse' }] }],
+          PreToolUse:         [{ hooks: [{ type: 'command', command: '~/.config/muse/hooks/agent-pulse.sh', commandWindows: '…', timeout: 10, statusMessage: 'Agent Pulse' }] }],
+          PermissionRequest:  [{ hooks: [{ type: 'command', command: '~/.config/muse/hooks/agent-pulse.sh', commandWindows: '…', timeout: 10, statusMessage: 'Agent Pulse' }] }],
+          PostToolUse:        [{ hooks: [{ type: 'command', command: '~/.config/muse/hooks/agent-pulse.sh', commandWindows: '…', timeout: 10, statusMessage: 'Agent Pulse' }] }],
+          PostToolUseFailure: [{ hooks: [{ type: 'command', command: '~/.config/muse/hooks/agent-pulse.sh', commandWindows: '…', timeout: 10, statusMessage: 'Agent Pulse' }] }],
+          Notification:       [{ hooks: [{ type: 'command', command: '~/.config/muse/hooks/agent-pulse.sh', commandWindows: '…', timeout: 10, statusMessage: 'Agent Pulse' }] }],
+          Stop:               [{ hooks: [{ type: 'command', command: '~/.config/muse/hooks/agent-pulse.sh', commandWindows: '…', timeout: 10, statusMessage: 'Agent Pulse' }] }],
+          SessionEnd:         [{ hooks: [{ type: 'command', command: '~/.config/muse/hooks/agent-pulse.sh', commandWindows: '…', timeout: 10, statusMessage: 'Agent Pulse' }] }],
+        },
+      }, null, 2),
+      troubleshooting: [
+        'Start a new muse session — hooks are discovered when Muse boots, not per prompt.',
+        'The first interactive session after installing may show a "new or changed hooks need your trust" prompt — choose "Trust all and continue".',
+        'Open ~/.config/muse/settings.json and confirm "schema_version": 1 is still present; Muse refuses to start without it.',
+        'Verify ~/.config/muse/hooks/agent-pulse.sh (and agent-pulse.ps1 on Windows) exist.',
+        'If you set XDG_CONFIG_HOME, the settings file and scripts live under $XDG_CONFIG_HOME/muse instead.',
+        'Muse running inside WSL is not detected from the Windows side — install Agent Pulse hooks from within WSL instead.',
+        ...COMMON_TROUBLESHOOTING,
+      ],
+    },
+  },
   'openai-codex': {
     label: 'OpenAI Codex',
     icon: './assets/codex.png',

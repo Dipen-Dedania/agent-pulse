@@ -4,6 +4,13 @@ import { render, act } from '@testing-library/react';
 import gsap from 'gsap';
 import { AntigravityMascot } from '../AntigravityMascot';
 import { ClawdMascot } from '../ClawdMascot';
+import { MercMascot } from '../MercMascot';
+import { ByteMascot } from '../ByteMascot';
+import { RustyMascot } from '../RustyMascot';
+import { KnightMascot } from '../KnightMascot';
+import { SenseiMascot } from '../SenseiMascot';
+import { SproutMascot } from '../SproutMascot';
+import { DroidMascot } from '../DroidMascot';
 import { AgentState } from '../../../../common/types';
 
 // ── jsdom SVG geometry shims ─────────────────────────────────────────────────
@@ -75,6 +82,16 @@ describe('mascot rig reset', () => {
   it.each([
     ['Antigravity', AntigravityMascot, 'gigi'],
     ['Clawd', ClawdMascot, 'body'],
+    // Merc mixes svgOrigin tweens on #char with local-origin blade swings.
+    ['Merc', MercMascot, 'char'],
+    // The character pack: each mixes authored transforms (jaws, arms, treads)
+    // with svgOrigin tweens on #char.
+    ['Byte', ByteMascot, 'char'],
+    ['Rusty', RustyMascot, 'char'],
+    ['Knight', KnightMascot, 'char'],
+    ['Sensei', SenseiMascot, 'char'],
+    ['Sprout', SproutMascot, 'char'],
+    ['Droid', DroidMascot, 'char'],
   ])('%s returns to its starting pose after a full state cycle', (_name, Mascot, groupId) => {
     const { container, rerender } = render(<Mascot state={CYCLE[0]} width={50} />);
     advance(1.5);

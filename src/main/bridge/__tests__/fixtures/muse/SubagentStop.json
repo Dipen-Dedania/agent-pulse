@@ -1,0 +1,13 @@
+{
+  "hook_event_name": "SubagentStop",
+  "subagent_id": "skill-reminder",
+  "child_session_id": "1a0fcd28-a936-420c-b2bc-f48b91a6ed73",
+  "stop_hook_active": false,
+  "last_assistant_message": "echo: You are a reminder observer for the main agent.\nDo not answer the user. Record exactly one decision this round by (elided)",
+  "session_id": "1a0fcd28-a936-420c-b2bc-f48b91a6ed73",
+  "turn_id": "1a0fcd28-a936-420c-b2bc-f48b91a6ed73",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "unknown",
+  "permission_mode": "default"
+}

@@ -5,7 +5,8 @@ import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import open, { openApp } from 'open';
-import { ToolId, ToolStatus, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleDisplayMatch, BubbleQuotaStyle } from '../../common/types';
+import { ToolId, ToolStatus, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleDisplayMatch, BubbleQuotaStyle, MascotId } from '../../common/types';
+import { MASCOT_GEOMETRY, mascotFor } from '../../common/mascotGeometry';
 import { logger } from '../../common/logger';
 
 // Pixel footprint of the bubble window per size. Width hugs the orb; height is
@@ -36,65 +37,9 @@ const ARC_DIMENSIONS: Record<BubbleSize, { width: number; height: number; toolti
   large:  { width: 86, height: 86, tooltip: 132 },
 };
 
-// Footprint for the Claude bubble when the Clawd mascot is on. Width MATCHES the
-// orb window (BUBBLE_DIMENSIONS) so that — with the stack right-edge aligned —
-// every bubble shares a vertical centerline; the narrower mascot SVG is centered
-// within (see MASCOT_WIDTH in Bubble.tsx, which stays ≤ these widths so no prop
-// clips). Height adds the usage-bar strip + bottom breathing room beneath the
-// mascot. Only the Claude bubble uses these.
-const MASCOT_DIMENSIONS: Record<BubbleSize, { width: number; height: number }> = {
-  small:  { width: 58, height: 81 },
-  medium: { width: 70, height: 94 },
-  large:  { width: 86, height: 112 },
-};
-
-// Footprint for the Codex bubble when the frog mascot is on. Width MATCHES the
-// orb window (BUBBLE_DIMENSIONS) so every bubble shares a vertical centerline
-// under the right-edge-aligned stack; the narrower frog SVG is centered within
-// (see MASCOT_WIDTH_CODEX in Bubble.tsx, ≤ these widths). The frog is taller than
-// Clawd (more headroom for the held sign + splayed hind legs), so it gets a bit
-// more vertical room; height adds the usage-bar strip + bottom breathing room.
-// Only the Codex bubble uses these.
-const MASCOT_DIMENSIONS_CODEX: Record<BubbleSize, { width: number; height: number }> = {
-  small:  { width: 58, height: 74 },
-  medium: { width: 70, height: 90 },
-  large:  { width: 86, height: 104 },
-};
-
-// Footprint for the Antigravity bubble when the GIGI droplet mascot is on. Width
-// MATCHES the orb window (BUBBLE_DIMENSIONS) so every bubble shares a vertical
-// centerline under the right-edge-aligned stack; the narrower droplet SVG is
-// centered within (see MASCOT_WIDTH_ANTIGRAVITY in Bubble.tsx, ≤ these widths).
-// GIGI is a tall teardrop, so it gets more vertical room; height adds the
-// usage-bar strip + bottom breathing room. Only the Antigravity bubble uses these.
-const MASCOT_DIMENSIONS_ANTIGRAVITY: Record<BubbleSize, { width: number; height: number }> = {
-  small:  { width: 58, height: 80 },
-  medium: { width: 70, height: 97 },
-  large:  { width: 86, height: 114 },
-};
-
-// Footprint for the Kiro bubble when the ghost mascot is on. The ghost SVG uses
-// a square viewBox at the same rendered widths as Clawd (see MASCOT_WIDTH_KIRO
-// in Bubble.tsx), so it shares Clawd's exact footprint — width MATCHES the orb
-// window so every bubble keeps the vertical centerline, height adds the
-// usage-bar strip + bottom breathing room. Only the Kiro bubble uses these.
-const MASCOT_DIMENSIONS_KIRO: Record<BubbleSize, { width: number; height: number }> = {
-  small:  { width: 58, height: 81 },
-  medium: { width: 70, height: 94 },
-  large:  { width: 86, height: 112 },
-};
-
-// Footprint for the VS Code Copilot bubble when the Mico blob mascot is on. Mico
-// uses a square viewBox at Clawd's rendered widths scaled to 120% (see
-// MASCOT_WIDTH_COPILOT in Bubble.tsx), so this is Clawd's footprint grown by the
-// same 20% — width hugs the enlarged mascot (wider than the orb window, so the
-// Copilot bubble sits slightly off the shared centerline), height adds the
-// usage-bar strip + bottom breathing room. Only the Copilot bubble uses these.
-const MASCOT_DIMENSIONS_COPILOT: Record<BubbleSize, { width: number; height: number }> = {
-  small:  { width: 69, height: 92 },
-  medium: { width: 83, height: 107 },
-  large:  { width: 102, height: 128 },
-};
+// Footprints while a mascot replaces the orb live in MASCOT_GEOMETRY
+// (src/common/mascotGeometry.ts), keyed by mascot id rather than by tool, so
+// any character can be assigned to any bubble. See dimsFor().
 
 // ─── macOS / Linux ────────────────────────────────────────────────────────────
 // macOS: `open -a <name>` activates the existing window (or launches if not running)
@@ -117,6 +62,8 @@ const TOOL_APP_NAME: Record<ToolId, { mac: string | null; linux: string | null }
   'grok':           { mac: null,                  linux: null },
   // OpenCode is a CLI/TUI — terminal-only, same as Grok and Claude Code.
   'opencode':       { mac: null,                  linux: null },
+  // Muse Code is a CLI/TUI — terminal-only, same as the other CLIs.
+  'muse-code':      { mac: null,                  linux: null },
 };
 
 // Last-resort click target: the tool's product page. Used only after every
@@ -132,6 +79,7 @@ const TOOL_WEB_URLS: Record<ToolId, string> = {
   'antigravity-cli': 'https://antigravity.google',
   'grok':            'https://grok.com',
   'opencode':        'https://opencode.ai',
+  'muse-code':       'https://dev.meta.ai/docs/muse-code',
 };
 
 // ─── Windows ─────────────────────────────────────────────────────────────────
@@ -165,6 +113,10 @@ const TOOL_CLI_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
   // OpenCode's TUI runs as `opencode`; it hosts its own server in-process, so
   // the one process name covers both surfaces.
   'opencode':       ['opencode'],
+  // Muse's native Windows build runs as a versioned `muse-bin-<ver>.exe` under
+  // a `muse.cmd` launcher; Get-Process -Name accepts the wildcard. macOS /
+  // Linux installs expose a plain `muse` binary.
+  'muse-code':      ['muse', 'muse-bin*'],
 };
 
 // URI schemes registered by GUI editors (HKCR on Windows, LaunchServices on
@@ -787,16 +739,9 @@ export class BubbleManager {
   // bars underneath it, so the window loses the bars strip and goes square
   // (ARC_DIMENSIONS). Mascot bubbles keep bars either way.
   private quotaStyle: BubbleQuotaStyle = 'bars';
-  // When true, the Claude bubble uses the larger MASCOT_DIMENSIONS footprint.
-  private mascotClaudeCode = false;
-  // When true, the Codex bubble uses the larger MASCOT_DIMENSIONS_CODEX footprint.
-  private mascotOpenaiCodex = false;
-  // When true, the Antigravity bubble uses the larger MASCOT_DIMENSIONS_ANTIGRAVITY footprint.
-  private mascotAntigravity = false;
-  // When true, the Kiro bubble uses the larger MASCOT_DIMENSIONS_KIRO footprint.
-  private mascotKiro = false;
-  // When true, the Copilot bubble uses the larger MASCOT_DIMENSIONS_COPILOT footprint.
-  private mascotVscodeCopilot = false;
+  // Per-tool mascot assignment. A tool with a mascot uses that mascot's window
+  // footprint from MASCOT_GEOMETRY instead of the orb footprint.
+  private mascots: Partial<Record<ToolId, MascotId>> = {};
   private stackPosition: BubbleStackPosition = 'bottom-right';
   private anchor: BubbleAnchor | null = null;
   private displayId: number | null = null;
@@ -835,11 +780,7 @@ export class BubbleManager {
     this.width = d.width;
     this.height = d.height;
     this.tooltipHeight = d.tooltip;
-    this.mascotClaudeCode = config.mascotClaudeCode ?? false;
-    this.mascotOpenaiCodex = config.mascotOpenaiCodex ?? false;
-    this.mascotAntigravity = config.mascotAntigravity ?? false;
-    this.mascotKiro = config.mascotKiro ?? false;
-    this.mascotVscodeCopilot = config.mascotVscodeCopilot ?? false;
+    this.mascots = config.mascots && typeof config.mascots === 'object' ? config.mascots : {};
     this.stackPosition = config.stackPosition;
     this.anchor = config.anchor ?? null;
     this.displayId = config.displayId ?? null;
@@ -847,30 +788,16 @@ export class BubbleManager {
     this.hidden = config.hidden ?? false;
   }
 
-  // Window footprint for a given tool. A bubble whose mascot is enabled grows
+  // Window footprint for a given tool. A bubble with a mascot assigned grows
   // to that mascot's size; everything else uses the standard orb size, since
   // every fill (including 'waveform', whose disc matches the orb) renders inside
   // the same footprint. Mascot checks come first because a mascot outranks the
   // fill mode. Used everywhere a window is sized, placed, or stacked.
   private dimsFor(toolId: ToolId): { width: number; height: number } {
-    if (toolId === 'claude-code' && this.mascotClaudeCode) {
-      const m = MASCOT_DIMENSIONS[this.size] ?? MASCOT_DIMENSIONS.medium;
-      return { width: m.width, height: m.height };
-    }
-    if (toolId === 'openai-codex' && this.mascotOpenaiCodex) {
-      const m = MASCOT_DIMENSIONS_CODEX[this.size] ?? MASCOT_DIMENSIONS_CODEX.medium;
-      return { width: m.width, height: m.height };
-    }
-    if (toolId === 'antigravity-cli' && this.mascotAntigravity) {
-      const m = MASCOT_DIMENSIONS_ANTIGRAVITY[this.size] ?? MASCOT_DIMENSIONS_ANTIGRAVITY.medium;
-      return { width: m.width, height: m.height };
-    }
-    if (toolId === 'kiro' && this.mascotKiro) {
-      const m = MASCOT_DIMENSIONS_KIRO[this.size] ?? MASCOT_DIMENSIONS_KIRO.medium;
-      return { width: m.width, height: m.height };
-    }
-    if (toolId === 'vscode-copilot' && this.mascotVscodeCopilot) {
-      const m = MASCOT_DIMENSIONS_COPILOT[this.size] ?? MASCOT_DIMENSIONS_COPILOT.medium;
+    const mascot = mascotFor(this.mascots, toolId);
+    if (mascot) {
+      const w = MASCOT_GEOMETRY[mascot].window;
+      const m = w[this.size] ?? w.medium;
       return { width: m.width, height: m.height };
     }
     return { width: this.width, height: this.height };

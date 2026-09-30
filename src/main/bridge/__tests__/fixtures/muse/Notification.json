@@ -1,0 +1,13 @@
+{
+  "notification_type": "permission_prompt",
+  "title": "Muse Code needs approval",
+  "message": "ws — waiting for approval",
+  "hook_event_name": "Notification",
+  "session_id": "01a0ed23-f440-7e81-863c-1e3cf1b01fd2",
+  "turn_id": "b9e317c4-cde6-4069-afda-7b1ea19214ee",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "fake-model",
+  "permission_mode": "default",
+  "model_provider": "meta"
+}

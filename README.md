@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/github/downloads/Dipen-Dedania/agent-pulse/total" alt="GitHub Downloads (all releases)" />
 </p>
 
-Agent Pulse is a cross-platform Electron desktop app that surfaces the state of every AI coding agent on your machine through floating, always-on-top status bubbles. Instead of tab-hopping between Claude Code, Cursor, Codex, Copilot, Kiro, and Antigravity to check whether an agent is still working, idle, or has crashed, you see it at a glance in a frosted-glass bubble — anywhere on your desktop.
+Agent Pulse is a cross-platform Electron desktop app that surfaces the state of every AI coding agent on your machine through floating, always-on-top status bubbles. Instead of tab-hopping between Claude Code, Cursor, Codex, Copilot, Kiro, Antigravity, and Muse Code to check whether an agent is still working, idle, or has crashed, you see it at a glance in a frosted-glass bubble — anywhere on your desktop.
 
 It also bundles a unified status bridge, subscription usage meters for Claude / Codex / Cursor / Antigravity, a local Pulse Timeline with estimated-cost analytics, a self-running Backlog board that executes queued tasks during your idle windows, a configurable Claude Code status line, Discord/Slack attention webhooks, a cowork session scheduler, and a configurable shell-command guardrail engine.
 
@@ -80,6 +80,7 @@ In-progress builds for any commit on `main` are also available as workflow artif
 | Kiro                     | IDE           | Shell hook (`.kiro/hooks/agent-pulse.kiro.hook`)                              |
 | Antigravity              | **CLI + IDE** | Shell hook (`~/.gemini/config/hooks.json`) — one install covers both surfaces |
 | Grok                     | CLI / TUI     | HTTP hook (`~/.grok/hooks/agent-pulse.json`) — dedicated global file          |
+| Muse Code (Meta)         | CLI / TUI     | Shell hook (`~/.config/muse/settings.json` + script) — merged, user-level     |
 
 Want a tool that isn't listed? Open a [tool support request](https://github.com/Dipen-Dedania/agent-pulse/issues/new?template=tool_support_request.yml) — or better, [add it yourself](CONTRIBUTING.md#adding-support-for-a-new-tool).
 
@@ -316,6 +317,7 @@ npm run test:bridge
 | `~/.codex/hooks.json` + `~/.codex/config.toml`           | Codex hooks + `[features].hooks` feature flag.                                                                                           |
 | `.kiro/hooks/agent-pulse.kiro.hook` (+ script)           | Kiro hooks.                                                                                                                              |
 | `~/.gemini/config/hooks.json` (+ script)                 | Antigravity CLI **and** IDE hooks.                                                                                                       |
+| `~/.config/muse/settings.json` + `~/.config/muse/hooks/` | Muse Code hooks block (merged into the user settings file) + hook scripts.                                                              |
 | `~/.config/autostart/agent-pulse.desktop` _(Linux only)_ | Launch-on-startup entry.                                                                                                                 |
 
 All hook files can be uninstalled from the Settings panel with one click.

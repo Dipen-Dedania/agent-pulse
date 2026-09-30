@@ -1,0 +1,17 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "powershell",
+  "tool_input": {
+    "command": "echo agent-pulse-spike",
+    "description": "x",
+    "workdir": "\\\\?\\C:\\Users\\dev\\proj"
+  },
+  "tool_use_id": "call_ap1",
+  "session_id": "01a0ed21-977b-7b82-b7d6-35816acba9d4",
+  "turn_id": "1b75bb54-d738-48d8-b998-88f9703908df",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "fake-model",
+  "permission_mode": "bypassPermissions",
+  "model_provider": "meta"
+}

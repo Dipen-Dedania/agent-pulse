@@ -5,6 +5,7 @@ import { execFileSync } from 'child_process';
 import { ToolId, StatusLineRuntime } from '../../common/types';
 import { resolveAugmentedPath } from '../shell-path';
 import { opencodeConfigDir, opencodeDataDirs } from './opencode-paths';
+import { museConfigDir, museWindowsInstallDir } from './muse-paths';
 
 export interface ToolDetection {
   installed: boolean;
@@ -30,6 +31,7 @@ export class ToolDetector {
       'antigravity-cli': this.detectAntigravityCli(),
       'grok': this.detectGrok(),
       'opencode': this.detectOpencode(),
+      'muse-code': this.detectMuseCode(),
     };
   }
 
@@ -243,6 +245,27 @@ export class ToolDetector {
     if (dataDir) return { installed: true, location: dataDir };
 
     const cliPath = this.whichCommand('opencode');
+    if (cliPath) return { installed: true, location: cliPath };
+    return { installed: false };
+  }
+
+  private detectMuseCode(): ToolDetection {
+    // Muse Code keeps its config under $XDG_CONFIG_HOME/muse or ~/.config/muse
+    // on every platform (verified on 1.4.1 — no %APPDATA%). A fresh native
+    // Windows install has no config dir until first login, so also probe the
+    // installer's fixed location (%LOCALAPPDATA%/Programs/muse, holding a
+    // muse.cmd launcher) before falling back to a `muse` binary on PATH.
+    // A WSL-only install is deliberately not detected: its hooks would run
+    // inside the Linux VM and never reach this side's bridge.
+    const configDir = museConfigDir();
+    if (existsSync(configDir)) return { installed: true, location: configDir };
+
+    if (process.platform === 'win32') {
+      const launcher = path.join(museWindowsInstallDir(), 'muse.cmd');
+      if (existsSync(launcher)) return { installed: true, location: launcher };
+    }
+
+    const cliPath = this.whichCommand('muse');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }

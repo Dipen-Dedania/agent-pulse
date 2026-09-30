@@ -1,0 +1,16 @@
+{
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "powershell",
+  "tool_input": {
+    "command": "git push --force origin main",
+    "description": "x",
+    "workdir": "\\\\?\\C:\\Users\\dev\\proj"
+  },
+  "session_id": "01a0ed23-f440-7e81-863c-1e3cf1b01fd2",
+  "turn_id": "b9e317c4-cde6-4069-afda-7b1ea19214ee",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "fake-model",
+  "permission_mode": "default",
+  "model_provider": "meta"
+}

@@ -1,12 +1,9 @@
 import React, { useState } from 'react';
-import { AgentState } from '../../../common/types';
+import { AgentState, MascotId, ToolId } from '../../../common/types';
 import { STATE_COLORS } from '../../../common/stateColors';
 import { TOOL_META } from '../../../common/toolMeta';
-import { ClawdMascot } from '../Bubble/ClawdMascot';
-import { CodexMascot } from '../Bubble/CodexMascot';
-import { AntigravityMascot } from '../Bubble/AntigravityMascot';
-import { KiroMascot } from '../Bubble/KiroMascot';
-import { MicoMascot } from '../Bubble/MicoMascot';
+import { MASCOT_COMPONENTS, MASCOT_PREVIEW_WIDTH } from '../Bubble/mascotRegistry';
+import { MASCOT_HOME, MASCOT_IDS, MASCOT_LABELS } from '../../../common/mascotGeometry';
 
 type RingStyle = 'dotted' | 'dashed' | null;
 
@@ -106,23 +103,66 @@ const StateCard: React.FC<CardConfig> = ({
 // when Mascot mode is enabled on a bubble. One mascot renders at a time so only
 // five GSAP loops run in the settings window.
 
-type MascotToolId = 'claude-code' | 'openai-codex' | 'antigravity-cli' | 'kiro' | 'vscode-copilot';
+type MascotEntryId = Exclude<MascotId, 'none'>;
 
 interface MascotEntry {
-  id: MascotToolId;
+  id: MascotEntryId;
   Component: React.ComponentType<{ state: AgentState; width: number }>;
   // Per-mascot width chosen so the differing viewBox aspect ratios land at a
   // similar rendered height inside the card stage.
   width: number;
+  // The agent this character ships with, for the logo beside its name; a
+  // mascot without a home tool is still pickable for any agent.
+  homeTool: ToolId | null;
 }
 
-const MASCOTS: MascotEntry[] = [
-  { id: 'claude-code', Component: ClawdMascot, width: 78 },
-  { id: 'openai-codex', Component: CodexMascot, width: 64 },
-  { id: 'antigravity-cli', Component: AntigravityMascot, width: 58 },
-  { id: 'kiro', Component: KiroMascot, width: 78 },
-  { id: 'vscode-copilot', Component: MicoMascot, width: 78 },
-];
+const MASCOTS: MascotEntry[] = MASCOT_IDS.map((id) => ({
+  id,
+  Component: MASCOT_COMPONENTS[id],
+  width: MASCOT_PREVIEW_WIDTH[id],
+  homeTool: (Object.keys(MASCOT_HOME) as ToolId[]).find((t) => MASCOT_HOME[t] === id) ?? null,
+}));
+
+// The picker splits the roster into characters that ship with an agent (sorted
+// by the agent's name, since that is how users look for them) and free agents
+// that belong to no tool, so the icon-less pills read as a deliberate group
+// rather than unfinished ones.
+const AGENT_MASCOTS = MASCOTS.filter(
+  (m): m is MascotEntry & { homeTool: ToolId } => m.homeTool !== null,
+).sort((a, b) => TOOL_META[a.homeTool].label.localeCompare(TOOL_META[b.homeTool].label));
+const FREE_MASCOTS = MASCOTS.filter((m) => m.homeTool === null);
+
+const MascotPickerGroup: React.FC<{
+  label: string;
+  mascots: MascotEntry[];
+  activeId: MascotEntryId;
+  onPick: (id: MascotEntryId) => void;
+}> = ({ label, mascots, activeId, onPick }) => (
+  <div className='flex flex-col gap-1.5'>
+    <p className='text-[10px] font-medium uppercase tracking-wider text-faint'>{label}</p>
+    <div className='flex flex-wrap gap-1.5'>
+      {mascots.map((m) => {
+        const active = m.id === activeId;
+        const tool = m.homeTool ? TOOL_META[m.homeTool] : null;
+        return (
+          <button
+            key={m.id}
+            onClick={() => onPick(m.id)}
+            aria-pressed={active}
+            title={tool ? `${MASCOT_LABELS[m.id]} · ${tool.label}` : MASCOT_LABELS[m.id]}
+            className={`flex items-center cursor-pointer gap-1.5 pl-2.5 pr-3 py-1 rounded-full text-xs font-medium border transition-colors ${active
+                ? 'bg-control-strong border-edge-strong text-primary shadow-sm'
+                : 'bg-glass/40 border-edge/70 text-muted hover:text-primary hover:border-edge-strong'
+              }`}
+          >
+            {tool && <img src={tool.icon} alt='' className='w-3.5 h-3.5' />}
+            {MASCOT_LABELS[m.id]}
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
 
 const MascotStateCard: React.FC<{ card: CardConfig; mascot: MascotEntry }> = ({
   card,
@@ -142,33 +182,27 @@ const MascotStateCard: React.FC<{ card: CardConfig; mascot: MascotEntry }> = ({
 };
 
 const MascotStates: React.FC = () => {
-  const [mascotId, setMascotId] = useState<MascotToolId>('claude-code');
+  const [mascotId, setMascotId] = useState<MascotEntryId>('clawd');
   const mascot = MASCOTS.find((m) => m.id === mascotId) ?? MASCOTS[0];
 
   return (
     <div className='mt-8'>
-      <div className='flex flex-wrap items-center justify-between gap-3 mb-4'>
-        <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
-          Mascot States
-        </p>
-        <div className='flex gap-1.5'>
-          {MASCOTS.map((m) => {
-            const active = m.id === mascotId;
-            return (
-              <button
-                key={m.id}
-                onClick={() => setMascotId(m.id)}
-                className={`flex items-center cursor-pointer gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${active
-                    ? 'bg-control/80 border-edge-strong/70 text-primary'
-                    : 'bg-glass/40 border-edge/70 text-muted hover:text-primary hover:border-edge-strong'
-                  }`}
-              >
-                <img src={TOOL_META[m.id].icon} alt='' className='w-3.5 h-3.5' />
-                {TOOL_META[m.id].label}
-              </button>
-            );
-          })}
-        </div>
+      <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
+        Mascot States
+      </p>
+      <div className='flex flex-wrap gap-x-8 gap-y-3 mb-4'>
+        <MascotPickerGroup
+          label='Agent mascots'
+          mascots={AGENT_MASCOTS}
+          activeId={mascotId}
+          onPick={setMascotId}
+        />
+        <MascotPickerGroup
+          label='Free agents'
+          mascots={FREE_MASCOTS}
+          activeId={mascotId}
+          onPick={setMascotId}
+        />
       </div>
       <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3'>
         {CARDS.map((card) => (
@@ -176,7 +210,7 @@ const MascotStates: React.FC = () => {
         ))}
       </div>
       <p className='text-[11px] text-faint mt-3'>
-        Shown when Mascot mode is enabled for the tool in the Bubble tab.
+        Shown on any agent you assign the mascot to in the Bubble tab.
       </p>
     </div>
   );

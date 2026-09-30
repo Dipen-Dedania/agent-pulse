@@ -163,7 +163,47 @@ const GROK_ERROR_EVENTS = new Set([
 ]);
 const GROK_NOTIFICATION_WAITING_TYPES = new Set(['permission', 'permission_prompt', 'permission_request']);
 
-const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'antigravity-cli', 'grok', 'opencode'];
+// Muse Code (Meta) hook event names → AgentState. Muse implements Claude
+// Code's hook contract verbatim (same PascalCase names, same snake_case stdin
+// fields), so the mapping mirrors mapClaudeCodeEvent. Detection relies solely
+// on the `_ap_tool: "muse-code"` marker our shim injects — nothing in the
+// native payload tells it apart from Claude Code. Verified on Muse 1.4.1:
+//   PermissionRequest fires when a tool call needs approval; a Notification
+//   with notification_type "permission_prompt" arrives alongside it.
+//   PostToolUseFailure carries the tool's error text in `error`.
+//   Stop fires at every turn end (both provider paths), so PostLLMCall is not
+//   needed for idle detection and is not registered (its payload embeds the
+//   whole conversation — far beyond MAX_BODY_BYTES).
+//   SubagentStart/Stop fire for Muse's internal "reminder" observer agents on
+//   every turn, so they are not registered either; if one ever arrives it is
+//   ignored rather than flipping the bubble.
+//   PostToolUse maps to WORKING (unlike Claude Code's idle-active): the model
+//   is always called again after a tool result, and the Muse shim delivers
+//   PostToolUse asynchronously, so an idle mapping could land after the next
+//   awaited PreToolUse and dip a busy bubble to idle mid-turn. Stop is the
+//   turn boundary.
+const MUSE_WAITING_EVENTS = new Set(['PermissionRequest']);
+const MUSE_WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse']);
+const MUSE_IDLE_EVENTS    = new Set(['SessionStart', 'Stop', 'SessionEnd']);
+const MUSE_ERROR_EVENTS   = new Set(['PostToolUseFailure']);
+const MUSE_NOTIFICATION_WAITING_TYPES = new Set(['permission_prompt', 'permission', 'permission_request']);
+
+function mapMuseCodeEvent(eventName: string, data: any): AgentState | null {
+  // Same auto-compaction guard as Claude Code: a mid-turn SessionStart with
+  // source 'compact' is not a session boundary.
+  if (eventName === 'SessionStart' && data?.source === 'compact') return null;
+  if (eventName === 'Notification') {
+    const notifType = data?.notification_type ?? data?.notificationType;
+    return MUSE_NOTIFICATION_WAITING_TYPES.has(notifType) ? 'waiting' : null;
+  }
+  if (MUSE_WAITING_EVENTS.has(eventName)) return 'waiting';
+  if (MUSE_WORKING_EVENTS.has(eventName)) return 'working';
+  if (MUSE_IDLE_EVENTS.has(eventName))    return 'idle-active';
+  if (MUSE_ERROR_EVENTS.has(eventName))   return 'error';
+  return null;
+}
+
+const VALID_TOOLS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'antigravity-cli', 'grok', 'opencode', 'muse-code'];
 const VALID_STATES: AgentState[] = ['working', 'waiting', 'idle', 'idle-active', 'error'];
 
 export class StatusBridgeServer {
@@ -630,6 +670,24 @@ export function buildSecretBlockResponse(
 // `status: "blocked"` + `continue: false` are stable markers every block body
 // carries so the shell hook scripts can detect a block without a JSON parser.
 function buildDenyResponse(toolId: ToolId, reason: string, matchedRules: string): any {
+  // Muse Code validates hook output against Claude Code's contract and FAILS
+  // the hook on any unknown top-level key — `status`, `continue` and
+  // `matchedRules` each produced "unsupported <key> in output of PreToolUse
+  // hook output" on 1.4.1 — and a failed hook fails OPEN, so the command
+  // would run. Send only Claude-documented fields; the Muse shim detects a
+  // block via the literal "permissionDecision":"deny" instead of
+  // "status":"blocked".
+  if (toolId === 'muse-code') {
+    return {
+      decision: 'block',
+      reason,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason,
+      },
+    };
+  }
   // Antigravity's allow/deny protocol uses "deny"; Codex/Claude Code use the
   // legacy "block" plus hookSpecificOutput.
   const decision = toolId === 'antigravity-cli' ? 'deny' : 'block';
@@ -812,6 +870,43 @@ export function normalizePayload(data: any): { toolId: ToolId; state: AgentState
             sessionId:   data.conversationId ?? data.session_id,
             taskSummary: toolName ? `Tool: ${toolName}` : undefined,
             model:       typeof data.model === 'string' ? data.model : undefined,
+            errorMessage,
+            ...common,
+          },
+        };
+      }
+
+      // Format 2d — Muse Code (Meta). Its stdin payload is byte-for-byte Claude
+      // Code's hook schema, so the ONLY thing that tells it apart is the
+      // `_ap_tool` marker injected by our shim. It must therefore sit ahead of
+      // every field-sniffing branch below (Cursor, Kiro, the Claude Code
+      // transcript/permission_mode branch, Copilot) — any of those would
+      // happily claim a Muse payload.
+      if (data._ap_tool === 'muse-code') {
+        const state = mapMuseCodeEvent(eventName, data);
+        if (state === null) {
+          logger.debug(`Ignoring unmapped Muse Code event: ${eventName}`);
+          return null;
+        }
+        const toolName: string | undefined =
+          typeof data.tool_name === 'string' ? data.tool_name : undefined;
+        // Muse reports "unknown" as the model on its echo provider — drop it
+        // so analytics don't grow a synthetic "unknown" model row.
+        const model: string | undefined =
+          typeof data.model === 'string' && data.model !== 'unknown' ? data.model : undefined;
+        // PostToolUseFailure carries the tool's failure detail as a (JSON)
+        // string in `error`; keep a bounded excerpt for the bubble/timeline.
+        const errorMessage: string | undefined =
+          eventName === 'PostToolUseFailure' && typeof data.error === 'string'
+            ? data.error.slice(0, 500)
+            : undefined;
+        return {
+          toolId: 'muse-code',
+          state,
+          payload: {
+            sessionId:   data.session_id ?? data.sessionId,
+            taskSummary: toolName ? `Tool: ${toolName}` : undefined,
+            model,
             errorMessage,
             ...common,
           },

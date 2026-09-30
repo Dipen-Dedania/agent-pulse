@@ -19,11 +19,8 @@ import {
   copilotArcRemaining,
   antigravityArcRemaining,
 } from './quota';
-import { ClawdMascot } from './ClawdMascot';
-import { CodexMascot } from './CodexMascot';
-import { AntigravityMascot } from './AntigravityMascot';
-import { KiroMascot } from './KiroMascot';
-import { MicoMascot } from './MicoMascot';
+import { MASCOT_COMPONENTS } from './mascotRegistry';
+import { MASCOT_GEOMETRY, mascotFor } from '../../../common/mascotGeometry';
 import { logger } from '../../../common/logger';
 import { motion } from 'framer-motion';
 import { useStatusStore } from '../../store/useStatusStore';
@@ -47,38 +44,9 @@ const ORB_DIMENSIONS: Record<BubbleSize, BubbleDims> = {
   large: { orb: 60, icon: 30, ring: 70, bar: { width: 64, height: 4, gap: 3 } },
 };
 
-// Rendered width of the Clawd mascot per bubble size — the tuned widths scaled
-// to 80% (20% smaller, on request). The Claude bubble window shrinks to match
-// (see MASCOT_DIMENSIONS in bubble-manager.ts), so there's no dead space around
-// the mascot and the flag/zzz/alert props still never clip.
-const MASCOT_WIDTH: Record<BubbleSize, number> = { small: 54, medium: 66, large: 82 };
-
-// Rendered width of the Codex frog mascot per bubble size — the tuned widths
-// scaled to 60% (40% smaller, on request). The Codex bubble window shrinks to
-// match (see MASCOT_DIMENSIONS_CODEX in bubble-manager.ts), so there's no dead
-// space around the mascot and the sign/zzz/alert props still never clip.
-const MASCOT_WIDTH_CODEX: Record<BubbleSize, number> = { small: 42, medium: 52, large: 62 };
-
-// Rendered width of the Antigravity GIGI mascot per bubble size — the tuned
-// widths scaled to 60% (40% smaller, on request). The Antigravity bubble window
-// shrinks to match (see MASCOT_DIMENSIONS_ANTIGRAVITY in bubble-manager.ts), so
-// there's no dead space around the mascot and the flag/zzz/alert props still
-// never clip.
-const MASCOT_WIDTH_ANTIGRAVITY: Record<BubbleSize, number> = { small: 40, medium: 50, large: 61 };
-
-// Rendered width of the Kiro ghost mascot per bubble size — same widths as
-// Clawd (the ghost's viewBox is square like Clawd's, so at equal widths the two
-// mascots share an identical footprint). The Kiro bubble window grows to match
-// (see MASCOT_DIMENSIONS_KIRO in bubble-manager.ts), so there's no dead space
-// around the mascot and the sign/zzz/alert props still never clip.
-const MASCOT_WIDTH_KIRO: Record<BubbleSize, number> = { small: 54, medium: 66, large: 82 };
-
-// Rendered width of the Copilot Mico mascot per bubble size — Clawd's widths
-// scaled to 120% (20% larger, on request; Mico's viewBox is square like
-// Clawd's). The Copilot bubble window grows to match (see
-// MASCOT_DIMENSIONS_COPILOT in bubble-manager.ts), so there's no dead space
-// around the mascot and the sign/zzz/alert props still never clip.
-const MASCOT_WIDTH_COPILOT: Record<BubbleSize, number> = { small: 65, medium: 79, large: 98 };
+// Rendered mascot widths per bubble size live in MASCOT_GEOMETRY (src/common),
+// keyed by mascot id, next to the matching window footprints bubble-manager uses,
+// so a mascot never clips whichever agent it is assigned to.
 
 
 interface BubbleProps {
@@ -496,11 +464,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
   const [fillMode, setFillMode] = useState<BubbleFillMode>('glass');
   const [fillColor, setFillColor] = useState<string>('#ffffff');
   const [quotaStyle, setQuotaStyle] = useState<BubbleQuotaStyle>('bars');
-  const [mascotEnabled, setMascotEnabled] = useState(false);
-  const [mascotCodexEnabled, setMascotCodexEnabled] = useState(false);
-  const [mascotAntigravityEnabled, setMascotAntigravityEnabled] = useState(false);
-  const [mascotKiroEnabled, setMascotKiroEnabled] = useState(false);
-  const [mascotCopilotEnabled, setMascotCopilotEnabled] = useState(false);
+  // Per-agent mascot assignments from BubbleConfig; this bubble reads its own.
+  const [mascots, setMascots] = useState<BubbleConfig['mascots']>({});
   const [bubbleOpacity, setBubbleOpacity] = useState(1);
   const [refreshingUsage, setRefreshingUsage] = useState(false);
 
@@ -537,11 +502,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
       if (b.fillMode) setFillMode(b.fillMode);
       if (b.fillColor) setFillColor(b.fillColor);
       if (b.quotaStyle) setQuotaStyle(b.quotaStyle);
-      if (typeof b.mascotClaudeCode === 'boolean') setMascotEnabled(b.mascotClaudeCode);
-      if (typeof b.mascotOpenaiCodex === 'boolean') setMascotCodexEnabled(b.mascotOpenaiCodex);
-      if (typeof b.mascotAntigravity === 'boolean') setMascotAntigravityEnabled(b.mascotAntigravity);
-      if (typeof b.mascotKiro === 'boolean') setMascotKiroEnabled(b.mascotKiro);
-      if (typeof b.mascotVscodeCopilot === 'boolean') setMascotCopilotEnabled(b.mascotVscodeCopilot);
+      if (b.mascots && typeof b.mascots === 'object') setMascots(b.mascots);
       if (typeof b.opacity === 'number' && Number.isFinite(b.opacity)) {
         setBubbleOpacity(Math.min(1, Math.max(0.3, b.opacity)));
       }
@@ -920,16 +881,12 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
   const renderSize: BubbleSize = demo ? 'large' : bubbleSize;
   const dims = ORB_DIMENSIONS[renderSize] ?? ORB_DIMENSIONS.medium;
 
-  // Mascot mode: the Claude bubble swaps its glass orb for the animated Clawd,
-  // and the Codex bubble for the animated frog — each pose conveys the state, so
-  // we drop the disc background, the per-state orb pulse, and the orbiting state
-  // rings, keeping only the corner badges. The tour demo always stars Clawd.
-  const claudeMascotMode = toolId === 'claude-code' && (mascotEnabled || demo);
-  const codexMascotMode = toolId === 'openai-codex' && mascotCodexEnabled;
-  const antigravityMascotMode = toolId === 'antigravity-cli' && mascotAntigravityEnabled;
-  const kiroMascotMode = toolId === 'kiro' && mascotKiroEnabled;
-  const copilotMascotMode = toolId === 'vscode-copilot' && mascotCopilotEnabled;
-  const mascotMode = claudeMascotMode || codexMascotMode || antigravityMascotMode || kiroMascotMode || copilotMascotMode;
+  // Mascot mode: the bubble swaps its glass orb for whichever animated character
+  // the user assigned to this agent — each pose conveys the state, so we drop the
+  // disc background, the per-state orb pulse, and the orbiting state rings,
+  // keeping only the corner badges. The tour demo always stars Clawd.
+  const mascotId = demo && toolId === 'claude-code' ? 'clawd' : mascotFor(mascots, toolId);
+  const mascotMode = mascotId !== null;
   // "3D orb" fill: a rotating dotted point-cloud around the tool logo, state-
   // driven. Mutually exclusive with mascot mode (mascot wins), matching how
   // glass/solid already yield to a mascot.
@@ -972,15 +929,10 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
             : toolId === 'antigravity-cli'
               ? antigravityArcRemaining(antigravityUsageStatus, visibleAntigravityModels(antigravityUsageStatus))
               : null;
-  const mascotWidth = codexMascotMode
-    ? (MASCOT_WIDTH_CODEX[renderSize] ?? MASCOT_WIDTH_CODEX.medium)
-    : antigravityMascotMode
-      ? (MASCOT_WIDTH_ANTIGRAVITY[renderSize] ?? MASCOT_WIDTH_ANTIGRAVITY.medium)
-      : kiroMascotMode
-        ? (MASCOT_WIDTH_KIRO[renderSize] ?? MASCOT_WIDTH_KIRO.medium)
-        : copilotMascotMode
-          ? (MASCOT_WIDTH_COPILOT[renderSize] ?? MASCOT_WIDTH_COPILOT.medium)
-          : (MASCOT_WIDTH[renderSize] ?? MASCOT_WIDTH.medium);
+  const mascotWidth = mascotId
+    ? (MASCOT_GEOMETRY[mascotId].width[renderSize] ?? MASCOT_GEOMETRY[mascotId].width.medium)
+    : 0;
+  const Mascot = mascotId ? MASCOT_COMPONENTS[mascotId] : null;
 
   const animations: Record<AgentState, any> = {
     idle: {
@@ -1173,18 +1125,8 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
               : '0 4px 16px 0 rgba(0,0,0,0.15)',
         }}
       >
-        {mascotMode ? (
-          codexMascotMode ? (
-            <CodexMascot state={state} width={mascotWidth} />
-          ) : antigravityMascotMode ? (
-            <AntigravityMascot state={state} width={mascotWidth} />
-          ) : kiroMascotMode ? (
-            <KiroMascot state={state} width={mascotWidth} />
-          ) : copilotMascotMode ? (
-            <MicoMascot state={state} width={mascotWidth} />
-          ) : (
-            <ClawdMascot state={state} width={mascotWidth} />
-          )
+        {Mascot ? (
+          <Mascot state={state} width={mascotWidth} />
         ) : waveformMode ? (
           <WaveformTrace
             state={state}

@@ -11,6 +11,12 @@ import {
   opencodePluginDirs,
   opencodePluginPath,
 } from './opencode-paths';
+import {
+  museHooksDir,
+  museHookPs1Path,
+  museHookShPath,
+  museSettingsPath,
+} from './muse-paths';
 
 export class ConfigWriter {
   private bridgeUrl = BRIDGE_URL;
@@ -33,6 +39,8 @@ export class ConfigWriter {
         return this.isGrokHookInstalled();
       case 'opencode':
         return this.isOpencodeHookInstalled();
+      case 'muse-code':
+        return this.isMuseCodeHookInstalled();
       default:
         return false;
     }
@@ -56,6 +64,8 @@ export class ConfigWriter {
         return this.writeGrokHook();
       case 'opencode':
         return this.writeOpencodeHook();
+      case 'muse-code':
+        return this.writeMuseCodeHook();
       default:
         throw new Error(`Hook installation for ${toolId} not yet implemented`);
     }
@@ -1128,6 +1138,279 @@ exit 0
 `;
   }
 
+  // ─── Muse Code ─────────────────────────────────────────────────────────────
+  // Muse implements Claude Code's hook contract (same event names, same stdin
+  // JSON, same hookSpecificOutput deny) but ONLY supports command hooks and
+  // runs them with a cleared environment. We merge a `hooks` block into the
+  // user settings file — hooks there are admitted without a trust prompt in
+  // headless runs and with a one-time "Trust all and continue" prompt in the
+  // TUI (verified on 1.4.1) — and point every event at a script pair that
+  // POSTs the payload to the bridge.
+  //
+  // Windows quoting: Muse hands `command` to cmd.exe with embedded double
+  // quotes backslash-escaped, so ANY quoted path breaks ('"C:\...\powershell.exe"'
+  // is not recognized as an internal or external command). We therefore never
+  // quote: the Windows form is `powershell.exe -EncodedCommand <base64>`, whose
+  // decoded payload (`& '<ps1 path>'`) may contain spaces and quotes freely.
+  // `commandWindows` is selected on Windows only and `command` (the .sh path)
+  // everywhere else, so one settings entry works on every platform.
+  //
+  // settings.json rules (verified): a missing file is created with
+  // `"schema_version": 1`; an existing file without schema_version gets it
+  // added (Muse refuses to start without it); a UTF-8 BOM is equally fatal to
+  // Muse, so one is stripped on read and never written; an unparsable file is
+  // left untouched and the install fails loudly instead of clobbering it.
+
+  private static readonly MUSE_HOOK_EVENTS = [
+    'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest',
+    'PostToolUse', 'PostToolUseFailure', 'Notification', 'Stop', 'SessionEnd',
+  ];
+  private static readonly MUSE_STATUS_MESSAGE = 'Agent Pulse';
+
+  // The bridge listens on 127.0.0.1 only. A `localhost` URL makes .NET try
+  // ::1 first and wait for the refusal — measured at ~2.0s per hook in a fresh
+  // PowerShell process versus ~0.18s for the literal IPv4 address — and the
+  // awaited PreToolUse hook sits on every tool call, so the Muse scripts use
+  // the address form.
+  private museBridgeUrl(): string {
+    return this.bridgeUrl.replace('://localhost:', '://127.0.0.1:');
+  }
+
+  private readMuseSettings(): { settings: any; existed: boolean } {
+    const settingsPath = museSettingsPath();
+    if (!fs.existsSync(settingsPath)) return { settings: {}, existed: false };
+    const raw = fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '');
+    if (raw.trim().length === 0) return { settings: {}, existed: true };
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error(`Muse settings file is not valid JSON — fix ${settingsPath} by hand, then reinstall the hook.`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`Muse settings file must contain a JSON object: ${settingsPath}`);
+    }
+    return { settings: parsed, existed: true };
+  }
+
+  private isMuseAgentPulseHandler(hook: any): boolean {
+    return this.hasAgentPulseCommand(hook) || hook?.statusMessage === ConfigWriter.MUSE_STATUS_MESSAGE;
+  }
+
+  // Drop our handlers from one Muse hook-event array, keeping every foreign
+  // group and handler. A group that mixed ours with foreign handlers keeps the
+  // foreign ones; a group left empty is dropped.
+  private stripMuseAgentPulseEntries(entries: any): any[] {
+    if (!Array.isArray(entries)) return [];
+    const kept: any[] = [];
+    for (const group of entries) {
+      if (!group || typeof group !== 'object' || !Array.isArray(group.hooks)) {
+        kept.push(group);
+        continue;
+      }
+      const hooks = group.hooks.filter((h: any) => !this.isMuseAgentPulseHandler(h));
+      if (hooks.length === 0) continue;
+      kept.push(hooks.length === group.hooks.length ? group : { ...group, hooks });
+    }
+    return kept;
+  }
+
+  private isMuseCodeHookInstalled(): boolean {
+    let settings: any;
+    try {
+      settings = this.readMuseSettings().settings;
+    } catch {
+      return false;
+    }
+    if (!settings?.hooks || typeof settings.hooks !== 'object') return false;
+    // Command hooks: the scripts must exist for the hook to actually fire.
+    if (!this.hasAllFiles([museHookShPath(), museHookPs1Path()])) return false;
+    return ['SessionStart', 'PreToolUse', 'Stop'].every((event) =>
+      Array.isArray(settings.hooks[event]) &&
+      settings.hooks[event].some((group: any) =>
+        Array.isArray(group?.hooks) && group.hooks.some((h: any) => this.isMuseAgentPulseHandler(h)),
+      ),
+    );
+  }
+
+  // Muse only needs to WAIT for two hooks: PreToolUse (that is where a
+  // guardrail deny is relayed) and SessionStart (once per session, so the
+  // agent PID chain is latched before any other event and its idle-active
+  // can never land after a later working event). Everything else is
+  // observation-only and declared `async: true`, which Muse runs in the
+  // background without stalling the turn (verified 1.4.1: async hooks fire,
+  // are not awaited, and are not audited in the session log).
+  private static readonly MUSE_AWAITED_EVENTS = new Set(['PreToolUse', 'SessionStart']);
+
+  private buildMuseHandler(event: string): any {
+    const shPath = museHookShPath();
+    const ps1Path = museHookPs1Path();
+    // POSIX: the command goes through a shell, so single-quote a path with
+    // whitespace and leave a plain one bare.
+    const command = /\s/.test(shPath) ? `'${shPath.replace(/'/g, `'\\''`)}'` : shPath;
+    const systemRoot = process.env['SystemRoot'] || 'C:\\Windows';
+    const psExe = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const inner = `& '${ps1Path.replace(/'/g, "''")}'`;
+    const encoded = Buffer.from(inner, 'utf16le').toString('base64');
+    const commandWindows = `${psExe} -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`;
+    return {
+      type: 'command',
+      command,
+      commandWindows,
+      // Seconds (verified: a 1s timeout still let a ~240ms hook complete).
+      timeout: 10,
+      ...(ConfigWriter.MUSE_AWAITED_EVENTS.has(event) ? {} : { async: true }),
+      statusMessage: ConfigWriter.MUSE_STATUS_MESSAGE,
+    };
+  }
+
+  private writeMuseCodeHook() {
+    const { settings } = this.readMuseSettings(); // throws on an unparsable file
+    const hooksDir = museHooksDir();
+    if (!fs.existsSync(hooksDir)) {
+      fs.mkdirSync(hooksDir, { recursive: true });
+    }
+    fs.writeFileSync(museHookShPath(), this.buildMuseShellScript(), { mode: 0o755 });
+    fs.writeFileSync(museHookPs1Path(), this.buildMusePowerShellScript());
+
+    if (typeof settings.schema_version !== 'number') settings.schema_version = 1;
+    if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
+      settings.hooks = {};
+    }
+    // Strip-then-append per event, like the Claude Code writer: idempotent and
+    // never touches foreign handlers.
+    for (const event of ConfigWriter.MUSE_HOOK_EVENTS) {
+      settings.hooks[event] = [
+        ...this.stripMuseAgentPulseEntries(settings.hooks[event]),
+        { hooks: [this.buildMuseHandler(event)] },
+      ];
+    }
+
+    const settingsPath = museSettingsPath();
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    return { success: true, path: settingsPath };
+  }
+
+  /**
+   * Bash script for Muse Code: injects `_ap_tool: "muse-code"` + cwd + agent_pid
+   * before forwarding the stdin event JSON to the bridge, and relays a deny
+   * verdict back via stdout. Muse clears the environment for hooks, so PATH is
+   * restored to the usual system locations first. Fail-open on any error.
+   */
+  private buildMuseShellScript(): string {
+    return `#!/usr/bin/env bash
+# Agent Pulse — Muse Code hook script (bash)
+# Reads event JSON from stdin, injects identifier + cwd + agent_pid, forwards to
+# the bridge, and relays a guardrail deny verdict back to Muse via stdout.
+# Muse runs hooks with a cleared environment, so restore a sane PATH first.
+# Fail-open: any bridge error leaves the tool call allowed.
+export PATH="\${PATH:+$PATH:}/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
+BODY=$(cat)
+CWD_ESCAPED=$(printf '%s' "$PWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+CHAIN_PIDS="$PPID"
+_CUR=$PPID
+for _i in 1 2 3 4 5 6 7; do
+  _PARENT=$(ps -o ppid= -p "$_CUR" 2>/dev/null | tr -d ' ')
+  if [ -z "$_PARENT" ] || [ "$_PARENT" -le 1 ] 2>/dev/null; then break; fi
+  CHAIN_PIDS="$CHAIN_PIDS,$_PARENT"
+  _CUR=$_PARENT
+done
+INJECT='"_ap_tool":"muse-code","cwd":"'"$CWD_ESCAPED"'","agent_pid":'"$PPID"',"agent_pid_chain":['"$CHAIN_PIDS"'],'
+BODY=$(printf '%s' "$BODY" | sed "s|^{|{$INJECT|")
+RESP=$(curl -s --max-time 3 -X POST \\
+  -H "Content-Type: application/json" \\
+  -d "$BODY" \\
+  "${this.museBridgeUrl()}" 2>/dev/null || true)
+# Relay an explicit deny verdict. Muse rejects any non-Claude top-level key, so
+# the bridge sends Muse a pure Claude-shaped body (see buildDenyResponse); a
+# down/slow bridge fails open (tool call allowed).
+case "$RESP" in
+  *'"permissionDecision":"deny"'*) printf '%s' "$RESP" ;;
+esac
+exit 0
+`;
+  }
+
+  /**
+   * PowerShell script for Muse Code: injects `_ap_tool: "muse-code"` + cwd +
+   * agent_pid before forwarding to the bridge. Launched via -EncodedCommand
+   * (see buildMuseHandler) so the settings entry needs no quoting. Fail-open.
+   */
+  private buildMusePowerShellScript(): string {
+    return `# Agent Pulse — Muse Code hook script (PowerShell)
+# Reads event JSON from stdin, injects identifier + cwd + agent_pid, forwards to
+# the bridge, and relays a guardrail deny verdict back to Muse via stdout.
+# Fail-open: any bridge error leaves the tool call allowed.
+$ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$reader = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false))
+$body = $reader.ReadToEnd()
+$reader.Close()
+# Manual JSON escaping: the JSON cmdlet would auto-import a module (~1s cold).
+$cwdJson = '"' + $PWD.Path.Replace('\\', '\\\\').Replace('"', '\\"') + '"'
+# Only SessionStart walks the process tree (any WMI call costs 2-4s in a cold
+# process): it is awaited, so the chain is latched before anything else fires,
+# and the hosting terminal cannot change for the life of the session. Every
+# other hook stays on the ~0.2s fast path — the awaited PreToolUse because it
+# sits on every tool call, and the async ones because a slow background hook
+# could otherwise land after a later Stop and revive an idle bubble. The
+# bridge keeps the latched chain when a payload omits it.
+$walk = $body -match '"hook_event_name"\\s*:\\s*"SessionStart"'
+$pidInject = ''
+if ($walk) {
+  $chainPids = New-Object System.Collections.ArrayList
+  [void]$chainPids.Add($PID)
+  try {
+    $parents = @{}
+    foreach ($p in (Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId -ErrorAction Stop)) {
+      $parents[[int]$p.ProcessId] = [int]$p.ParentProcessId
+    }
+    $cur = $PID
+    for ($i = 0; $i -lt 7; $i++) {
+      if (-not $parents.ContainsKey($cur)) { break }
+      $next = $parents[$cur]
+      if ($next -le 0) { break }
+      [void]$chainPids.Add($next)
+      $cur = $next
+    }
+  } catch { }
+  $chainJson = '[' + ($chainPids -join ',') + ']'
+  $agentPid = if ($chainPids.Count -ge 2) { $chainPids[1] } else { $PID }
+  $pidInject = '"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
+}
+$inject = '"_ap_tool":"muse-code","cwd":' + $cwdJson + ',' + $pidInject
+$body = $body -replace '^\\{', ('{' + $inject)
+try {
+  # Raw HttpWebRequest: ~300ms cheaper per call than the web cmdlet in a
+  # fresh PowerShell process. Literal 127.0.0.1 (never localhost): the IPv6
+  # ::1 attempt against the IPv4-only bridge costs ~2s per call.
+  $req = [System.Net.WebRequest]::Create("${this.museBridgeUrl()}")
+  $req.Method = 'POST'
+  $req.ContentType = 'application/json'
+  $req.Timeout = 3000
+  # Loopback only — skip system proxy auto-detection (can add 1-2s).
+  $req.Proxy = $null
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+  $req.ContentLength = $bytes.Length
+  $stream = $req.GetRequestStream()
+  $stream.Write($bytes, 0, $bytes.Length)
+  $stream.Close()
+  $resp = $req.GetResponse()
+  $respReader = [System.IO.StreamReader]::new($resp.GetResponseStream(), [System.Text.UTF8Encoding]::new($false))
+  $content = $respReader.ReadToEnd()
+  $respReader.Close()
+  $resp.Close()
+  # Muse rejects any non-Claude top-level key in hook output, so the bridge
+  # sends a pure Claude-shaped deny; relay it verbatim, nothing otherwise.
+  if ($content -like '*"permissionDecision":"deny"*') {
+    [Console]::Out.Write($content)
+  }
+} catch { }
+exit 0
+`;
+  }
+
   // ─── OpenCode ──────────────────────────────────────────────────────────────
   // OpenCode has NO declarative shell-hook config. The `experimental.hook`
   // block (file_edited / session_completed) documented in various third-party
@@ -1518,6 +1801,31 @@ export const AgentPulse = async ({ directory, worktree }) => {
       const ps1Path = path.join(hooksDir, 'agent-pulse.ps1');
       if (fs.existsSync(shPath))  fs.unlinkSync(shPath);
       if (fs.existsSync(ps1Path)) fs.unlinkSync(ps1Path);
+      return { success: true };
+    }
+
+    if (toolId === 'muse-code') {
+      // Strip only our handlers from the settings file (foreign hooks and every
+      // other setting survive), then remove the script pair. An unparsable
+      // settings file is left alone — we never rewrite what we can't read.
+      try {
+        const { settings, existed } = this.readMuseSettings();
+        if (existed && settings.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks)) {
+          for (const event of Object.keys(settings.hooks)) {
+            if (!Array.isArray(settings.hooks[event])) continue;
+            const kept = this.stripMuseAgentPulseEntries(settings.hooks[event]);
+            if (kept.length === 0) delete settings.hooks[event];
+            else settings.hooks[event] = kept;
+          }
+          if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+          fs.writeFileSync(museSettingsPath(), JSON.stringify(settings, null, 2) + '\n');
+        }
+      } catch {
+        // Unparsable settings — leave the file untouched.
+      }
+      for (const file of [museHookShPath(), museHookPs1Path()]) {
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
       return { success: true };
     }
 

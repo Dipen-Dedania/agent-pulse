@@ -22,7 +22,7 @@ export class TourManager {
   private demoWindow: BrowserWindow | null = null;
   private cardWindow: BrowserWindow | null = null;
 
-  // Matches MASCOT_DIMENSIONS.large in bubble-manager.ts — the demo bubble
+  // Matches MASCOT_GEOMETRY.clawd.window.large (src/common/mascotGeometry.ts) — the demo bubble
   // always renders at large size with the Clawd mascot for showcase clarity,
   // regardless of the user's configured bubble size.
   private static readonly DEMO_W = 86;

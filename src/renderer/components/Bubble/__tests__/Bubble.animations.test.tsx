@@ -71,6 +71,10 @@ vi.mock('../../../../common/toolMeta', () => ({
     'vscode-copilot': { label: 'GitHub Copilot', icon: '/mock-icon.png', hookInfo: {} },
     'openai-codex':   { label: 'OpenAI Codex',   icon: '/mock-icon.png', hookInfo: {} },
     'kiro':           { label: 'Kiro',           icon: '/mock-icon.png', hookInfo: {} },
+    'antigravity-cli': { label: 'Antigravity',   icon: '/mock-icon.png', hookInfo: {} },
+    'grok':           { label: 'Grok',           icon: '/mock-icon.png', hookInfo: {} },
+    'opencode':       { label: 'OpenCode',       icon: '/mock-icon.png', hookInfo: {} },
+    'muse-code':      { label: 'Muse Code',      icon: '/mock-icon.png', hookInfo: {} },
   },
 }));
 
@@ -247,15 +251,15 @@ describe('Bubble renders tool icon', () => {
   });
 });
 
-// ── Clawd mascot mode ─────────────────────────────────────────────────────────
+// ── Mascot mode ───────────────────────────────────────────────────────────────
 
-describe('Bubble Clawd mascot mode', () => {
+describe('Bubble mascot mode', () => {
   beforeEach(() => { mockState = 'idle'; vi.clearAllMocks(); });
   afterEach(() => { mockElectron.invoke.mockResolvedValue(undefined); });
 
-  const withMascotConfig = () => {
+  const withMascots = (mascots: Record<string, string>) => {
     mockElectron.invoke.mockImplementation((channel: string) => {
-      if (channel === 'get-config') return Promise.resolve({ bubble: { mascotClaudeCode: true } });
+      if (channel === 'get-config') return Promise.resolve({ bubble: { mascots } });
       // Usage pollers feed the bars; a valid (if empty) status avoids a crash
       // on the awaited re-render once config resolves.
       if (channel.endsWith('usage:get-current')) return Promise.resolve({ state: 'unknown' });
@@ -263,16 +267,38 @@ describe('Bubble Clawd mascot mode', () => {
     });
   };
 
-  it('swaps the Claude orb for the mascot SVG when enabled', async () => {
-    withMascotConfig();
-    const container = renderBubble('claude-code');
-    await waitFor(() => expect(container.querySelector('#char')).not.toBeNull());
+  // Third column: the character group each rig names its root after.
+  it.each([
+    ['clawd', 'claude-code', '#char'],
+    ['frog', 'openai-codex', '#frog-char'],
+    ['gigi', 'antigravity-cli', '#char'],
+    ['ghost', 'kiro', '#char'],
+    ['mico', 'vscode-copilot', '#char'],
+    ['merc', 'grok', '#char'],
+    ['jolly', 'muse-code', '#char'],
+    ['byte', 'opencode', '#char'],
+    ['knight', 'cursor', '#char'],
+    ['rusty', 'kiro', '#char'],
+    ['sensei', 'grok', '#char'],
+    ['sprout', 'openai-codex', '#char'],
+    ['droid', 'antigravity-cli', '#char'],
+  ] as const)('swaps the orb for the %s mascot when assigned to %s', async (mascot, toolId, rootSel) => {
+    withMascots({ [toolId]: mascot });
+    const container = renderBubble(toolId);
+    await waitFor(() => expect(container.querySelector(rootSel)).not.toBeNull());
     // Orb icon is gone in mascot mode
     expect(container.querySelector('img')).toBeNull();
   });
 
-  it('keeps the orb for non-Claude tools even when mascot is enabled', async () => {
-    withMascotConfig();
+  it('lets any mascot go on any agent (Clawd on Cursor)', async () => {
+    withMascots({ cursor: 'clawd' });
+    const container = renderBubble('cursor');
+    await waitFor(() => expect(container.querySelector('#char')).not.toBeNull());
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('keeps the orb for agents without an assignment', async () => {
+    withMascots({ 'claude-code': 'clawd' });
     const container = renderBubble('cursor');
     // Give the config effect a chance to apply, then confirm no mascot.
     await waitFor(() => expect(mockElectron.invoke).toHaveBeenCalledWith('get-config'));
@@ -280,7 +306,15 @@ describe('Bubble Clawd mascot mode', () => {
     expect(container.querySelector('img')).not.toBeNull();
   });
 
-  it('renders the orb (no mascot) for Claude when disabled', () => {
+  it("treats 'none' like no assignment", async () => {
+    withMascots({ 'claude-code': 'none' });
+    const container = renderBubble('claude-code');
+    await waitFor(() => expect(mockElectron.invoke).toHaveBeenCalledWith('get-config'));
+    expect(container.querySelector('#char')).toBeNull();
+    expect(container.querySelector('img')).not.toBeNull();
+  });
+
+  it('renders the orb (no mascot) when the config has no map', () => {
     // Default mock: invoke resolves undefined → mascot stays off.
     const container = renderBubble('claude-code');
     expect(container.querySelector('#char')).toBeNull();

@@ -1,26 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, DisplayInfo, ToolId } from '../../../common/types';
+import { AgentState, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, DisplayInfo, MascotId, ToolId } from '../../../common/types';
 import { BUBBLE_SOUNDS, playBubbleSound } from '../../sound';
 import { TOOL_META } from '../../../common/toolMeta';
-import { Button, GlassToggle, Modal, Segmented, Tooltip } from '../Shared';
+import { MASCOT_HINTS, MASCOT_HOME, MASCOT_IDS, MASCOT_LABELS, mascotFor } from '../../../common/mascotGeometry';
+import { STATE_COLORS } from '../../../common/stateColors';
+import { MercMascot } from '../Bubble/MercMascot';
+import { Button, GlassToggle, Modal, Segmented, Select, SelectOption, Tooltip } from '../Shared';
 
-// The agents that ship an animated mascot. Each maps a BubbleConfig flag to the
-// tool it belongs to (for the logo + label via TOOL_META) and the mascot's name.
-// Agents without a mascot (Cursor, Grok) are intentionally absent.
-type MascotKey =
-  | 'mascotClaudeCode'
-  | 'mascotOpenaiCodex'
-  | 'mascotAntigravity'
-  | 'mascotKiro'
-  | 'mascotVscodeCopilot';
+// Every agent gets a mascot row, in TOOL_META order. Any mascot can be assigned
+// to any agent; MASCOT_HOME supplies the vendor default the master switch uses.
+const MASCOT_TOOLS = Object.keys(TOOL_META) as ToolId[];
 
-const MASCOTS: { key: MascotKey; toolId: ToolId; name: string }[] = [
-  { key: 'mascotClaudeCode',   toolId: 'claude-code',    name: 'Clawd' },
-  { key: 'mascotOpenaiCodex',  toolId: 'openai-codex',   name: 'Frog' },
-  { key: 'mascotAntigravity',  toolId: 'antigravity-cli', name: 'GIGI' },
-  { key: 'mascotKiro',         toolId: 'kiro',           name: 'Ghost' },
-  { key: 'mascotVscodeCopilot', toolId: 'vscode-copilot', name: 'Mico' },
+const MASCOT_OPTIONS: SelectOption<MascotId>[] = [
+  { value: 'none', label: MASCOT_LABELS.none },
+  ...MASCOT_IDS.map((id) => ({ value: id, label: MASCOT_LABELS[id] })),
 ];
 
 interface Props {
@@ -186,13 +180,26 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
   const [mascotModalOpen, setMascotModalOpen] = useState(false);
 
-  // Mascot master state — derived from the five per-agent flags.
-  const mascotOnCount = MASCOTS.filter((m) => !!config[m.key]).length;
-  const allMascotsOn = mascotOnCount === MASCOTS.length;
-  // Clicking the master toggle: if any are off, turn all on; else turn all off.
+  // Mascot master state: "all on" means every agent with a home mascot shows
+  // one (whichever the user picked). The map is sent whole on every change —
+  // the main process merges BubbleConfig shallowly, so a partial map would
+  // drop the other agents' assignments.
+  const mascots = config.mascots ?? {};
+  const homeTools = MASCOT_TOOLS.filter((t) => MASCOT_HOME[t]);
+  const allMascotsOn = homeTools.every((t) => mascotFor(mascots, t) !== null);
+  const setMascot = (toolId: ToolId, id: MascotId) => {
+    const next = { ...mascots };
+    if (id === 'none') delete next[toolId];
+    else next[toolId] = id;
+    onChange({ mascots: next });
+  };
+  // Master toggle: if any home agent is bare, give every home agent its own
+  // character (keeping explicit picks); otherwise clear every assignment.
   const toggleAllMascots = () => {
-    const next = !allMascotsOn;
-    onChange(Object.fromEntries(MASCOTS.map((m) => [m.key, next])) as Partial<BubbleConfig>);
+    if (allMascotsOn) { onChange({ mascots: {} }); return; }
+    const next = { ...mascots };
+    for (const t of homeTools) if (!mascotFor(next, t)) next[t] = MASCOT_HOME[t]!;
+    onChange({ mascots: next });
   };
 
   // Connected monitors, kept live across hotplug while Settings is open.
@@ -256,20 +263,20 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
         <div className='min-w-0 flex items-center gap-3'>
           {/* Overlapped agent logos as a visual anchor. */}
           <div className='flex shrink-0'>
-            {MASCOTS.map((m, i) => (
+            {homeTools.map((t, i) => (
               <img
-                key={m.key}
-                src={TOOL_META[m.toolId].icon}
+                key={t}
+                src={TOOL_META[t].icon}
                 alt=''
                 aria-hidden
-                className={`w-6 h-6 rounded-full ring-2 ring-black/20 object-contain bg-control/40 ${i > 0 ? '-ml-2' : ''} ${config[m.key] ? '' : 'opacity-40 grayscale'}`}
+                className={`w-6 h-6 rounded-full ring-2 ring-black/20 object-contain bg-control/40 ${i > 0 ? '-ml-2' : ''} ${mascotFor(mascots, t) ? '' : 'opacity-40 grayscale'}`}
               />
             ))}
           </div>
           <div className='min-w-0'>
             <p className='text-sm font-medium text-strong'>Mascots</p>
             <p className='text-xs text-muted mt-0.5'>
-              Choose which agents show an animated mascot
+              Pick an animated mascot for each agent
             </p>
           </div>
         </div>
@@ -559,8 +566,8 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
     <AnimatePresence>
       {mascotModalOpen && (
         <MascotModal
-          config={config}
-          onChange={onChange}
+          mascots={mascots}
+          onPick={setMascot}
           allOn={allMascotsOn}
           onToggleAll={toggleAllMascots}
           onClose={() => setMascotModalOpen(false)}
@@ -571,28 +578,55 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
   );
 };
 
+// ── Mascot showreel ──────────────────────────────────────────────────────────
+// Live demo for the Mascots modal's master card: Merc acts out every agent
+// state in turn, so the card shows what "pose tracks state" means instead of
+// describing it. The caption names the state currently being acted.
+const SHOWREEL: { state: AgentState; label: string }[] = [
+  { state: 'idle-active', label: 'Idle (active)' },
+  { state: 'working', label: 'Working' },
+  { state: 'waiting', label: 'Waiting' },
+  { state: 'error', label: 'Error' },
+  { state: 'idle', label: 'Idle' },
+];
+const SHOWREEL_STEP_MS = 3500;
+
+const MascotShowreel: React.FC = () => {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setStep((n) => (n + 1) % SHOWREEL.length), SHOWREEL_STEP_MS);
+    return () => clearInterval(timer);
+  }, []);
+  const { state, label } = SHOWREEL[step];
+  return (
+    <div className='min-w-0 flex items-center gap-4'>
+      <div className='w-[72px] h-[72px] shrink-0 flex items-end justify-center'>
+        <MercMascot state={state} width={72} />
+      </div>
+      <div className='min-w-0'>
+        <p className='text-sm font-medium text-strong'>Animated mascots</p>
+        <p className={'text-xs mt-0.5 font-medium ' + STATE_COLORS[state].textClass}>{label}</p>
+      </div>
+    </div>
+  );
+};
+
 // ── Mascots modal ────────────────────────────────────────────────────────────
-// Master "Animated mascots" switch + one slim row per agent. Shares BubbleConfig
-// via onChange; no local persistence. Matches the AddRuleModal backdrop idiom.
+// Master "Animated mascots" switch + one row per agent with a mascot picker.
+// Shares BubbleConfig via onPick; no local persistence. Matches the
+// AddRuleModal backdrop idiom.
 const MascotModal: React.FC<{
-  config: BubbleConfig;
-  onChange: (partial: Partial<BubbleConfig>) => void;
+  mascots: BubbleConfig['mascots'];
+  onPick: (toolId: ToolId, id: MascotId) => void;
   allOn: boolean;
   onToggleAll: () => void;
   onClose: () => void;
-}> = ({ config, onChange, allOn, onToggleAll, onClose }) => {
+}> = ({ mascots, onPick, allOn, onToggleAll, onClose }) => {
   return (
     <Modal eyebrow='Bubble appearance' title='Mascots' onClose={onClose}>
       {/* Master switch */}
-      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
-        <div className='min-w-0'>
-          <p className='text-sm font-medium text-strong'>Animated mascots</p>
-          <p className='text-xs text-muted mt-0.5'>
-            Swap an agent's orb for an animated mascot whose pose tracks its state — sleeping when idle,
-            flagging when it needs you, working out while it runs. Other agents keep their orb; the bubble
-            grows a little to give the mascot room.
-          </p>
-        </div>
+      <div className='glass-secondary shrink-0 flex items-center justify-between gap-4 px-4 py-3'>
+        <MascotShowreel />
         <GlassToggle
           checked={allOn}
           onChange={onToggleAll}
@@ -602,28 +636,34 @@ const MascotModal: React.FC<{
       </div>
 
       {/* Per-agent rows */}
-      <div className='flex flex-col gap-2'>
-        {MASCOTS.map((m) => (
-          <div key={m.key} className='glass-secondary flex items-center justify-between gap-3 px-4 py-2.5'>
-            <div className='min-w-0 flex items-center gap-3'>
-              <img
-                src={TOOL_META[m.toolId].icon}
-                alt=''
-                aria-hidden
-                className='w-6 h-6 rounded-full object-contain bg-control/40 shrink-0'
+      <div className='flex flex-col gap-2 shrink-0'>
+        {MASCOT_TOOLS.map((toolId) => {
+          const picked = mascots?.[toolId] ?? 'none';
+          const hint = picked === 'none' ? 'Glass orb' : MASCOT_HINTS[picked];
+          return (
+            <div key={toolId} className='glass-secondary shrink-0 flex items-center justify-between gap-3 px-4 py-2.5'>
+              <div className='min-w-0 flex items-center gap-3'>
+                <img
+                  src={TOOL_META[toolId].icon}
+                  alt=''
+                  aria-hidden
+                  className='w-6 h-6 rounded-full object-contain bg-control/40 shrink-0'
+                />
+                <div className='min-w-0'>
+                  <p className='text-sm font-medium text-strong truncate'>{TOOL_META[toolId].label}</p>
+                  <p className='text-[11px] text-muted truncate'>{hint}</p>
+                </div>
+              </div>
+              <Select<MascotId>
+                value={picked}
+                options={MASCOT_OPTIONS}
+                onChange={(id) => onPick(toolId, id)}
+                className='w-36 px-3 py-1.5 text-sm'
+                ariaLabel={`Mascot for ${TOOL_META[toolId].label}`}
               />
-              <p className='text-sm font-medium text-strong truncate'>
-                {m.name} <span className='text-muted font-normal'>({TOOL_META[m.toolId].label})</span>
-              </p>
             </div>
-            <GlassToggle
-              checked={!!config[m.key]}
-              onChange={() => onChange({ [m.key]: !config[m.key] })}
-              size='sm'
-              label={`${m.name} mascot (${TOOL_META[m.toolId].label})`}
-            />
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Modal>
   );

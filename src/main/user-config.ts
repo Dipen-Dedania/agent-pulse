@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold, AppearanceConfig, ThemeMode } from '../common/types';
+import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, MascotId, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold, AppearanceConfig, ThemeMode } from '../common/types';
+import { MASCOT_HOME, MASCOT_IDS } from '../common/mascotGeometry';
 import { GuardrailConfig } from '../common/guardrails';
 import {
   BacklogPopulationConfig,
@@ -176,11 +177,7 @@ const DEFAULTS: UserConfig = {
     fillColor: '#ffffff',
     quotaStyle: 'bars',
     hidden: false,
-    mascotClaudeCode: false,
-    mascotOpenaiCodex: false,
-    mascotAntigravity: false,
-    mascotKiro: false,
-    mascotVscodeCopilot: false,
+    mascots: {},
     opacity: 1,
   },
   attention: {
@@ -560,6 +557,41 @@ function migrateSecretProtection(raw: unknown): SecretProtectionConfig {
 // Validate a persisted bubble block against the known string unions, falling
 // back to defaults for any unrecognized/missing field so a hand-edited or
 // stale config can't strand the bubbles at an invalid size/corner/sound.
+// Per-agent mascot map. Reads the current `mascots` map and, for configs saved
+// before the picker existed, the five legacy per-tool booleans
+// (mascotClaudeCode etc.), each of which meant "that tool shows its own vendor
+// character". Legacy flags are applied first and the map overlays them, so a
+// config carrying both (downgrade + re-upgrade) keeps the map's choices. Unknown
+// mascot ids and 'none' are dropped, so the result only ever holds real
+// assignments. Booleans are not re-emitted: the map is the only shape saved.
+const LEGACY_MASCOT_FLAGS: { flag: string; toolId: ToolId }[] = [
+  { flag: 'mascotClaudeCode', toolId: 'claude-code' },
+  { flag: 'mascotOpenaiCodex', toolId: 'openai-codex' },
+  { flag: 'mascotAntigravity', toolId: 'antigravity-cli' },
+  { flag: 'mascotKiro', toolId: 'kiro' },
+  { flag: 'mascotVscodeCopilot', toolId: 'vscode-copilot' },
+];
+const TOOL_IDS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'antigravity-cli', 'grok', 'opencode'];
+
+export function migrateMascots(raw: unknown): Partial<Record<ToolId, MascotId>> {
+  const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: Partial<Record<ToolId, MascotId>> = {};
+  for (const { flag, toolId } of LEGACY_MASCOT_FLAGS) {
+    const home = MASCOT_HOME[toolId];
+    if (b[flag] === true && home) out[toolId] = home;
+  }
+  const m = b.mascots;
+  if (m && typeof m === 'object') {
+    for (const toolId of TOOL_IDS) {
+      const v = (m as Record<string, unknown>)[toolId];
+      if (typeof v !== 'string') continue;
+      if (v === 'none') { delete out[toolId]; continue; }
+      if ((MASCOT_IDS as string[]).includes(v)) out[toolId] = v as MascotId;
+    }
+  }
+  return out;
+}
+
 export function migrateBubble(raw: unknown): BubbleConfig {
   const d = DEFAULTS.bubble;
   const b = (raw && typeof raw === 'object' ? raw : {}) as Partial<BubbleConfig>;
@@ -615,11 +647,7 @@ export function migrateBubble(raw: unknown): BubbleConfig {
     fillColor: isColor(b.fillColor) ? b.fillColor.trim() : d.fillColor,
     quotaStyle: QUOTA_STYLES.includes(b.quotaStyle as BubbleQuotaStyle) ? (b.quotaStyle as BubbleQuotaStyle) : d.quotaStyle,
     hidden: typeof b.hidden === 'boolean' ? b.hidden : d.hidden,
-    mascotClaudeCode: typeof b.mascotClaudeCode === 'boolean' ? b.mascotClaudeCode : d.mascotClaudeCode,
-    mascotOpenaiCodex: typeof b.mascotOpenaiCodex === 'boolean' ? b.mascotOpenaiCodex : d.mascotOpenaiCodex,
-    mascotAntigravity: typeof b.mascotAntigravity === 'boolean' ? b.mascotAntigravity : d.mascotAntigravity,
-    mascotKiro: typeof b.mascotKiro === 'boolean' ? b.mascotKiro : d.mascotKiro,
-    mascotVscodeCopilot: typeof b.mascotVscodeCopilot === 'boolean' ? b.mascotVscodeCopilot : d.mascotVscodeCopilot,
+    mascots: migrateMascots(b),
     // Clamp to a floor of 0.3 so a stale/hand-edited config can't make the
     // bubbles effectively invisible (and unfindable).
     opacity: typeof b.opacity === 'number' && Number.isFinite(b.opacity)

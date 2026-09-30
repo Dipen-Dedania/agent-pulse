@@ -1,0 +1,20 @@
+{
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "powershell",
+  "tool_input": {
+    "command": "nonexistent-cmd-xyz; exit 3",
+    "description": "x",
+    "workdir": "\\\\?\\C:\\Users\\dev\\proj"
+  },
+  "tool_use_id": "call_ap1",
+  "error": "{\n  \"chunk_id\": \"exec-1-1\",\n  \"command\": \"nonexistent-cmd-xyz; exit 3\",\n  \"exit_code\": 3,\n  \"terminal_status\": \"failed\",\n  \"terminal_reason\": \"process exited with status 3\",\n  \"output\": \"nonexistent-cmd-xyz : The term 'nonexistent-cmd-xyz' is not recognized as the name of a cmdlet, function, script file, \\r\\nor operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and \\r\\ntry again.\\r\\nAt line:1 char:1\\r\\n+ nonexistent-cmd-xyz; exit 3\\r\\n+ ~~~~~~~~~~~~~~~~~~~\\r\\n    + CategoryInfo          : ObjectNotFound: (nonexistent-cmd-xyz:String) [], CommandNotFoundException\\r\\n    + FullyQualifiedErrorId : CommandNotFoundException\\r\\n \\r\\n\",\n  \"original_output_bytes\": 487,\n  \"original_output_tokens\": 122,\n  \"truncated\": false\n}",
+  "is_interrupt": false,
+  "duration_ms": 356,
+  "session_id": "01a0ed22-e66a-7c00-b487-5e40fd08b351",
+  "turn_id": "6ffe3f0a-c7c8-4525-89de-66f30e7fc008",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "fake-model",
+  "permission_mode": "bypassPermissions",
+  "model_provider": "meta"
+}

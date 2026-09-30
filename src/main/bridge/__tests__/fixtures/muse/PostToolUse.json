@@ -1,0 +1,18 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "powershell",
+  "tool_input": {
+    "command": "echo agent-pulse-spike",
+    "description": "x",
+    "workdir": "\\\\?\\C:\\Users\\dev\\proj"
+  },
+  "tool_use_id": "call_ap1",
+  "tool_response": "{\n  \"chunk_id\": \"exec-1-1\",\n  \"command\": \"echo agent-pulse-spike\",\n  \"description\": \"x\",\n  \"exit_code\": 0,\n  \"terminal_status\": \"completed\",\n  \"output\": \"agent-pulse-spike\\r\\n\",\n  \"original_output_bytes\": 19,\n  \"original_output_tokens\": 5,\n  \"truncated\": false\n}",
+  "session_id": "01a0ed21-977b-7b82-b7d6-35816acba9d4",
+  "turn_id": "1b75bb54-d738-48d8-b998-88f9703908df",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "fake-model",
+  "permission_mode": "bypassPermissions",
+  "model_provider": "meta"
+}

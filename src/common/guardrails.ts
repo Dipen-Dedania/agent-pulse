@@ -79,6 +79,10 @@ export const BLOCKABLE_TOOLS: Record<ToolId, boolean> = {
   // Grok uses the same native HTTP hook mechanism as Claude Code and reads a
   // Claude-compatible deny response (hookSpecificOutput.permissionDecision).
   'grok': true,
+  // Muse Code implements Claude Code's hook contract: a PreToolUse hook that
+  // prints hookSpecificOutput.permissionDecision:"deny" aborts the tool call
+  // (verified on 1.4.1 — see buildDenyResponse for the strict output shape).
+  'muse-code': true,
   'cursor': false,
   'vscode-copilot': false,
   'kiro': false,

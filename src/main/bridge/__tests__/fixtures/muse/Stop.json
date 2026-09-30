@@ -1,0 +1,11 @@
+{
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "echo: ping",
+  "session_id": "01a0ed1a-45ae-77b1-9cf8-e930897b7a4b",
+  "turn_id": "bd0dacc3-1565-4c22-85f8-1003ec120603",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "unknown",
+  "permission_mode": "default"
+}

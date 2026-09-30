@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "session_id": "01a0ed1a-45ae-77b1-9cf8-e930897b7a4b",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "unknown",
+  "permission_mode": "default"
+}

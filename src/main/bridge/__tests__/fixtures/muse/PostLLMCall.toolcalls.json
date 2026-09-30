@@ -1,0 +1,58 @@
+{
+  "hook_event_name": "PostLLMCall",
+  "provider": "model.meta.response",
+  "request_id": "1b75bb54-d738-48d8-b998-88f9703908df:0:1",
+  "attempt": 1,
+  "step": 0,
+  "status": "tool_calls",
+  "response_id": "resp_1790684798124",
+  "usage": {
+    "input_tokens": 1234,
+    "output_tokens": 56,
+    "cached_tokens": 1000,
+    "cache_write_tokens": 0,
+    "cache_read_tokens": 1000,
+    "reasoning_tokens": 7
+  },
+  "finish_reason": "tool_calls",
+  "error": null,
+  "output_text_preview": "",
+  "tool_call_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "(elided)"
+        }
+      ]
+    }
+  ],
+  "message_count": 2,
+  "tools": [
+    {
+      "name": "workflow",
+      "description": "(elided)",
+      "has_parameters": true,
+      "strict": false
+    },
+    {
+      "name": "read_file",
+      "description": "(elided)",
+      "has_parameters": true,
+      "strict": false
+    }
+  ],
+  "tool_count": 31,
+  "options": {
+    "meta.reasoning.effort": "high"
+  },
+  "session_id": "01a0ed21-977b-7b82-b7d6-35816acba9d4",
+  "turn_id": "1b75bb54-d738-48d8-b998-88f9703908df",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "fake-model",
+  "permission_mode": "bypassPermissions",
+  "model_provider": "meta"
+}

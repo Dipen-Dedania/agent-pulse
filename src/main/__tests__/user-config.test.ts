@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { migrateBacklogPopulation, migrateBubble } from '../user-config';
+import { migrateBacklogPopulation, migrateBubble, migrateMascots } from '../user-config';
 
 describe('migrateBacklogPopulation', () => {
   it('returns the shipped defaults for missing / non-object input', () => {
@@ -57,5 +57,54 @@ describe('migrateBubble', () => {
     // A hand-edited config must not feed an unknown value into the window sizing.
     expect(migrateBubble({ quotaStyle: 'gauge' }).quotaStyle).toBe('bars');
     expect(migrateBubble({ quotaStyle: 7 }).quotaStyle).toBe('bars');
+  });
+});
+
+describe('migrateMascots', () => {
+  it('defaults to an empty map', () => {
+    expect(migrateMascots(undefined)).toEqual({});
+    expect(migrateMascots({})).toEqual({});
+    expect(migrateBubble({}).mascots).toEqual({});
+  });
+
+  it("lifts the legacy per-tool booleans onto each tool's home mascot", () => {
+    expect(migrateMascots({
+      mascotClaudeCode: true,
+      mascotOpenaiCodex: true,
+      mascotAntigravity: false,
+      mascotKiro: true,
+      mascotVscodeCopilot: true,
+    })).toEqual({
+      'claude-code': 'clawd',
+      'openai-codex': 'frog',
+      kiro: 'ghost',
+      'vscode-copilot': 'mico',
+    });
+  });
+
+  it('keeps a saved map as-is, including cross-assignments', () => {
+    expect(migrateMascots({ mascots: { cursor: 'clawd', grok: 'merc' } }))
+      .toEqual({ cursor: 'clawd', grok: 'merc' });
+    // The character pack is accepted on any agent, homed or not.
+    expect(migrateMascots({ mascots: { opencode: 'byte', cursor: 'knight', kiro: 'rusty', grok: 'sensei', 'openai-codex': 'sprout', 'antigravity-cli': 'droid' } }))
+      .toEqual({ opencode: 'byte', cursor: 'knight', kiro: 'rusty', grok: 'sensei', 'openai-codex': 'sprout', 'antigravity-cli': 'droid' });
+  });
+
+  it('lets the map override a legacy boolean (downgrade + re-upgrade)', () => {
+    expect(migrateMascots({ mascotClaudeCode: true, mascots: { 'claude-code': 'none' } }))
+      .toEqual({});
+    expect(migrateMascots({ mascotClaudeCode: true, mascots: { 'claude-code': 'merc' } }))
+      .toEqual({ 'claude-code': 'merc' });
+  });
+
+  it('drops unknown mascot ids, unknown tools and non-string values', () => {
+    expect(migrateMascots({ mascots: { 'claude-code': 'deadpool', grok: 7, 'not-a-tool': 'clawd', kiro: 'ghost' } }))
+      .toEqual({ kiro: 'ghost' });
+  });
+
+  it('never re-emits the legacy booleans', () => {
+    const out = migrateBubble({ mascotClaudeCode: true }) as unknown as Record<string, unknown>;
+    expect(out.mascotClaudeCode).toBeUndefined();
+    expect(out.mascots).toEqual({ 'claude-code': 'clawd' });
   });
 });

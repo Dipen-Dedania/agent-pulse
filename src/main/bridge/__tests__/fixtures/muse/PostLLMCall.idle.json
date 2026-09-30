@@ -1,0 +1,55 @@
+{
+  "hook_event_name": "PostLLMCall",
+  "provider": "model.unknown.response",
+  "request_id": "bd0dacc3-1565-4c22-85f8-1003ec120603:0:1",
+  "attempt": 1,
+  "step": 0,
+  "status": "success",
+  "response_id": "muse-tui-echo",
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cached_tokens": 0,
+    "reasoning_tokens": 0
+  },
+  "finish_reason": null,
+  "error": null,
+  "output_text_preview": "echo: ping",
+  "tool_call_count": 0,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "(elided)"
+        }
+      ]
+    }
+  ],
+  "message_count": 2,
+  "tools": [
+    {
+      "name": "workflow",
+      "description": "(elided)",
+      "has_parameters": true,
+      "strict": false
+    },
+    {
+      "name": "read_file",
+      "description": "(elided)",
+      "has_parameters": true,
+      "strict": false
+    }
+  ],
+  "tool_count": 24,
+  "options": {
+    "meta.reasoning.effort": "high"
+  },
+  "session_id": "01a0ed1a-45ae-77b1-9cf8-e930897b7a4b",
+  "turn_id": "bd0dacc3-1565-4c22-85f8-1003ec120603",
+  "cwd": "C:\\Users\\dev\\proj",
+  "transcript_path": null,
+  "model": "unknown",
+  "permission_mode": "default"
+}

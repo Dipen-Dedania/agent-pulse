@@ -14,6 +14,8 @@ const BASH_TOOL_NAMES = new Set([
   'execute_command', 'bash_command', 'cli',
   // Grok's shell tool.
   'run_terminal_command',
+  // Muse Code's shell tool is `bash` on macOS/Linux and `powershell` on Windows.
+  'powershell',
 ]);
 
 function isShellTool(name: unknown): boolean {
@@ -67,6 +69,16 @@ export function extractCommand(toolId: ToolId, data: any): string | null {
         'tool_input.command',
         'input.command',
         'parameters.command',
+      ]);
+    }
+
+    case 'muse-code': {
+      // Muse Code emits Claude Code's exact PreToolUse shape (verified 1.4.1):
+      //   { tool_name: 'powershell' | 'bash', tool_input: { command, description, workdir } }
+      if (!isShellTool(data.tool_name)) return null;
+      return pickString(data, [
+        'tool_input.command',
+        'toolInput.command',
       ]);
     }
 

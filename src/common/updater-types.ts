@@ -40,3 +40,12 @@ export interface UpdaterState {
   // without re-detecting the platform itself.
   platform: NodeJS.Platform;
 }
+
+/**
+ * True when there is a new version the user can act on (download or
+ * install). Both the tray dot and the Updates-tab badge derive from this so
+ * main and renderer never disagree about what "pending" means.
+ */
+export function hasPendingUpdate(status: UpdaterStatus): boolean {
+  return status === 'available' || status === 'downloaded';
+}

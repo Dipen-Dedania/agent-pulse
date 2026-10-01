@@ -44,6 +44,7 @@ import { AttentionEngine } from './attention/engine';
 import { isAutoLaunchEnabled, setAutoLaunch } from './auto-launch';
 import { bootTimeline, TimelineHandle } from './timeline';
 import { bootUpdater, UpdaterHandle } from './updater';
+import { hasPendingUpdate } from '../common/updater-types';
 
 // Windows uses this to group windows under our identity and show our taskbar icon.
 if (process.platform === 'win32') {
@@ -372,6 +373,12 @@ class AgentPulseApp {
         applyUpdaterConfig: (next) => {
           this.userConfig.updates = next;
           saveConfig(this.userConfig);
+        },
+        // Mirror pending-update state onto the tray (dot + tooltip + menu
+        // label) and the macOS dock badge, so the user sees a new version
+        // even with Settings closed or on another tab.
+        onStateChange: (state) => {
+          this.trayManager.setUpdatePending(hasPendingUpdate(state.status), state.info?.version ?? null);
         },
       });
 

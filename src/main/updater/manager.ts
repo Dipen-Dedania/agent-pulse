@@ -31,6 +31,9 @@ interface UpdaterDeps {
   // Feature-flag gate. When false, the manager still answers IPC with a
   // 'disabled' state but never touches autoUpdater or starts timers.
   enabled: boolean;
+  // Fired on every state transition, after the renderer broadcast. Lets the
+  // main process react too (tray dot, dock badge) without polling.
+  onStateChange?: (state: UpdaterState) => void;
 }
 
 export class UpdaterManager {
@@ -281,6 +284,11 @@ export class UpdaterManager {
     const state = this.getState();
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('updates:state', state);
+    }
+    try {
+      this.deps.onStateChange?.(state);
+    } catch (e) {
+      logger.warn('[UpdaterManager] onStateChange handler threw', e);
     }
   }
 }

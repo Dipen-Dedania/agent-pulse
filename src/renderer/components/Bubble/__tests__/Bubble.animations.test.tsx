@@ -282,6 +282,9 @@ describe('Bubble mascot mode', () => {
     ['sensei', 'grok', '#char'],
     ['sprout', 'openai-codex', '#char'],
     ['droid', 'antigravity-cli', '#char'],
+    ['frost', 'cursor', '#char'],
+    ['scorch', 'opencode', '#char'],
+    ['smooth', 'muse-code', '#char'],
   ] as const)('swaps the orb for the %s mascot when assigned to %s', async (mascot, toolId, rootSel) => {
     withMascots({ [toolId]: mascot });
     const container = renderBubble(toolId);

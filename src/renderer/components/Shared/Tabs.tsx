@@ -1,6 +1,7 @@
 import React, { useId } from 'react';
 import { motion } from 'framer-motion';
 import { snappy } from '../../motion';
+import { Badge } from './Badge';
 
 /**
  * Tabs — section / page navigation pills with a sliding active indicator.
@@ -18,10 +19,22 @@ import { snappy } from '../../motion';
  *
  * Pass surface / margin / width / wrap via `className` on the track (e.g.
  * `glass-primary rounded-xl mb-8 w-fit` or `glass-secondary flex-wrap mb-2`).
+ *
+ * `fill` stretches the track to the full width of its container and gives
+ * every pill an equal share of it (centred label), for full-width nav bars.
+ * Each tab may carry an `icon` (ReactNode) rendered before its label and a
+ * `badge` (dot or count) after it for "something new here" signalling.
  */
 export interface TabItem {
   value: string;
   label: React.ReactNode;
+  /** Optional leading icon (rendered at 16px, inherits text colour). */
+  icon?: React.ReactNode;
+  /**
+   * Attention badge after the label. `true` renders a small red dot (with
+   * screen-reader text), a number renders a count pill. Falsy renders nothing.
+   */
+  badge?: boolean | number;
 }
 
 const TONES = {
@@ -34,13 +47,19 @@ export const Tabs: React.FC<{
   value: string;
   onChange: (next: string) => void;
   tone?: keyof typeof TONES;
+  /** Stretch to the container width and give each pill an equal share. */
+  fill?: boolean;
   className?: string;
   ariaLabel?: string;
-}> = ({ tabs, value, onChange, tone = 'glass', className = '', ariaLabel }) => {
+}> = ({ tabs, value, onChange, tone = 'glass', fill = false, className = '', ariaLabel }) => {
   const groupId = useId();
   const toneStyle = TONES[tone];
   return (
-    <div role='tablist' aria-label={ariaLabel} className={`flex gap-1 p-1 ${className}`}>
+    <div
+      role='tablist'
+      aria-label={ariaLabel}
+      className={`flex gap-1 p-1 ${fill ? 'w-full' : ''} ${className}`}
+    >
       {tabs.map((tab) => {
         const active = tab.value === value;
         return (
@@ -52,8 +71,8 @@ export const Tabs: React.FC<{
             whileTap={{ scale: 0.97 }}
             transition={snappy}
             className={`relative px-4 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
-              active ? toneStyle.text : 'text-muted hover:text-strong'
-            }`}
+              fill ? 'flex-1 min-w-0' : ''
+            } ${active ? toneStyle.text : 'text-muted hover:text-strong'}`}
           >
             {active && (
               <motion.span
@@ -62,7 +81,31 @@ export const Tabs: React.FC<{
                 transition={snappy}
               />
             )}
-            <span className='relative z-10'>{tab.label}</span>
+            <span
+              className={`relative z-10 inline-flex items-center gap-2 ${fill ? 'justify-center w-full' : ''}`}
+            >
+              {tab.icon && (
+                <span aria-hidden='true' className='shrink-0 w-4 h-4 [&>svg]:w-full [&>svg]:h-full'>
+                  {tab.icon}
+                </span>
+              )}
+              <span className='truncate'>{tab.label}</span>
+              {tab.badge === true && (
+                <>
+                  <span
+                    aria-hidden='true'
+                    data-testid='tab-badge-dot'
+                    className='shrink-0 w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_0_2px_rgba(255,255,255,0.6)]'
+                  />
+                  <span className='sr-only'>(new)</span>
+                </>
+              )}
+              {typeof tab.badge === 'number' && tab.badge > 0 && (
+                <Badge tone='danger' variant='pill' size='xs' weight='semibold' className='shrink-0'>
+                  {tab.badge}
+                </Badge>
+              )}
+            </span>
           </motion.button>
         );
       })}

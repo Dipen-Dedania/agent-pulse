@@ -3,7 +3,7 @@ export type AgentState = 'working' | 'waiting' | 'idle' | 'idle-active' | 'error
 
 // Animated characters that can replace a bubble's orb. 'none' = show the orb.
 // Data per id lives in src/common/mascotGeometry.ts; components in the renderer.
-export type MascotId = 'none' | 'clawd' | 'frog' | 'gigi' | 'ghost' | 'mico' | 'merc' | 'jolly' | 'byte' | 'rusty' | 'knight' | 'sensei' | 'sprout' | 'droid';
+export type MascotId = 'none' | 'clawd' | 'frog' | 'gigi' | 'ghost' | 'mico' | 'merc' | 'jolly' | 'byte' | 'rusty' | 'knight' | 'sensei' | 'sprout' | 'droid' | 'frost' | 'scorch' | 'smooth';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 export interface AppearanceConfig { theme: ThemeMode; }

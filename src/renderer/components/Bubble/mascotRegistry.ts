@@ -13,6 +13,9 @@ import { KnightMascot } from './KnightMascot';
 import { SenseiMascot } from './SenseiMascot';
 import { SproutMascot } from './SproutMascot';
 import { DroidMascot } from './DroidMascot';
+import { FrostMascot } from './FrostMascot';
+import { ScorchMascot } from './ScorchMascot';
+import { SmoothMascot } from './SmoothMascot';
 
 // ─── Mascot registry: the component half ─────────────────────────────────────
 // Every animated character that can replace a bubble's orb, keyed by MascotId.
@@ -37,6 +40,9 @@ export const MASCOT_COMPONENTS: Record<Exclude<MascotId, 'none'>, MascotComponen
   sensei: SenseiMascot,
   sprout: SproutMascot,
   droid: DroidMascot,
+  frost: FrostMascot,
+  scorch: ScorchMascot,
+  smooth: SmoothMascot,
 };
 
 // Width used by the Settings "Mascot States" preview cards, chosen per mascot so
@@ -55,4 +61,7 @@ export const MASCOT_PREVIEW_WIDTH: Record<Exclude<MascotId, 'none'>, number> = {
   sensei: 78,
   sprout: 78,
   droid: 78,
+  frost: 78,
+  scorch: 78,
+  smooth: 78,
 };

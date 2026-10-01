@@ -4,11 +4,13 @@ import { AgentState } from '../../../common/types';
 import { MascotRigSnapshot, resetMascotRig, snapshotMascotRig } from './mascotRig';
 
 // ── Knight mascot ───────────────────────────────────────────────────────────
-// An original, hand-drawn caped vigilante in the spirit of a certain brooding,
-// cowled comic hero: a dark cowl with pointed ears, a flowing two-tone cape, a
-// gold diamond emblem on the chest (not a bat shape) and a gold belt. Rim-light
-// strokes trace the silhouette so he still reads against dark glass. Each
-// AgentState drives a pose:
+// An original, hand-drawn take on the classic brooding, cowled comic-book
+// vigilante: a navy-black cowl whose pointed ears grow out of the head as one
+// silhouette, an exposed jaw under the cowl's edge, narrow white eye slits, a
+// grey suit with black trunks and gloves, a yellow utility belt with pouches,
+// a yellow oval chest emblem carrying a small bat silhouette, and a wide cape
+// with a scalloped bat-wing hem. Rim-light strokes trace the dark shapes so he
+// still reads against dark glass. Each AgentState drives a pose:
 //
 //   idle         → cape wraps around him on the pillow, eyes shut, zzz drifts
 //   idle-active  → slow breathing, cape sways, a periodic narrowed-eye /
@@ -16,16 +18,16 @@ import { MascotRigSnapshot, resetMascotRig, snapshotMascotRig } from './mascotRi
 //   waiting      → "need input" sign rises, arms fold inward, body rocks,
 //                  cape sways, eyes glance at the sign
 //   working      → crouch, leap with the cape flaring, land, two dash laps,
-//                  then throws his boomerang out and back
+//                  then throws his batarang out and back
 //   error        → X-eyes, the chest emblem cracks, head shakes, a red tint
 //                  strobes over the (otherwise all-dark) silhouette, ⚠ badge
 //
 // The rig shares Merc/Kiro's coordinate space and prop geometry (pillow, zzz,
 // sign, badge all sit where theirs do), so it drops into the same window
 // footprint without retuning. Every animated part pivots at its own local
-// origin (the boomerang is wrapped in a static translate so it can be
-// tweened with a plain 0,0 transform origin), so poses never fight an
-// authored transform.
+// origin (the batarang is wrapped in a static translate so it can be tweened
+// with a plain 0,0 transform origin), so poses never fight an authored
+// transform.
 //
 // All animation lives in a `gsap.context` scoped to the component's root and
 // reverted on every state change; `resetMascotRig` puts the authored
@@ -39,7 +41,8 @@ interface KnightMascotProps {
 
 // Same square box as Merc/Kiro: character spans x ≈ 90..450, y ≈ 40..590 (base
 // line y 590). Headroom above (y -200..0) holds the sign, zzz and badge; the
-// cape flares out to roughly x 55..485 and the boomerang throw reaches x 330.
+// cowl ears reach y -5, the cape flares out to roughly x 55..485 and the
+// batarang throw reaches x 330.
 const VIEW = { x: -120, y: -200, w: 860, h: 860 };
 const ASPECT = VIEW.h / VIEW.w;
 
@@ -48,24 +51,39 @@ const FOOT_C = '270 590'; // base of the torso (squash / crouch / leap pivot)
 const HEAD_C = '270 370'; // where the head meets the torso (head turn / shake pivot)
 const CAPE_C = '270 330'; // shoulder line where the cape gathers
 
-const COWL = '#2a2e38';
-const RIM = '#7f8aa3';
-const CAPE_OUTER = '#1a1d26';
-const CAPE_INNER = '#3b2f52';
-const GOLD = '#e0b13a';
+const COWL = '#1b1f2e';       // cowl, cape, gloves, trunks: near-black navy
+const RIM = '#6c7a99';        // rim-light stroke so the dark shapes read on dark glass
+const SUIT = '#7d849a';       // grey body suit
+const SUIT_SHADE = '#646b80'; // muscle shading on the suit
+const CAPE_INNER = '#2c3352'; // cape lining glimpsed through the front opening
+const GOLD = '#f2c531';       // emblem oval + utility belt
+const GOLD_DARK = '#c9931f';  // belt pouches / buckle
 const WHITE = '#ffffff';
-const SKIN = '#d8b89c';
+const SKIN = '#e2bfa0';
+const MOUTH = '#8a5a48';
 const RED = '#c8102e';
 
 // Torso: shoulders at y 330, straight flanks 400..520, rounded base to y 590
 // (identical geometry to Merc's TORSO_D so both drop into the same footprint).
 const TORSO_D = 'M130 400 C130 340 190 330 270 330 C350 330 410 340 410 400 L410 520 C410 570 350 590 270 590 C190 590 130 570 130 520 Z';
+// Black trunks: the torso below the belt.
+const TRUNKS_D = 'M130 504 L410 504 L410 520 C410 570 350 590 270 590 C190 590 130 570 130 520 Z';
 
-// Wide cloak draping from the shoulders down past the feet, gathered in a
-// shallow collar notch at the neck.
-const CAPE_D = 'M170 330 C100 345 55 430 65 520 C72 575 120 604 180 604 L360 604 C420 604 468 575 475 520 C485 430 440 345 370 330 C345 352 315 362 270 362 C225 362 195 352 170 330 Z';
-// Inner lining, glimpsed through the front opening of the cloak.
+// Cowl: head circle (270,205 r160) and both pointed ears drawn as ONE outline so
+// there is no seam where the ears meet the head. Ear tips sit at y -5, clear of
+// the badge (x 222..318) and the zzz text.
+const COWL_D = 'M150 -5 L230 50 A160 160 0 0 1 310 50 L390 -5 L405 119 A160 160 0 1 1 135 119 Z';
+
+// Wide cape draping from the shoulders down past the feet, gathered in a
+// shallow collar notch at the neck, with a five-point scalloped bat-wing hem.
+const CAPE_D = 'M170 330 C100 345 55 430 65 520 L72 608 Q110 540 150 608 Q190 540 230 608 Q270 540 310 608 Q350 540 390 608 Q430 540 468 608 L475 520 C485 430 440 345 370 330 C345 352 315 362 270 362 C225 362 195 352 170 330 Z';
+// Lining, glimpsed through the front opening of the cape.
 const CAPE_INNER_D = 'M270 380 C230 400 205 460 210 540 C213 570 240 590 270 590 C300 590 327 570 330 540 C335 460 310 400 270 380 Z';
+
+// Small bat silhouette for the chest emblem, centred on (270,415), ~96 wide.
+const BAT_D = 'M270 402 L262 394 L258 404 L250 402 C238 396 226 394 214 401 C232 405 238 411 233 416 C238 422 250 425 258 421 C262 425 268 429 270 435 C272 429 278 425 282 421 C290 425 302 422 307 416 C302 411 308 405 326 401 C314 394 302 396 290 402 L282 404 L278 394 Z';
+// Batarang, drawn about its own origin (~100 wide) and placed by a static translate.
+const BATARANG_D = 'M0 -8 L-8 -22 L-14 -10 C-26 -18 -40 -16 -50 -6 C-38 -4 -32 4 -36 12 C-26 18 -14 14 -6 8 L0 18 L6 8 C14 14 26 18 36 12 C32 4 38 -4 50 -6 C40 -16 26 -18 14 -10 L8 -22 Z';
 
 export const KnightMascot: React.FC<KnightMascotProps> = ({ state, width }) => {
   const rootRef = useRef<SVGSVGElement>(null);
@@ -118,7 +136,7 @@ export const KnightMascot: React.FC<KnightMascotProps> = ({ state, width }) => {
           .to('#cape', { scaleX: 1, svgOrigin: CAPE_C, duration: 0.2, ease: 'power2.in' }, '<');
       };
 
-      // ── working → crouch, leap, dash laps, throw the boomerang ──────────
+      // ── working → crouch, leap, dash laps, throw the batarang ───────────
       const playRun = () => {
         gsap.set('#boomerang', { opacity: 0 });
         const tl = gsap.timeline({ repeat: -1 });
@@ -140,7 +158,7 @@ export const KnightMascot: React.FC<KnightMascotProps> = ({ state, width }) => {
             .to('#char', { x: 0, rotation: 0, svgOrigin: FOOT_C, duration: s, ease: 'power2.inOut' });
         }
 
-        // The throw: boomerang whips out, spins, and returns.
+        // The throw: batarang whips out, spins, and returns.
         tl.set('#boomerang', { opacity: 1, x: 0, rotation: 0 })
           .to('#boomerang', { x: 330, rotation: 720, duration: 0.45, ease: 'power2.out', ...LOCAL })
           .to('#boomerang', { x: 0, rotation: 1440, opacity: 0, duration: 0.45, ease: 'power2.in', ...LOCAL })
@@ -213,6 +231,7 @@ export const KnightMascot: React.FC<KnightMascotProps> = ({ state, width }) => {
     >
       <defs>
         <clipPath id="knight-head-clip"><circle cx="270" cy="205" r="160" /></clipPath>
+        <clipPath id="knight-torso-clip"><path d={TORSO_D} /></clipPath>
       </defs>
 
       {/* floating "zzz" for sleep (above the head) */}
@@ -224,48 +243,85 @@ export const KnightMascot: React.FC<KnightMascotProps> = ({ state, width }) => {
       <g id="char">
         {/* cape, drawn behind the body so it reads as draped over the shoulders */}
         <g id="cape">
-          <path d={CAPE_D} fill={CAPE_OUTER} stroke={RIM} strokeWidth="5" />
+          <path d={CAPE_D} fill={COWL} stroke={RIM} strokeWidth="5" strokeLinejoin="round" />
           <path d={CAPE_INNER_D} fill={CAPE_INNER} />
         </g>
 
         <g id="body">
-          <path d={TORSO_D} fill={COWL} stroke={RIM} strokeWidth="5" />
-          <rect id="belt" x="130" y="478" width="280" height="26" fill={GOLD} />
+          {/* grey suit with a little chest / ab shading, black trunks below the belt */}
+          <path d={TORSO_D} fill={SUIT} stroke={RIM} strokeWidth="5" />
+          <g clipPath="url(#knight-torso-clip)" fill={SUIT_SHADE}>
+            <path d="M270 345 C230 345 190 360 165 395 C200 392 235 396 270 400 C305 396 340 392 375 395 C350 360 310 345 270 345 Z" />
+            <rect x="262" y="448" width="16" height="26" rx="8" />
+            <rect x="222" y="452" width="26" height="14" rx="7" />
+            <rect x="292" y="452" width="26" height="14" rx="7" />
+          </g>
+          <path d={TRUNKS_D} fill={COWL} />
+          <path d={TORSO_D} stroke={RIM} strokeWidth="5" />
 
-          {/* chest emblem: a plain gold diamond, no franchise shapes */}
-          <path id="emblem" d="M270 390 L315 420 L270 450 L225 420 Z" fill={GOLD} />
-          <g id="emblem-crack" opacity="0" stroke={CAPE_OUTER} strokeWidth="4" strokeLinecap="round">
-            <line x1="245" y1="405" x2="270" y2="435" />
-            <line x1="270" y1="392" x2="270" y2="448" />
-            <line x1="295" y1="405" x2="270" y2="435" />
+          {/* yellow utility belt with pouches and a square buckle */}
+          <g id="belt">
+            <rect x="130" y="478" width="280" height="26" fill={GOLD} />
+            <rect x="160" y="482" width="30" height="18" rx="4" fill={GOLD_DARK} />
+            <rect x="203" y="482" width="30" height="18" rx="4" fill={GOLD_DARK} />
+            <rect x="307" y="482" width="30" height="18" rx="4" fill={GOLD_DARK} />
+            <rect x="350" y="482" width="30" height="18" rx="4" fill={GOLD_DARK} />
+            <rect x="250" y="479" width="40" height="24" rx="5" fill={GOLD_DARK} />
+            <rect x="256" y="484" width="28" height="14" rx="3" fill={GOLD} />
           </g>
 
-          {/* arm stubs */}
-          <g id="arm-l"><circle cx="132" cy="440" r="40" fill={COWL} stroke={RIM} strokeWidth="5" /></g>
-          <g id="arm-r"><circle cx="408" cy="440" r="40" fill={COWL} stroke={RIM} strokeWidth="5" /></g>
+          {/* chest emblem: yellow oval carrying a small bat silhouette */}
+          <g id="emblem">
+            <ellipse cx="270" cy="415" rx="62" ry="38" fill={GOLD} stroke={COWL} strokeWidth="5" />
+            <path d={BAT_D} fill={COWL} />
+          </g>
+          <g id="emblem-crack" opacity="0" stroke={COWL} strokeWidth="4" strokeLinecap="round">
+            <line x1="236" y1="392" x2="262" y2="420" />
+            <line x1="262" y1="420" x2="248" y2="446" />
+            <line x1="262" y1="420" x2="296" y2="436" />
+            <line x1="296" y1="436" x2="318" y2="426" />
+          </g>
 
-          {/* boomerang, thrown from the right hand during the working pose */}
+          {/* black gloves with three fins on the outer forearm */}
+          <g id="arm-l">
+            <circle cx="132" cy="440" r="40" fill={COWL} stroke={RIM} strokeWidth="5" />
+            <g stroke={RIM} strokeWidth="5" strokeLinecap="round">
+              <line x1="104" y1="418" x2="80" y2="404" />
+              <line x1="95" y1="440" x2="68" y2="440" />
+              <line x1="104" y1="462" x2="80" y2="476" />
+            </g>
+          </g>
+          <g id="arm-r">
+            <circle cx="408" cy="440" r="40" fill={COWL} stroke={RIM} strokeWidth="5" />
+            <g stroke={RIM} strokeWidth="5" strokeLinecap="round">
+              <line x1="436" y1="418" x2="460" y2="404" />
+              <line x1="445" y1="440" x2="472" y2="440" />
+              <line x1="436" y1="462" x2="460" y2="476" />
+            </g>
+          </g>
+
+          {/* batarang, thrown from the right hand during the working pose
+              (keeps the #boomerang id the pose timeline drives) */}
           <g transform="translate(408 440)">
             <g id="boomerang" opacity="0">
-              <line x1="0" y1="0" x2="30" y2="-52" stroke={CAPE_OUTER} strokeWidth="14" strokeLinecap="round" />
-              <line x1="0" y1="0" x2="30" y2="52" stroke={CAPE_OUTER} strokeWidth="14" strokeLinecap="round" />
+              <path d={BATARANG_D} fill={COWL} stroke={RIM} strokeWidth="4" strokeLinejoin="round" />
             </g>
           </g>
 
           <g id="head">
-            {/* pointed cowl ears */}
-            <path d="M190 90 L150 10 L235 85 Z" fill={COWL} stroke={RIM} strokeWidth="5" strokeLinejoin="round" />
-            <path d="M350 90 L390 10 L305 85 Z" fill={COWL} stroke={RIM} strokeWidth="5" strokeLinejoin="round" />
-            {/* cowl */}
-            <circle cx="270" cy="205" r="160" fill={COWL} stroke={RIM} strokeWidth="5" />
-            {/* exposed lower-face skin, clipped to the cowl */}
+            {/* cowl with integrated pointed ears */}
+            <path d={COWL_D} fill={COWL} stroke={RIM} strokeWidth="5" strokeLinejoin="round" />
+            {/* exposed jaw: the cowl's lower edge dips over the (covered) nose
+                and rises at the cheeks; clipped to the head circle */}
             <g clipPath="url(#knight-head-clip)">
-              <rect x="110" y="240" width="320" height="130" fill={SKIN} />
+              <path d="M172 268 C210 244 240 296 270 296 C300 296 330 244 368 268 L368 400 L172 400 Z" fill={SKIN} />
             </g>
-            {/* white angular eye-slits */}
+            {/* stern mouth */}
+            <path d="M246 334 Q270 328 294 334" stroke={MOUTH} strokeWidth="7" strokeLinecap="round" />
+            {/* white angular eye-slits, outer corners raised */}
             <g id="eyes" fill={WHITE}>
-              <ellipse id="eye-l" cx="214" cy="200" rx="30" ry="12" transform="rotate(-12 214 200)" />
-              <ellipse id="eye-r" cx="326" cy="200" rx="30" ry="12" transform="rotate(12 326 200)" />
+              <polygon id="eye-l" points="178,184 242,196 242,214 186,212" />
+              <polygon id="eye-r" points="362,184 298,196 298,214 354,212" />
             </g>
             {/* X eyes for the error state (shown while #eyes is hidden) */}
             <g id="eyes-x" opacity="0" stroke={WHITE} strokeWidth="10" strokeLinecap="round">
@@ -282,7 +338,7 @@ export const KnightMascot: React.FC<KnightMascotProps> = ({ state, width }) => {
             <path d={TORSO_D} />
             <circle cx="132" cy="440" r="43" />
             <circle cx="408" cy="440" r="43" />
-            <circle cx="270" cy="205" r="160" />
+            <path d={COWL_D} />
           </g>
         </g>
 

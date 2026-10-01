@@ -88,6 +88,8 @@ describe('migrateMascots', () => {
     // The character pack is accepted on any agent, homed or not.
     expect(migrateMascots({ mascots: { opencode: 'byte', cursor: 'knight', kiro: 'rusty', grok: 'sensei', 'openai-codex': 'sprout', 'antigravity-cli': 'droid' } }))
       .toEqual({ opencode: 'byte', cursor: 'knight', kiro: 'rusty', grok: 'sensei', 'openai-codex': 'sprout', 'antigravity-cli': 'droid' });
+    expect(migrateMascots({ mascots: { cursor: 'frost', opencode: 'scorch', 'muse-code': 'smooth' } }))
+      .toEqual({ cursor: 'frost', opencode: 'scorch', 'muse-code': 'smooth' });
   });
 
   it('lets the map override a legacy boolean (downgrade + re-upgrade)', () => {

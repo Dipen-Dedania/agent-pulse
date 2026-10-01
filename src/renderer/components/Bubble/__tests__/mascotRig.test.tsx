@@ -11,6 +11,9 @@ import { KnightMascot } from '../KnightMascot';
 import { SenseiMascot } from '../SenseiMascot';
 import { SproutMascot } from '../SproutMascot';
 import { DroidMascot } from '../DroidMascot';
+import { FrostMascot } from '../FrostMascot';
+import { ScorchMascot } from '../ScorchMascot';
+import { SmoothMascot } from '../SmoothMascot';
 import { AgentState } from '../../../../common/types';
 
 // ── jsdom SVG geometry shims ─────────────────────────────────────────────────
@@ -92,6 +95,11 @@ describe('mascot rig reset', () => {
     ['Sensei', SenseiMascot, 'char'],
     ['Sprout', SproutMascot, 'char'],
     ['Droid', DroidMascot, 'char'],
+    // Pack 3: legs hang from hip wrappers above the base line; Scorch's rope
+    // carries an authored scale(0 1) the reset must restore.
+    ['Frost', FrostMascot, 'char'],
+    ['Scorch', ScorchMascot, 'char'],
+    ['Smooth', SmoothMascot, 'char'],
   ])('%s returns to its starting pose after a full state cycle', (_name, Mascot, groupId) => {
     const { container, rerender } = render(<Mascot state={CYCLE[0]} width={50} />);
     advance(1.5);

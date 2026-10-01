@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, MascotId, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold, AppearanceConfig, ThemeMode } from '../common/types';
 import { MASCOT_HOME, MASCOT_IDS } from '../common/mascotGeometry';
+import { TOOL_META } from '../common/toolMeta';
 import { GuardrailConfig } from '../common/guardrails';
 import {
   BacklogPopulationConfig,
@@ -571,7 +572,9 @@ const LEGACY_MASCOT_FLAGS: { flag: string; toolId: ToolId }[] = [
   { flag: 'mascotKiro', toolId: 'kiro' },
   { flag: 'mascotVscodeCopilot', toolId: 'vscode-copilot' },
 ];
-const TOOL_IDS: ToolId[] = ['claude-code', 'cursor', 'vscode-copilot', 'openai-codex', 'kiro', 'antigravity-cli', 'grok', 'opencode'];
+// Every registered agent, so a mascot assigned to a newly added tool survives
+// a config reload (a hand-kept list here silently dropped muse-code).
+const TOOL_IDS = Object.keys(TOOL_META) as ToolId[];
 
 export function migrateMascots(raw: unknown): Partial<Record<ToolId, MascotId>> {
   const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;

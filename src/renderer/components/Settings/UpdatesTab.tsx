@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { UpdaterState } from '../../../common/updater-types';
 import { logger } from '../../../common/logger';
+import { useUpdaterState } from '../../hooks/useUpdaterState';
 import { Badge, GlassToggle, Button, Meter, type BadgeTone } from '../Shared';
 
 function formatBytes(n: number): string {
@@ -42,24 +43,8 @@ const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ chi
 );
 
 export const UpdatesTab: React.FC = () => {
-  const [state, setState] = useState<UpdaterState | null>(null);
-
-  // Load once on mount, then live-update on every IPC broadcast. The main
-  // process pushes a fresh state on every transition (checking, progress,
-  // downloaded) so the renderer never needs to poll.
-  useEffect(() => {
-    let cancelled = false;
-    window.electron
-      .invoke('updates:get-state')
-      .then((s: UpdaterState) => { if (!cancelled) setState(s); })
-      .catch((e: unknown) => logger.error('[UpdatesTab] failed to load state', e));
-    const handler = (_e: unknown, next: UpdaterState) => setState(next);
-    window.electron.on('updates:state', handler);
-    return () => {
-      cancelled = true;
-      window.electron.off('updates:state', handler);
-    };
-  }, []);
+  // Live state from main (shared with the Settings panel's tab badge).
+  const [state, setState] = useUpdaterState();
 
   if (!state) {
     return <p className='text-muted text-sm'>Loading…</p>;

@@ -12,7 +12,7 @@ import { BubbleSize, MascotId, ToolId } from './types';
 
 // Every pickable mascot, in the order the settings picker lists them.
 export const MASCOT_IDS: Exclude<MascotId, 'none'>[] = [
-  'clawd', 'frog', 'gigi', 'ghost', 'mico', 'merc', 'jolly', 'byte', 'rusty', 'knight', 'sensei', 'sprout', 'droid',
+  'clawd', 'frog', 'gigi', 'ghost', 'mico', 'merc', 'jolly', 'byte', 'rusty', 'knight', 'sensei', 'sprout', 'droid', 'frost', 'scorch', 'smooth',
 ];
 
 export const MASCOT_LABELS: Record<MascotId, string> = {
@@ -30,6 +30,9 @@ export const MASCOT_LABELS: Record<MascotId, string> = {
   sensei: 'Sensei',
   sprout: 'Sprout',
   droid: 'Droid',
+  frost: 'Frost',
+  scorch: 'Scorch',
+  smooth: 'Smooth',
 };
 
 // One-line hint shown under the picker, so a user knows which character a
@@ -48,6 +51,9 @@ export const MASCOT_HINTS: Record<Exclude<MascotId, 'none'>, string> = {
   sensei: 'Black-and-white panda with kung fu moves',
   sprout: 'Bark-skinned sapling that dances',
   droid: 'Chrome dome droid with a tool arm',
+  frost: 'Ice-blue hooded ninja that freezes and shatters',
+  scorch: 'Gold hooded ninja with a rope spear',
+  smooth: 'Black-suited dancer in a fedora and one white glove',
 };
 
 // The agent each vendor character "belongs" to. Used by the master switch in
@@ -138,6 +144,18 @@ export const MASCOT_GEOMETRY: Record<Exclude<MascotId, 'none'>, MascotGeometry> 
     window: { small: { width: 58, height: 81 }, medium: { width: 70, height: 94 }, large: { width: 86, height: 112 } },
   },
   droid: {
+    width: { small: 54, medium: 66, large: 82 },
+    window: { small: { width: 58, height: 81 }, medium: { width: 70, height: 94 }, large: { width: 86, height: 112 } },
+  },
+  frost: {
+    width: { small: 54, medium: 66, large: 82 },
+    window: { small: { width: 58, height: 81 }, medium: { width: 70, height: 94 }, large: { width: 86, height: 112 } },
+  },
+  scorch: {
+    width: { small: 54, medium: 66, large: 82 },
+    window: { small: { width: 58, height: 81 }, medium: { width: 70, height: 94 }, large: { width: 86, height: 112 } },
+  },
+  smooth: {
     width: { small: 54, medium: 66, large: 82 },
     window: { small: { width: 58, height: 81 }, medium: { width: 70, height: 94 }, large: { width: 86, height: 112 } },
   },

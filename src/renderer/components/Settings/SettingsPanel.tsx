@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { hasPendingUpdate } from '../../../common/updater-types';
+import { useUpdaterState } from '../../hooks/useUpdaterState';
 import { AnimatePresence, motion } from 'framer-motion';
 import { smooth, tabContent, tabContentTransition } from '../../motion';
 import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, ThemeMode, AppearanceConfig, TourState } from '../../../common/types';
@@ -253,18 +255,58 @@ const GuardrailsParent: React.FC = () => {
   );
 };
 
+// ── Settings tab icons (16px, inherit text colour) ───────────────────────────
+
+type IconProps = { className?: string };
+const tabSvg = (children: React.ReactNode, { className }: IconProps) => (
+  <svg
+    xmlns='http://www.w3.org/2000/svg'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth={2}
+    strokeLinecap='round'
+    strokeLinejoin='round'
+    className={className}
+  >
+    {children}
+  </svg>
+);
+
+// Hooks — a plug.
+const HooksIcon: React.FC<IconProps> = (p) =>
+  tabSvg(<><path d='M12 22v-5' /><path d='M9 8V2' /><path d='M15 8V2' /><path d='M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z' /></>, p);
+// Bubble — a chat bubble.
+const BubbleIcon: React.FC<IconProps> = (p) =>
+  tabSvg(<path d='M7.9 20A9 9 0 1 0 4 16.1L2 22z' />, p);
+// Plans & Limits — a gauge.
+const PlansIcon: React.FC<IconProps> = (p) =>
+  tabSvg(<><path d='m12 14 4-4' /><path d='M3.34 19a10 10 0 1 1 17.32 0' /></>, p);
+// Backlog — a kanban board.
+const BacklogIcon: React.FC<IconProps> = (p) =>
+  tabSvg(<><path d='M6 5v11' /><path d='M12 5v6' /><path d='M18 5v14' /></>, p);
+// Analytics — a bar chart.
+const AnalyticsIcon: React.FC<IconProps> = (p) =>
+  tabSvg(<><path d='M3 3v16a2 2 0 0 0 2 2h16' /><path d='M18 17V9' /><path d='M13 17V5' /><path d='M8 17v-3' /></>, p);
+// Guardrails — a shield with a check.
+const GuardrailsIcon: React.FC<IconProps> = (p) =>
+  tabSvg(<><path d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z' /><path d='m9 12 2 2 4-4' /></>, p);
+// Updates — a refresh loop with a download arrow.
+const UpdatesIcon: React.FC<IconProps> = (p) =>
+  tabSvg(<><path d='M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8' /><path d='M21 3v5h-5' /></>, p);
+
 // ── Settings Panel ────────────────────────────────────────────────────────────
 
 export type TabId = 'hooks' | 'bubble' | 'usage' | 'backlog' | 'analytics' | 'guardrails' | 'updates';
 
-const TABS: { id: TabId; label: string; description: string }[] = [
-  { id: 'hooks',      label: 'Hooks',      description: 'Manage which AI tools show a status bubble.' },
-  { id: 'bubble',     label: 'Bubble',     description: 'Size, screen position, and inactivity sound for the bubbles.' },
-  { id: 'usage',      label: 'Plans & Limits', description: 'Monitor plan usage and configure Claude Code’s scheduler & status line.' },
-  { id: 'backlog',    label: 'Backlog',    description: 'Queue research tasks that run themselves during your idle windows.' },
-  { id: 'analytics',  label: 'Analytics',  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
-  { id: 'guardrails', label: 'Guardrails', description: 'Block risky shell commands and protect secret files from agents.' },
-  { id: 'updates',    label: 'Updates',    description: 'Check for and install new versions of Agent Pulse.' },
+const TABS: { id: TabId; label: string; Icon: React.FC<IconProps>; description: string }[] = [
+  { id: 'hooks',      label: 'Hooks',      Icon: HooksIcon,      description: 'Manage which AI tools show a status bubble.' },
+  { id: 'bubble',     label: 'Bubble',     Icon: BubbleIcon,     description: 'Size, screen position, and inactivity sound for the bubbles.' },
+  { id: 'usage',      label: 'Plans & Limits', Icon: PlansIcon,  description: 'Monitor plan usage and configure Claude Code’s scheduler & status line.' },
+  { id: 'backlog',    label: 'Backlog',    Icon: BacklogIcon,    description: 'Queue research tasks that run themselves during your idle windows.' },
+  { id: 'analytics',  label: 'Analytics',  Icon: AnalyticsIcon,  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
+  { id: 'guardrails', label: 'Guardrails', Icon: GuardrailsIcon, description: 'Block risky shell commands and protect secret files from agents.' },
+  { id: 'updates',    label: 'Updates',    Icon: UpdatesIcon,    description: 'Check for and install new versions of Agent Pulse.' },
 ];
 
 export const SettingsPanel: React.FC = () => {
@@ -294,6 +336,10 @@ export const SettingsPanel: React.FC = () => {
     mode: 'off', nextFireAt: null, nextEventKind: null, lastRun: null, openersToday: 0, windowResetsAt: null,
   });
   const [activeTab, setActiveTab] = useState<TabId>('hooks');
+  // Updater state drives the attention dot on the Updates tab so a new
+  // version is visible from any tab, not only once Updates is opened.
+  const [updaterState] = useUpdaterState();
+  const updatePending = updaterState ? hasPendingUpdate(updaterState.status) : false;
   // Which provider sub-tab is open within the Usage tab. Claude Code groups its
   // usage, scheduler, and status-line settings together since they're all
   // Claude Code features.
@@ -766,10 +812,16 @@ export const SettingsPanel: React.FC = () => {
 
       {/* Tab navigation */}
       <Tabs
-        className='glass-primary rounded-xl mb-8 w-fit'
+        className='glass-primary rounded-xl mb-8'
         ariaLabel='Settings sections'
         tone='glass'
-        tabs={TABS.map((t) => ({ value: t.id, label: t.label }))}
+        fill
+        tabs={TABS.map((t) => ({
+          value: t.id,
+          label: t.label,
+          icon: <t.Icon />,
+          badge: t.id === 'updates' && updatePending,
+        }))}
         value={activeTab}
         onChange={(v) => setActiveTab(v as TabId)}
       />

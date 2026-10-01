@@ -3,6 +3,7 @@ import { logger } from '../../common/logger';
 import { ENABLE_UPDATER } from '../feature-flags';
 import { UserConfig, UpdaterConfig } from '../user-config';
 import { UpdaterManager } from './manager';
+import type { UpdaterState } from '../../common/updater-types';
 
 interface BootOptions {
   // Callable so the manager always reads the current config snapshot rather
@@ -11,6 +12,8 @@ interface BootOptions {
   // The caller owns the in-memory UserConfig; we hand them back a mutated
   // version so they can update their own field and persist atomically.
   applyUpdaterConfig: (next: UpdaterConfig) => void;
+  // Optional main-side observer of every state transition (tray indicator).
+  onStateChange?: (state: UpdaterState) => void;
 }
 
 export interface UpdaterHandle {
@@ -26,6 +29,7 @@ export function bootUpdater(opts: BootOptions): UpdaterHandle {
     getUserConfig: opts.getUserConfig,
     persistUpdaterConfig: opts.applyUpdaterConfig,
     enabled: ENABLE_UPDATER,
+    onStateChange: opts.onStateChange,
   });
   manager.init();
 

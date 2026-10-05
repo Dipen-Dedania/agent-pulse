@@ -1,0 +1,33 @@
+# Normalize line endings: every text file is stored and checked out as LF,
+# regardless of the committer's OS or core.autocrlf setting. The repo is
+# developed on Windows and macOS; mixed endings were producing whole-file
+# diffs on otherwise one-line changes.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF to run under cmd.exe.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets: never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.mp3 binary
+*.mp4 binary
+*.webm binary
+*.wav binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.7z binary
+*.db binary
+*.sqlite binary

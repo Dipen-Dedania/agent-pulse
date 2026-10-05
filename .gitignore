@@ -144,3 +144,8 @@ vite.config.ts.timestamp-*
 .claude/settings-local-model.json
 .claude/settings.json
 .claude/settings-openrouter.json
+# Internal working notes (never publish)
+security-review-internal.md
+clawd-svgs/
+
+docs/archive/*

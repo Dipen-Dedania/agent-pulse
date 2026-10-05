@@ -27,7 +27,6 @@ function formatRelative(ts: number | null): string {
 const STATUS_PILL: Record<UpdaterState['status'], { label: string; tone: BadgeTone }> = {
   idle:            { label: 'Idle',                  tone: 'neutral' },
   disabled:        { label: 'Disabled (dev mode)',   tone: 'neutral' },
-  unsupported:     { label: 'Manual install',        tone: 'warn'    },
   checking:        { label: 'Checking…',             tone: 'info'    },
   available:       { label: 'Update available',      tone: 'ok'      },
   'not-available': { label: 'Up to date',            tone: 'ok'      },
@@ -51,7 +50,9 @@ export const UpdatesTab: React.FC = () => {
   }
 
   const pill = STATUS_PILL[state.status];
-  const isMacUnsupported = state.status === 'unsupported' && state.platform === 'darwin';
+  // macOS without a signed build: checks run (tray dot + tab badge work),
+  // but install is manual. Offer the release page instead of Download.
+  const isMacCheckOnly = state.platform === 'darwin' && !state.installSupported;
   const isDev = state.status === 'disabled';
   const isInProgress = state.status === 'checking' || state.status === 'downloading';
 
@@ -79,6 +80,16 @@ export const UpdatesTab: React.FC = () => {
     }
   };
 
+  const handleOpenDownloadPage = async () => {
+    const url = state.info?.downloadPageUrl;
+    if (!url) return;
+    try {
+      await window.electron.invoke('open-external', url);
+    } catch (e) {
+      logger.error('[UpdatesTab] open download page failed', e);
+    }
+  };
+
   const handleAutoCheckToggle = async () => {
     try {
       const next = await window.electron.invoke('updates:set-auto-check', !state.autoCheck);
@@ -90,12 +101,13 @@ export const UpdatesTab: React.FC = () => {
 
   return (
     <div>
-      {isMacUnsupported && (
-        <Card className='border-amber-500/30 bg-amber-500/10'>
-          <p className='font-semibold text-warn'>Manual updates on macOS</p>
-          <p className='text-sm text-warn/90 mt-1'>
-            Auto-update on macOS requires a signed and notarized build, which we haven't enabled yet.
-            Until then, grab the latest installer from the Releases page.
+      {isMacCheckOnly && (
+        <Card>
+          <p className='font-semibold text-strong'>Manual install on macOS</p>
+          <p className='text-sm text-muted mt-1'>
+            Agent Pulse checks for new versions on macOS, but installing them needs a signed
+            build we don't ship yet. When a new version appears you'll see a dot on the tray
+            icon and on this tab; download the DMG from the Releases page.
           </p>
         </Card>
       )}
@@ -126,7 +138,7 @@ export const UpdatesTab: React.FC = () => {
           </p>
           <Button
             onClick={handleCheck}
-            disabled={isInProgress || isDev || isMacUnsupported}
+            disabled={isInProgress || isDev}
           >
             {state.status === 'checking' ? 'Checking…' : 'Check for updates'}
           </Button>
@@ -182,12 +194,21 @@ export const UpdatesTab: React.FC = () => {
             </div>
           )}
 
-          {state.status === 'available' && (
+          {state.status === 'available' && state.installSupported && (
             <Button
               onClick={handleDownload}
               className='w-full'
             >
               Download update
+            </Button>
+          )}
+          {state.status === 'available' && !state.installSupported && (
+            <Button
+              onClick={handleOpenDownloadPage}
+              disabled={!state.info.downloadPageUrl}
+              className='w-full'
+            >
+              Open download page
             </Button>
           )}
           {state.status === 'downloaded' && (
@@ -213,7 +234,7 @@ export const UpdatesTab: React.FC = () => {
             onChange={handleAutoCheckToggle}
             size="lg"
             label="Toggle automatic update checks"
-            disabled={isDev || isMacUnsupported}
+            disabled={isDev}
           />
         </div>
       </Card>

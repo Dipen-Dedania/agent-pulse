@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Electron mock ───────────────────────────────────────────────────────────
 const m = vi.hoisted(() => {
@@ -10,11 +10,10 @@ const m = vi.hoisted(() => {
     on: ReturnType<typeof vi.fn>;
     destroy: ReturnType<typeof vi.fn>;
   }> = [];
-  const dockSetBadge = vi.fn();
   const menuTemplates: unknown[][] = [];
   // Which icon paths load as empty (simulates a missing dotted PNG).
   const emptyPaths = new Set<string>();
-  return { trayInstances, dockSetBadge, menuTemplates, emptyPaths };
+  return { trayInstances, menuTemplates, emptyPaths };
 });
 
 vi.mock('electron', () => ({
@@ -33,7 +32,6 @@ vi.mock('electron', () => ({
   Menu: {
     buildFromTemplate: (tpl: unknown[]) => { m.menuTemplates.push(tpl); return { tpl }; },
   },
-  app: { dock: { setBadge: m.dockSetBadge } },
   nativeImage: {
     createFromPath: (p: string) => ({
       path: p,
@@ -54,21 +52,11 @@ const lastTray = () => m.trayInstances[m.trayInstances.length - 1];
 const lastMenuLabel = () => (m.menuTemplates[m.menuTemplates.length - 1][0] as { label: string }).label;
 const imgPath = (img: unknown) => (img as { path: string }).path;
 
-let platformSpy: { restore: () => void } | null = null;
-function setPlatform(p: NodeJS.Platform) {
-  const desc = Object.getOwnPropertyDescriptor(process, 'platform')!;
-  Object.defineProperty(process, 'platform', { value: p, configurable: true });
-  platformSpy = { restore: () => Object.defineProperty(process, 'platform', desc) };
-}
-
 beforeEach(() => {
   m.trayInstances.length = 0;
   m.menuTemplates.length = 0;
   m.emptyPaths.clear();
-  m.dockSetBadge.mockClear();
-  setPlatform('win32');
 });
-afterEach(() => platformSpy?.restore());
 
 describe('TrayManager update indicator', () => {
   it('starts with the plain icon, default tooltip and "Check for Updates…"', () => {
@@ -141,30 +129,10 @@ describe('TrayManager update indicator', () => {
     expect(lastMenuLabel()).toBe('Download Update…');
   });
 
-  it('sets and clears the dock badge on macOS only', () => {
+  it('destroy() tears down the tray', () => {
     const tm = new TrayManager();
     tm.init(callbacks);
-    tm.setUpdatePending(true, '1.4.0');
-    expect(m.dockSetBadge).not.toHaveBeenCalled();
-
-    platformSpy?.restore();
-    setPlatform('darwin');
-    const tmMac = new TrayManager();
-    tmMac.init(callbacks);
-    tmMac.setUpdatePending(true, '1.4.0');
-    expect(m.dockSetBadge).toHaveBeenLastCalledWith('1');
-    tmMac.setUpdatePending(false);
-    expect(m.dockSetBadge).toHaveBeenLastCalledWith('');
-  });
-
-  it('destroy() tears down the tray and clears the dock badge on macOS', () => {
-    platformSpy?.restore();
-    setPlatform('darwin');
-    const tm = new TrayManager();
-    tm.init(callbacks);
-    tm.setUpdatePending(true, '1.4.0');
     tm.destroy();
     expect(lastTray().destroy).toHaveBeenCalled();
-    expect(m.dockSetBadge).toHaveBeenLastCalledWith('');
   });
 });

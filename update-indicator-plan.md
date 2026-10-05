@@ -2,7 +2,9 @@
 
 Status: implemented 2026-10-01 (verified on Windows via tests; macOS / Linux
 runtime not exercised). Dotted icons generated once with a Pillow script
-(not committed).
+(not committed). Follow-up the same day: `mac-update-detection-plan.md`
+made macOS check-only so the dot actually lights there, and removed the
+dock badge (dead on an LSUIElement app).
 
 Today the updater (`src/main/updater/manager.ts`) checks on launch and every
 6 h, then broadcasts `updates:state` to every window. The only listener is

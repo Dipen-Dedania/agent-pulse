@@ -39,7 +39,7 @@ Pushes to `main` (without a tag) build the same installers and attach them as wo
 
 - **Check cadence**: one jittered check **30–120 s after launch** (so a corporate-NAT fleet doesn't stampede the feed), then every **6 hours** while the app stays open. The "Check now" button is throttled to once per 10 min.
 - **User control**: downloads are *never* automatic — the user clicks **Download**, then **Restart & install**. Auto-install-on-quit is disabled because the tray keeps the app alive past window-close.
-- **Platforms**: Windows (NSIS) auto-updates end-to-end. macOS surfaces an `unsupported` status with a manual-install banner — code signing + notarization aren't wired yet. Dev / unpackaged runs report `disabled` instead of silently failing.
+- **Platforms**: Windows (NSIS) and Linux (AppImage) auto-update end-to-end. **macOS is check-only**: the app polls the same `latest-mac.yml`, lights the tray dot and the Updates-tab badge when a newer version exists, and offers an "Open download page" button to the GitHub Release — but it never downloads or installs (`installSupported: false` in `UpdaterState`). Squirrel.Mac refuses to install an unsigned bundle. To enable real mac auto-install later: (1) Developer ID certificate + notarization in the release workflow, (2) add a `zip` target under `mac.target` — electron-updater's `MacUpdater` downloads the zip, not the dmg — and (3) flip `INSTALL_SUPPORTED` for darwin in `src/main/updater/manager.ts`. Dev / unpackaged runs report `disabled` instead of silently failing.
 - **Soft failures**: `403` / `429` responses are treated as soft failures (no user-visible error); the next periodic check retries.
 
 ## Verifying / debugging an update

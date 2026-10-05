@@ -32,3 +32,4 @@ export { Modal } from './Modal';
 export { Segmented, type SegmentedOption } from './Segmented';
 export { Tabs, type TabItem } from './Tabs';
 export { AnimatedNumber } from './AnimatedNumber';
+export { Markdown } from './Markdown';

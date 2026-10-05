@@ -4,7 +4,7 @@ import { logger } from '../../../common/logger';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { appAlert, appConfirm, Button, Modal, Select, Tooltip } from '../Shared';
 import { DiffView } from './DiffView';
-import { Markdown } from './Markdown';
+import { Markdown } from '../Shared';
 
 // Card detail: attempt history + artifacts (research report / execution diff
 // + QA report) +, for execution cards, the worktree the diff came from.

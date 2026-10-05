@@ -23,6 +23,19 @@ const PERIODIC_CHECK_MS = 6 * 60 * 60 * 1000;
 // "Check now" and chew through 60 unauthenticated requests in a minute.
 const MANUAL_CHECK_THROTTLE_MS = 10 * 60 * 1000;
 
+// Human-facing release page. Owner/repo mirror GITHUB_PUBLISH in
+// electron-builder.config.cjs; the release workflow attaches every
+// installer (exe, dmg, AppImage) to the GitHub Release for the tag.
+const RELEASES_PAGE = 'https://github.com/Dipen-Dedania/agent-pulse/releases';
+
+// macOS: electron-updater can *check* against latest-mac.yml without any
+// signing, but Squirrel.Mac refuses to install an unsigned bundle. Until a
+// Developer ID build ships, mac runs in check-only mode: the tray dot and
+// Updates tab light up, and the user downloads the DMG from RELEASES_PAGE.
+// Enabling real install later also needs a zip mac target (MacUpdater
+// downloads the zip, not the dmg).
+const INSTALL_SUPPORTED = process.platform !== 'darwin';
+
 interface UpdaterDeps {
   getUserConfig: () => UserConfig;
   // Called whenever lastCheckedAt or autoCheck change so the on-disk config
@@ -66,13 +79,8 @@ export class UpdaterManager {
       return;
     }
 
-    // macOS auto-update requires a signed + notarized build; until that's
-    // wired up, surface a distinct status so the renderer shows a manual-
-    // install banner instead of "checking" / spurious errors.
-    if (process.platform === 'darwin') {
-      this.status = 'unsupported';
-      logger.info('[UpdaterManager] macOS — auto-update deferred (signing not wired)');
-      return;
+    if (!INSTALL_SUPPORTED) {
+      logger.info('[UpdaterManager] macOS — check-only mode (install needs a signed build)');
     }
 
     autoUpdater.logger = {
@@ -114,13 +122,16 @@ export class UpdaterManager {
       errorMessage: this.errorMessage,
       lastCheckedAt: this.deps.getUserConfig().updates.lastCheckedAt,
       autoCheck: this.deps.getUserConfig().updates.autoCheck,
+      installSupported: INSTALL_SUPPORTED,
       platform: process.platform,
+      // Post-install "What's new" card is not wired yet (see release-notes-plan.md).
+      whatsNew: null,
     };
   }
 
   // force=true bypasses the throttle (used by the on-launch check).
   public async checkNow(opts: { force?: boolean } = {}): Promise<void> {
-    if (this.status === 'disabled' || this.status === 'unsupported') {
+    if (this.status === 'disabled') {
       logger.debug('[UpdaterManager] checkNow ignored: status =', this.status);
       return;
     }
@@ -147,6 +158,10 @@ export class UpdaterManager {
   }
 
   public async downloadUpdate(): Promise<void> {
+    if (!INSTALL_SUPPORTED) {
+      logger.warn('[UpdaterManager] downloadUpdate ignored: install unsupported on this platform');
+      return;
+    }
     if (this.status !== 'available') {
       logger.debug('[UpdaterManager] downloadUpdate ignored: status =', this.status);
       return;
@@ -163,6 +178,10 @@ export class UpdaterManager {
   }
 
   public quitAndInstall(): void {
+    if (!INSTALL_SUPPORTED) {
+      logger.warn('[UpdaterManager] quitAndInstall ignored: install unsupported on this platform');
+      return;
+    }
     if (this.status !== 'downloaded') {
       logger.warn('[UpdaterManager] quitAndInstall ignored: status =', this.status);
       return;
@@ -311,6 +330,7 @@ function toUpdateInfoLite(info: UpdateInfo): UpdateInfoLite {
     releaseDate: info.releaseDate,
     releaseName: info.releaseName ?? null,
     releaseNotes: notes,
+    downloadPageUrl: info.version ? `${RELEASES_PAGE}/tag/v${info.version}` : `${RELEASES_PAGE}/latest`,
   };
 }
 

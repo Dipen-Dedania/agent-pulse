@@ -4,7 +4,7 @@ import { hasPendingUpdate, type UpdaterStatus } from '../updater-types';
 describe('hasPendingUpdate', () => {
   it('is true only for available / downloaded', () => {
     const all: UpdaterStatus[] = [
-      'idle', 'unsupported', 'disabled', 'checking', 'available',
+      'idle', 'disabled', 'checking', 'available',
       'not-available', 'downloading', 'downloaded', 'error',
     ];
     const pending = all.filter(hasPendingUpdate);

@@ -1,4 +1,4 @@
-import { Tray, Menu, app, nativeImage, NativeImage } from 'electron';
+import { Tray, Menu, nativeImage, NativeImage } from 'electron';
 import path from 'path';
 import { logger } from '../../common/logger';
 
@@ -14,9 +14,11 @@ import { logger } from '../../common/logger';
 //
 // The 'update' variant is the same icon with a pre-rendered red dot in the
 // top-right corner. Electron has no tray badge API, so "update available" is
-// an image swap. Note: this is a full-colour icon, not a macOS template
-// image; if the mac icon is ever converted to a monochrome template, the
-// dotted variant must be re-authored as an alpha mask.
+// an image swap. On macOS this is the *only* indicator: packaged builds are
+// LSUIElement (no dock icon), so a dock badge could never render. Note: this
+// is a full-colour icon, not a macOS template image; if the mac icon is ever
+// converted to a monochrome template, the dotted variant must be re-authored
+// as an alpha mask.
 type TrayIconVariant = 'normal' | 'update';
 
 function getTrayIconPath(variant: TrayIconVariant): string {
@@ -74,8 +76,8 @@ export class TrayManager {
 
   /**
    * Reflect "a new version is available / downloaded" on the tray: dotted
-   * icon, descriptive tooltip, "Download update…" menu label, and (macOS
-   * only) a dock badge. Idempotent — the updater re-broadcasts the same
+   * icon, descriptive tooltip and "Download Update…" menu label.
+   * Idempotent — the updater re-broadcasts the same
    * state on every periodic check, so repeat calls with no change are no-ops.
    * Safe to call before init(); the state is applied when the tray is built.
    */
@@ -97,7 +99,6 @@ export class TrayManager {
       this.tray.destroy();
       this.tray = null;
     }
-    this.setDockBadge(false);
   }
 
   private applyIndicator() {
@@ -109,7 +110,6 @@ export class TrayManager {
         ? `Agent Pulse — update${this.pendingVersion ? ` ${this.pendingVersion}` : ''} available`
         : 'Agent Pulse',
     );
-    this.setDockBadge(this.updatePending);
   }
 
   private buildMenu(): Menu {
@@ -130,16 +130,5 @@ export class TrayManager {
         click: () => cb.onQuit(),
       },
     ]);
-  }
-
-  // macOS dock badge is the native "something new" convention. `app.dock` is
-  // undefined off-mac and on agent-only (LSUIElement) builds, so guard it.
-  private setDockBadge(on: boolean) {
-    if (process.platform !== 'darwin') return;
-    try {
-      app.dock?.setBadge(on ? '1' : '');
-    } catch (e) {
-      logger.debug('[TrayManager] dock badge unavailable', e);
-    }
   }
 }

@@ -112,6 +112,10 @@ export interface AnalyticsConfig {
 export interface UpdaterConfig {
   autoCheck: boolean;             // periodic background checks
   lastCheckedAt: number | null;   // unix ms of last completed check (success or no-update)
+  // app.getVersion() as of the last time the post-install "What's new" card
+  // was dismissed (or first stamped). null = never stamped: a fresh install
+  // or the first run of a build that has this field, which stays silent.
+  lastRunVersion: string | null;
 }
 
 // First-run tour + setup checklist. hasSeenTour flips on finish OR skip — the
@@ -242,6 +246,7 @@ const DEFAULTS: UserConfig = {
   updates: {
     autoCheck: true,
     lastCheckedAt: null,
+    lastRunVersion: null,
   },
   tour: {
     hasSeenTour: false,
@@ -888,6 +893,7 @@ export function loadConfig(): UserConfig {
         updates: {
           autoCheck: typeof updates.autoCheck === 'boolean' ? updates.autoCheck : DEFAULTS.updates.autoCheck,
           lastCheckedAt: typeof updates.lastCheckedAt === 'number' ? updates.lastCheckedAt : null,
+          lastRunVersion: typeof updates.lastRunVersion === 'string' && updates.lastRunVersion ? updates.lastRunVersion : null,
         },
         tour: migrateTour(parsed.tour),
         scheduler: migrateScheduler(parsed.scheduler),

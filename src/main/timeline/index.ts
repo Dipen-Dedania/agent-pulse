@@ -64,6 +64,10 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
       save: (row) => db.saveTranscriptOffset(row),
     },
     (hits) => { for (const h of hits) db.insertLimitEvent(h); },
+    // Live Codex quota: every token_count row carries rate_limits. Feed it to
+    // the poller so the bubble/Settings update mid-session without hitting the
+    // undocumented HTTP endpoint.
+    (snapshot, sampledAt) => opts.codexUsagePoller.ingestExternal(snapshot, sampledAt),
   );
 
   // One-time scan of existing transcripts so the Session Limits card shows

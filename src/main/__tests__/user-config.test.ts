@@ -1,5 +1,63 @@
 import { describe, it, expect } from 'vitest';
-import { migrateBacklogPopulation, migrateBubble, migrateMascots } from '../user-config';
+import { migrateBacklogPopulation, migrateBubble, migrateCodexStatusLine, migrateMascots, migrateScheduler, SchedulerConfig } from '../user-config';
+
+describe('migrateCodexStatusLine', () => {
+  const DEFAULT_ITEMS = ['model-with-reasoning', 'current-dir', 'git-branch', 'context-remaining', 'five-hour-limit', 'weekly-limit'];
+
+  it('returns the default items for missing / non-object / empty input', () => {
+    expect(migrateCodexStatusLine(undefined).items).toEqual(DEFAULT_ITEMS);
+    expect(migrateCodexStatusLine('nope').items).toEqual(DEFAULT_ITEMS);
+    expect(migrateCodexStatusLine({ items: [] }).items).toEqual(DEFAULT_ITEMS);
+    expect(migrateCodexStatusLine({ items: ['bogus'] }).items).toEqual(DEFAULT_ITEMS);
+  });
+
+  it('keeps known ids in order, drops unknown ones, and dedupes', () => {
+    const out = migrateCodexStatusLine({ items: ['git-branch', 'shell-cmd', 'model', 'git-branch', 42] });
+    expect(out.items).toEqual(['git-branch', 'model']);
+  });
+
+  it('returns a fresh array (defaults are never shared by reference)', () => {
+    const a = migrateCodexStatusLine(undefined);
+    a.items.push('activity');
+    expect(migrateCodexStatusLine(undefined).items).toEqual(DEFAULT_ITEMS);
+  });
+});
+
+describe('migrateScheduler', () => {
+  const defaults: SchedulerConfig = {
+    mode: 'off',
+    fixed: [],
+    adaptive: { workHours: { start: '09:00', end: '18:00' }, maxWindowsPerDay: 3 },
+    tokenNudge: { enabled: true, leadMs: 120_000 },
+    maxOpenersPerDay: 6,
+  };
+
+  it('returns the defaults for missing / non-object input', () => {
+    expect(migrateScheduler(undefined)).toEqual(defaults);
+    expect(migrateScheduler('nope')).toEqual(defaults);
+  });
+
+  it('honours an alternate defaults block (used for the Codex scheduler)', () => {
+    const codexDefaults: SchedulerConfig = { ...defaults, maxOpenersPerDay: 4 };
+    expect(migrateScheduler(undefined, codexDefaults).maxOpenersPerDay).toBe(4);
+    expect(migrateScheduler({ mode: 'fixed' }, codexDefaults)).toMatchObject({ mode: 'fixed', maxOpenersPerDay: 4 });
+  });
+
+  it('enum-checks mode and validates slots, days, and caps', () => {
+    const out = migrateScheduler({
+      mode: 'bogus',
+      fixed: [{ time: '06:00', days: [1, 9, -1, 2.5, 6] }, { nope: true }, null],
+      adaptive: { workHours: { start: '08:00' }, maxWindowsPerDay: 0 },
+      tokenNudge: { enabled: false, leadMs: -5 },
+      maxOpenersPerDay: 2.9,
+    });
+    expect(out.mode).toBe('off');
+    expect(out.fixed).toEqual([{ time: '06:00', days: [1, 6], enabled: true }]);
+    expect(out.adaptive).toEqual({ workHours: { start: '08:00', end: '18:00' }, maxWindowsPerDay: 3 });
+    expect(out.tokenNudge).toEqual({ enabled: false, leadMs: 120_000 });
+    expect(out.maxOpenersPerDay).toBe(2);
+  });
+});
 
 describe('migrateBacklogPopulation', () => {
   it('returns the shipped defaults for missing / non-object input', () => {

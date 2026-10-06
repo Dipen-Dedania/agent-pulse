@@ -82,7 +82,17 @@ export function claudeArcRemaining(status: UsageStatus): number | null {
 
 export function codexArcRemaining(status: CodexUsageStatus): number | null {
   if (status.state !== 'ok' || !status.snapshot) return null;
-  return 100 - status.snapshot.primary.utilization;
+  const { primary, secondary, limitReached } = status.snapshot;
+  // A reported hard stop beats any percentage — the ring reads "empty".
+  if (limitReached) return 0;
+  // Like Claude, show the window that gates the next prompt: the shortest one.
+  // On paid plans that's primary (5h); fall back to primary when lengths are
+  // unknown so the arc never flips on an endpoint shape change.
+  const gating =
+    secondary && primary.windowSeconds && secondary.windowSeconds && secondary.windowSeconds < primary.windowSeconds
+      ? secondary
+      : primary;
+  return 100 - gating.utilization;
 }
 
 export function cursorArcRemaining(status: CursorUsageStatus): number | null {

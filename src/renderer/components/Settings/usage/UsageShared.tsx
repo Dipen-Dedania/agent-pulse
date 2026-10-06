@@ -78,15 +78,26 @@ export const StatePill: React.FC<{
 };
 
 // ── Warning / status banner ───────────────────────────────────────────────────
+// `UsageBanner` renders unconditionally (the caller decides when); `UsageMessage`
+// is the original wrapper every provider uses for non-ok poller states.
+const BANNER_TONE = {
+  warn: 'text-warn/90 bg-amber-500/5 border-amber-500/20',
+  danger: 'text-danger bg-red-500/10 border-red-500/30',
+} as const;
+
+export const UsageBanner: React.FC<{ message: React.ReactNode; tone?: 'warn' | 'danger' }> = ({
+  message,
+  tone = 'warn',
+}) => (
+  <p className={`mt-4 text-sm border rounded-lg px-3 py-2 ${BANNER_TONE[tone]}`} role='status'>
+    {message}
+  </p>
+);
+
 export const UsageMessage: React.FC<{ message?: string; state: UsageState }> = ({
   message,
   state,
-}) =>
-  message && state !== 'ok' ? (
-    <p className='mt-4 text-sm text-warn/90 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2'>
-      {message}
-    </p>
-  ) : null;
+}) => (message && state !== 'ok' ? <UsageBanner message={message} tone='warn' /> : null);
 
 // ── Quota card ────────────────────────────────────────────────────────────────
 // The one snapshot card used by every provider: an uppercase label, a big

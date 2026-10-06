@@ -3,7 +3,7 @@ import { hasPendingUpdate } from '../../../common/updater-types';
 import { useUpdaterState } from '../../hooks/useUpdaterState';
 import { AnimatePresence, motion } from 'framer-motion';
 import { smooth, tabContent, tabContentTransition } from '../../motion';
-import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, ThemeMode, AppearanceConfig, TourState } from '../../../common/types';
+import { ToolId, UsageStatus, CodexUsageStatus, CursorUsageStatus, CopilotUsageStatus, AntigravityUsageStatus, SchedulerStatus, BubbleConfig, AttentionConfig, StatusLineConfig, StatusLineDetectInfo, CodexStatusLineConfig, CodexStatusLineDetectInfo, ThemeMode, AppearanceConfig, TourState } from '../../../common/types';
 import { TOOL_META, HookInfo } from '../../../common/toolMeta';
 import { logger } from '../../../common/logger';
 import { StatesReference } from './StatesReference';
@@ -17,6 +17,7 @@ import { SchedulerSection, SchedulerConfigUI } from './SchedulerSection';
 import { BubbleSection } from './BubbleSection';
 import { AttentionSection } from './AttentionSection';
 import { StatusLineSection } from './StatusLineSection';
+import { CodexStatusLineSection } from './CodexStatusLineSection';
 import { Badge, GlassToggle, IconButton, Tooltip, Button, Spinner, Segmented, Tabs, Modal } from '../Shared';
 import { GuardrailsTab } from './GuardrailsTab';
 import { SecretProtectionTab } from './SecretProtectionTab';
@@ -302,7 +303,7 @@ export type TabId = 'hooks' | 'bubble' | 'usage' | 'backlog' | 'analytics' | 'gu
 const TABS: { id: TabId; label: string; Icon: React.FC<IconProps>; description: string }[] = [
   { id: 'hooks',      label: 'Hooks',      Icon: HooksIcon,      description: 'Manage which AI tools show a status bubble.' },
   { id: 'bubble',     label: 'Bubble',     Icon: BubbleIcon,     description: 'Size, screen position, and inactivity sound for the bubbles.' },
-  { id: 'usage',      label: 'Plans & Limits', Icon: PlansIcon,  description: 'Monitor plan usage and configure Claude Code’s scheduler & status line.' },
+  { id: 'usage',      label: 'Plans & Limits', Icon: PlansIcon,  description: 'Monitor plan usage and configure each tool’s scheduler & status line.' },
   { id: 'backlog',    label: 'Backlog',    Icon: BacklogIcon,    description: 'Queue research tasks that run themselves during your idle windows.' },
   { id: 'analytics',  label: 'Analytics',  Icon: AnalyticsIcon,  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
   { id: 'guardrails', label: 'Guardrails', Icon: GuardrailsIcon, description: 'Block risky shell commands and protect secret files from agents.' },
@@ -326,13 +327,19 @@ export const SettingsPanel: React.FC = () => {
   const [antigravityUsageConfig, setAntigravityUsageConfig] = useState<AntigravityUsageConfigUI | null>(null);
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfigUI | null>(null);
+  const [codexSchedulerConfig, setCodexSchedulerConfig] = useState<SchedulerConfigUI | null>(null);
   const [backlogSchedulerConfig, setBacklogSchedulerConfig] = useState<BacklogSchedulerConfig | null>(null);
   const [backlogPopulationConfig, setBacklogPopulationConfig] = useState<BacklogPopulationConfig | null>(null);
   const [bubbleConfig, setBubbleConfig] = useState<BubbleConfig | null>(null);
   const [attentionConfig, setAttentionConfig] = useState<AttentionConfig | null>(null);
   const [statusLineConfig, setStatusLineConfig] = useState<StatusLineConfig | null>(null);
   const [statusLineDetect, setStatusLineDetect] = useState<StatusLineDetectInfo | null>(null);
+  const [codexStatusLineConfig, setCodexStatusLineConfig] = useState<CodexStatusLineConfig | null>(null);
+  const [codexStatusLineDetect, setCodexStatusLineDetect] = useState<CodexStatusLineDetectInfo | null>(null);
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus>({
+    mode: 'off', nextFireAt: null, nextEventKind: null, lastRun: null, openersToday: 0, windowResetsAt: null,
+  });
+  const [codexSchedulerStatus, setCodexSchedulerStatus] = useState<SchedulerStatus>({
     mode: 'off', nextFireAt: null, nextEventKind: null, lastRun: null, openersToday: 0, windowResetsAt: null,
   });
   const [activeTab, setActiveTab] = useState<TabId>('hooks');
@@ -441,6 +448,7 @@ export const SettingsPanel: React.FC = () => {
         if (config?.copilotUsage) setCopilotUsageConfig(config.copilotUsage);
         if (config?.antigravityUsage) setAntigravityUsageConfig(config.antigravityUsage);
         if (config?.scheduler) setSchedulerConfig(config.scheduler);
+        if (config?.codexScheduler) setCodexSchedulerConfig(config.codexScheduler);
         if (config?.backlogScheduler) setBacklogSchedulerConfig(config.backlogScheduler);
         if (config?.backlogPopulation) setBacklogPopulationConfig(config.backlogPopulation);
         if (config?.bubble) setBubbleConfig(config.bubble);
@@ -448,6 +456,9 @@ export const SettingsPanel: React.FC = () => {
         if (config?.statusLine) setStatusLineConfig(config.statusLine);
         const detectStatusLine = await window.electron.invoke('status-line:detect').catch(() => null);
         if (detectStatusLine) setStatusLineDetect(detectStatusLine);
+        if (config?.codexStatusLine) setCodexStatusLineConfig(config.codexStatusLine);
+        const detectCodexStatusLine = await window.electron.invoke('codex-status-line:detect').catch(() => null);
+        if (detectCodexStatusLine) setCodexStatusLineDetect(detectCodexStatusLine);
 
         const initialUsage = await window.electron.invoke('usage:get-current').catch(() => null);
         if (initialUsage) setUsageStatus(initialUsage);
@@ -461,6 +472,8 @@ export const SettingsPanel: React.FC = () => {
         if (initialAntigravityUsage) setAntigravityUsageStatus(initialAntigravityUsage);
         const initialScheduler = await window.electron.invoke('scheduler:get-current').catch(() => null);
         if (initialScheduler) setSchedulerStatus(initialScheduler);
+        const initialCodexScheduler = await window.electron.invoke('codex-scheduler:get-current').catch(() => null);
+        if (initialCodexScheduler) setCodexSchedulerStatus(initialCodexScheduler);
       } catch (error) {
         logger.error('[SettingsPanel] failed to initialize settings', error);
       } finally {
@@ -504,6 +517,18 @@ export const SettingsPanel: React.FC = () => {
     const handler = (_event: unknown, incoming: SchedulerStatus) => setSchedulerStatus(incoming);
     window.electron.on('scheduler:updated', handler);
     return () => window.electron.off('scheduler:updated', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: SchedulerStatus) => setCodexSchedulerStatus(incoming);
+    window.electron.on('codex-scheduler:updated', handler);
+    return () => window.electron.off('codex-scheduler:updated', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (_event: unknown, incoming: CodexStatusLineConfig) => setCodexStatusLineConfig(incoming);
+    window.electron.on('codex-status-line:config-updated', handler);
+    return () => window.electron.off('codex-status-line:config-updated', handler);
   }, []);
 
   useEffect(() => {
@@ -595,6 +620,15 @@ export const SettingsPanel: React.FC = () => {
       setSchedulerConfig(updated);
     } catch (e) {
       logger.error('[SettingsPanel] failed to update scheduler config', e);
+    }
+  };
+
+  const handleCodexSchedulerConfigChange = async (partial: Partial<SchedulerConfigUI>) => {
+    try {
+      const updated = await window.electron.invoke('codex-scheduler:update-config', partial);
+      setCodexSchedulerConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update Codex scheduler config', e);
     }
   };
 
@@ -698,11 +732,78 @@ export const SettingsPanel: React.FC = () => {
     }
   };
 
+  // ── Codex status line (config.toml editor) ────────────────────────────────
+  const refreshCodexStatusLineDetect = async () => {
+    const detect = await window.electron.invoke('codex-status-line:detect').catch(() => null);
+    if (detect) setCodexStatusLineDetect(detect);
+  };
+
+  const handleCodexStatusLineConfigChange = async (partial: Partial<CodexStatusLineConfig>) => {
+    setCodexStatusLineConfig((prev) => (prev ? { ...prev, ...partial } : prev));
+    try {
+      const updated = await window.electron.invoke('codex-status-line:update-config', partial);
+      setCodexStatusLineConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to update Codex status-line config', e);
+    } finally {
+      await refreshCodexStatusLineDetect();
+    }
+  };
+
+  const handleCodexStatusLineReset = async () => {
+    try {
+      const updated = await window.electron.invoke('codex-status-line:reset-config');
+      if (updated) setCodexStatusLineConfig(updated);
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to reset Codex status-line config', e);
+    } finally {
+      await refreshCodexStatusLineDetect();
+    }
+  };
+
+  const handleCodexStatusLineInstall = async (replace?: boolean) => {
+    try {
+      const result = await window.electron.invoke('codex-status-line:install', { replace });
+      if (result?.reason === 'inline-table') {
+        void appAlert(
+          'Your config.toml defines `tui` as an inline table or dotted key, which Agent Pulse cannot edit safely. Move it to a [tui] table and try again.',
+          'Codex status line',
+        );
+      } else if (result?.reason === 'empty') {
+        void appAlert('Add at least one item before installing.', 'Codex status line');
+      } else if (result?.reason === 'error') {
+        void appAlert('Failed to write config.toml: ' + (result.message ?? 'unknown error'), 'Codex status line');
+      }
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to install Codex status line', e);
+    } finally {
+      await refreshCodexStatusLineDetect();
+    }
+  };
+
+  const handleCodexStatusLineRemove = async () => {
+    try {
+      await window.electron.invoke('codex-status-line:remove');
+    } catch (e) {
+      logger.error('[SettingsPanel] failed to remove Codex status line', e);
+    } finally {
+      await refreshCodexStatusLineDetect();
+    }
+  };
+
   const handleSchedulerTestOpener = async () => {
     try {
       await window.electron.invoke('scheduler:test-opener');
     } catch (e) {
       logger.error('[SettingsPanel] test opener failed', e);
+    }
+  };
+
+  const handleCodexSchedulerTestOpener = async () => {
+    try {
+      await window.electron.invoke('codex-scheduler:test-opener');
+    } catch (e) {
+      logger.error('[SettingsPanel] Codex test opener failed', e);
     }
   };
 
@@ -1081,13 +1182,36 @@ export const SettingsPanel: React.FC = () => {
               </>
             )}
 
-            {active === 'openai-codex' && codexUsageConfig && (
-              <CodexUsageSection
-                config={codexUsageConfig}
-                status={codexUsageStatus}
-                onChange={handleCodexUsageConfigChange}
-                onRefresh={handleCodexUsageRefresh}
-              />
+            {active === 'openai-codex' && (
+              <>
+                {codexUsageConfig && (
+                  <CodexUsageSection
+                    config={codexUsageConfig}
+                    status={codexUsageStatus}
+                    onChange={handleCodexUsageConfigChange}
+                    onRefresh={handleCodexUsageRefresh}
+                  />
+                )}
+                {codexSchedulerConfig && (
+                  <SchedulerSection
+                    provider='openai-codex'
+                    config={codexSchedulerConfig}
+                    status={codexSchedulerStatus}
+                    onChange={handleCodexSchedulerConfigChange}
+                    onTestOpener={handleCodexSchedulerTestOpener}
+                  />
+                )}
+                {codexStatusLineConfig && codexStatusLineDetect && (
+                  <CodexStatusLineSection
+                    config={codexStatusLineConfig}
+                    detect={codexStatusLineDetect}
+                    onChange={handleCodexStatusLineConfigChange}
+                    onInstall={handleCodexStatusLineInstall}
+                    onRemove={handleCodexStatusLineRemove}
+                    onReset={handleCodexStatusLineReset}
+                  />
+                )}
+              </>
             )}
 
             {active === 'cursor' && cursorUsageConfig && (

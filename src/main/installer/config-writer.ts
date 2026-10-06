@@ -5,6 +5,16 @@ import { execFileSync } from 'child_process';
 import { BRIDGE_URL, STATUSLINE_INGEST_URL } from '../bridge/config';
 import { readConnectionFile } from '../mcp/connection';
 import { ToolId, StatusLineConfig, StatusLineRuntime, StatusLineState } from '../../common/types';
+import { CodexStatusLineConfig, CodexStatusLineState } from '../../common/types';
+import { formatStatusLineArray, parseStatusLineArray } from '../../common/codex-statusline';
+import {
+  CODEX_MANAGED_MARK,
+  findKeyInTable,
+  hasInlineTableConflict,
+  removeKeyFromTable,
+  splitLines,
+  upsertKeyInTable,
+} from './codex-toml';
 import {
   OPENCODE_PLUGIN_FILENAME,
   opencodeConfigDir,
@@ -2096,6 +2106,97 @@ export const AgentPulse = async ({ directory, worktree }) => {
       delete settings.statusLine;
       fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
     }
+    return { success: true };
+  }
+
+  // ── Codex status line ─────────────────────────────────────────────────────
+  // Codex draws its own footer from `[tui] status_line = [...]` in
+  // ~/.codex/config.toml, so there is no script to deploy — we upsert one line
+  // inside one table (see ./codex-toml.ts) and tag it with a marker comment so
+  // we can tell our line from a hand-written one.
+
+  public codexConfigTomlPath(): string {
+    return path.join(os.homedir(), '.codex', 'config.toml');
+  }
+
+  /** What the file holds right now, before any state judgement. */
+  public readCodexStatusLine(): { present: boolean; items: string[] | null; marked: boolean; conflict: boolean } {
+    const tomlPath = this.codexConfigTomlPath();
+    if (!fs.existsSync(tomlPath)) return { present: false, items: null, marked: false, conflict: false };
+    let content: string;
+    try { content = fs.readFileSync(tomlPath, 'utf8'); }
+    catch { return { present: false, items: null, marked: false, conflict: false }; }
+    const conflict = hasInlineTableConflict(content, 'tui', 'status_line');
+    const span = findKeyInTable(splitLines(content).lines, 'tui', 'status_line');
+    if (!span) return { present: conflict, items: null, marked: false, conflict };
+    return {
+      present: true,
+      items: parseStatusLineArray(span.valueText),
+      marked: span.line.includes(CODEX_MANAGED_MARK),
+      conflict,
+    };
+  }
+
+  // 'ours' when the line carries our marker OR its items equal what we would
+  // write (a user who stripped the comment keeps their "Installed" state).
+  public codexStatusLineState(expected: CodexStatusLineConfig): CodexStatusLineState {
+    const cur = this.readCodexStatusLine();
+    if (!cur.present) return 'none';
+    if (cur.marked) return 'ours';
+    if (cur.items && cur.items.length === expected.items.length && cur.items.every((v, i) => v === expected.items[i])) {
+      return 'ours';
+    }
+    return 'foreign';
+  }
+
+  private backupCodexConfig(tomlPath: string): string {
+    let n = 1;
+    let dest = path.join(path.dirname(tomlPath), `config.backup-${n}.toml`);
+    while (fs.existsSync(dest) && n < 1000) {
+      n += 1;
+      dest = path.join(path.dirname(tomlPath), `config.backup-${n}.toml`);
+    }
+    fs.copyFileSync(tomlPath, dest);
+    return dest;
+  }
+
+  public installCodexStatusLine(
+    cfg: CodexStatusLineConfig,
+    opts: { replace?: boolean } = {},
+  ): { success: boolean; state: CodexStatusLineState; path: string; backup?: string; reason?: 'needs-confirm' | 'inline-table' | 'empty' } {
+    const tomlPath = this.codexConfigTomlPath();
+    if (cfg.items.length === 0) {
+      return { success: false, state: this.codexStatusLineState(cfg), path: tomlPath, reason: 'empty' };
+    }
+    const state = this.codexStatusLineState(cfg);
+    const cur = this.readCodexStatusLine();
+    if (cur.conflict) return { success: false, state: 'foreign', path: tomlPath, reason: 'inline-table' };
+    if (state === 'foreign' && !opts.replace) {
+      return { success: false, state, path: tomlPath, reason: 'needs-confirm' };
+    }
+
+    const codexDir = path.dirname(tomlPath);
+    if (!fs.existsSync(codexDir)) fs.mkdirSync(codexDir, { recursive: true });
+    const content = fs.existsSync(tomlPath) ? fs.readFileSync(tomlPath, 'utf8') : '';
+
+    let backup: string | undefined;
+    if (state === 'foreign' && content) {
+      try { backup = this.backupCodexConfig(tomlPath); } catch { /* best effort */ }
+    }
+
+    const next = upsertKeyInTable(content, 'tui', 'status_line', formatStatusLineArray(cfg.items));
+    if (next !== content) fs.writeFileSync(tomlPath, next);
+    return { success: true, state: 'ours', path: tomlPath, backup };
+  }
+
+  // Remove only our key (and the [tui] header if we created it); every other
+  // line survives byte for byte.
+  public removeCodexStatusLine(): { success: boolean } {
+    const tomlPath = this.codexConfigTomlPath();
+    if (!fs.existsSync(tomlPath)) return { success: true };
+    const content = fs.readFileSync(tomlPath, 'utf8');
+    const next = removeKeyFromTable(content, 'tui', 'status_line');
+    if (next !== content) fs.writeFileSync(tomlPath, next);
     return { success: true };
   }
 

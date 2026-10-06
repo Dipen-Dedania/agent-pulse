@@ -4,6 +4,10 @@
 // reset. Runs inside the Electron main process, i.e. the user's logged-in
 // session, so Claude Code's own credentials resolve (this is *why* the
 // scheduler lives here rather than OS cron).
+//
+// The spawn/shim/timeout machinery (`spawnPing`, `lookupOnPath`) is shared with
+// the Codex opener (./codex-opener.ts); the Claude-specific bits stay here so
+// every existing import keeps working unchanged.
 
 import { execFile, execFileSync, ExecFileException } from 'child_process';
 import { existsSync } from 'fs';
@@ -40,6 +44,27 @@ function wellKnownDirs(): string[] {
 }
 
 /**
+ * `where`/`which` a command name against the augmented PATH (see
+ * resolveAugmentedPath). Returns every hit in PATH order, trimmed, so callers
+ * can apply their own preference (Windows shims vs POSIX scripts). Empty on a
+ * miss or when the lookup tool itself fails.
+ */
+export function lookupOnPath(name: string): string[] {
+  const lookup = process.platform === 'win32' ? 'where' : 'which';
+  const env = { ...process.env, PATH: resolveAugmentedPath() };
+  try {
+    return execFileSync(lookup, [name], { stdio: ['ignore', 'pipe', 'ignore'], env })
+      .toString()
+      .trim()
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Resolve the `claude` executable. First `which`/`where` against an augmented
  * PATH (see resolveAugmentedPath); if that misses, probe well-known absolute
  * install locations directly. On Windows, prefer the `.cmd`/`.exe` shim (what
@@ -48,27 +73,15 @@ function wellKnownDirs(): string[] {
  */
 export function resolveClaudeBin(): string | null {
   if (cachedBin) return cachedBin;
-  const lookup = process.platform === 'win32' ? 'where' : 'which';
-  const env = { ...process.env, PATH: resolveAugmentedPath() };
-  try {
-    const out = execFileSync(lookup, ['claude'], { stdio: ['ignore', 'pipe', 'ignore'], env })
-      .toString()
-      .trim()
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    if (out.length > 0) {
-      if (process.platform === 'win32') {
-        const runnable = out.find((p) => /\.(cmd|exe|bat)$/i.test(p));
-        cachedBin = runnable ?? out[0];
-      } else {
-        cachedBin = out[0];
-      }
-      return cachedBin;
+  const out = lookupOnPath('claude');
+  if (out.length > 0) {
+    if (process.platform === 'win32') {
+      const runnable = out.find((p) => /\.(cmd|exe|bat)$/i.test(p));
+      cachedBin = runnable ?? out[0];
+    } else {
+      cachedBin = out[0];
     }
-  } catch {
-    // fall through to absolute-path probing
+    return cachedBin;
   }
 
   // PATH lookup came up empty — probe known install locations directly.
@@ -122,47 +135,73 @@ export function buildCmdShimArgs(bin: string, args: string[]): string[] {
   return ['/d', '/s', '/c', `"${line}"`];
 }
 
+export interface PingSpec {
+  /** Absolute path (or shim) of the CLI to run. */
+  bin: string;
+  /** Fixed, injection-safe argv. */
+  args: string[];
+  timeoutMs: number;
+  cwd?: string;
+  /** Log prefix, e.g. '[scheduler/opener]'. */
+  logTag: string;
+  /** Called on ENOENT so the caller can drop its cached binary path. */
+  onEnoent?: () => void;
+}
+
+/**
+ * Spawn one ping and resolve with a structured result. Never throws. On
+ * Windows the command is routed through cmd.exe (see buildCmdShimArgs) so
+ * `.cmd` shims launch; args are fixed constants, so this is injection-safe.
+ */
+export function spawnPing(spec: PingSpec): Promise<OpenerResult> {
+  return new Promise((resolve) => {
+    const isWin = process.platform === 'win32';
+    const file = isWin ? (process.env.ComSpec || 'cmd.exe') : spec.bin;
+    const args = isWin ? buildCmdShimArgs(spec.bin, spec.args) : spec.args;
+
+    const child = execFile(
+      file,
+      args,
+      { timeout: spec.timeoutMs, windowsHide: true, windowsVerbatimArguments: isWin, cwd: spec.cwd },
+      (err: ExecFileException | null) => {
+        if (err) {
+          const reason = err.killed
+            ? `opener timed out after ${spec.timeoutMs / 1000}s`
+            : err.message;
+          // A non-zero exit may mean a real failure or a benign "rode a live
+          // window" — we can't tell from the exit code, so report the message.
+          if (err.code === 'ENOENT') spec.onEnoent?.();
+          logger.warn(`${spec.logTag} ping failed:`, reason);
+          resolve({ ok: false, reason });
+          return;
+        }
+        logger.info(`${spec.logTag} ping completed`);
+        resolve({ ok: true });
+      },
+    );
+    // execFile leaves stdin as an open pipe. `codex exec` treats a non-TTY
+    // stdin as extra prompt input and blocks until EOF ("Reading additional
+    // input from stdin…"), which turned every ping into a timeout. Closing it
+    // up front is a no-op for `claude -p`.
+    child.stdin?.end();
+  });
+}
+
 /**
  * Fire one opener ping. Never throws — every failure is returned as a
  * structured result so the engine/UI can surface it. Resolves once the child
  * process exits (or the timeout kills it).
  */
 export function fireOpener(): Promise<OpenerResult> {
-  return new Promise((resolve) => {
-    const bin = resolveClaudeBin();
-    if (!bin) {
-      resolve({ ok: false, reason: 'claude CLI not found on PATH' });
-      return;
-    }
-
-    // On Windows, npm shims are `.cmd` files that execFile can't launch
-    // directly — route through cmd.exe via buildCmdShimArgs (handles a spaced
-    // bin path like `C:\Program Files\...` safely). Args are fixed constants
-    // (no user input), so this is injection-safe.
-    const isWin = process.platform === 'win32';
-    const file = isWin ? (process.env.ComSpec || 'cmd.exe') : bin;
-    const claudeArgs = ['-p', PROMPT, '--model', 'haiku'];
-    const args = isWin ? buildCmdShimArgs(bin, claudeArgs) : claudeArgs;
-
-    execFile(
-      file,
-      args,
-      { timeout: OPENER_TIMEOUT_MS, windowsHide: true, windowsVerbatimArguments: isWin },
-      (err: ExecFileException | null) => {
-        if (err) {
-          const reason = err.killed
-            ? `opener timed out after ${OPENER_TIMEOUT_MS / 1000}s`
-            : err.message;
-          // A non-zero exit may mean a real failure or a benign "rode a live
-          // window" — we can't tell from the exit code, so report the message.
-          if (err.code === 'ENOENT') resetClaudeBinCache();
-          logger.warn('[scheduler/opener] ping failed:', reason);
-          resolve({ ok: false, reason });
-          return;
-        }
-        logger.info('[scheduler/opener] ping completed');
-        resolve({ ok: true });
-      },
-    );
+  const bin = resolveClaudeBin();
+  if (!bin) {
+    return Promise.resolve({ ok: false, reason: 'claude CLI not found on PATH' });
+  }
+  return spawnPing({
+    bin,
+    args: ['-p', PROMPT, '--model', 'haiku'],
+    timeoutMs: OPENER_TIMEOUT_MS,
+    logTag: '[scheduler/opener]',
+    onEnoent: resetClaudeBinCache,
   });
 }

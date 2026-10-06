@@ -212,13 +212,43 @@ export interface ToolStatus {
 // number-or-ISO-string format by parseUsageResponse).
 
 export interface UsageWindow {
-  utilization: number; // 0–100
-  resetsAt: number;    // ms epoch
+  utilization: number;    // 0–100
+  resetsAt: number;       // ms epoch
+  windowSeconds?: number; // rolling-window length (Codex reports it; Claude's windows are fixed 5h/7d)
+}
+
+// Claude "extra usage" — pay-as-you-go credits that cover you once a plan
+// window is exhausted. Parsed from `extra_usage` + `spend` on the OAuth usage
+// endpoint. Money is in whole currency units (dollars), never minor units.
+// On Team/Enterprise seats the org pays centrally, so monthlyLimit/balance
+// are typically null and canPurchaseCredits is false.
+export interface ClaudeExtraUsage {
+  enabled: boolean;            // extra_usage.is_enabled
+  usedCredits: number | null;  // spent this period
+  monthlyLimit: number | null; // cap for the period, if one is set
+  utilization: number | null;  // 0–100 of monthlyLimit, when the API reports it
+  balance: number | null;      // prepaid balance (spend.balance), if any
+  currency: string;            // ISO 4217, defaults to USD
+  spendLimitReached: boolean;
+  userDisabled: boolean;
+  canPurchaseCredits: boolean;
+}
+
+// A per-scope weekly limit from `limits[]` (kind=weekly_scoped) — e.g. the
+// Opus-only weekly cap that runs alongside the all-models 7-day window.
+// Display-only: never drives notifications or the bubble bars.
+export interface ClaudeScopedLimit {
+  label: string;          // scope.model.display_name (or "Opus"/"Sonnet" legacy keys)
+  utilization: number;    // 0–100
+  resetsAt: number;       // ms epoch
 }
 
 export interface UsageSnapshot {
   fiveHour: UsageWindow;
   sevenDay: UsageWindow;
+  extraUsage?: ClaudeExtraUsage;      // HTTP poll only — statusline pushes don't carry it
+  scopedLimits?: ClaudeScopedLimit[]; // HTTP poll only
+  planType?: string;                  // credentials `subscriptionType` ("team" | "max" | "pro" | …)
 }
 
 export type UsageState =
@@ -247,13 +277,37 @@ export interface UsageStatus {
 }
 
 // ─── Codex (ChatGPT) subscription usage ──────────────────────────────────────
-// Sourced from ChatGPT's undocumented /backend-api/wham/usage endpoint.
-// Codex exposes a `primary_window` (always present) plus an optional
-// `secondary_window`. The bubble renders one bar per window that exists.
+// Sourced from ChatGPT's undocumented /backend-api/wham/usage endpoint, and
+// pushed live from session rollouts (`rate_limits` on token_count rows).
+// Codex exposes a `primary_window` (always present — the 5-hour window on paid
+// plans) plus an optional `secondary_window` (weekly). The bubble renders one
+// bar per window that exists; labels derive from `windowSeconds`.
+
+export interface CodexCredits {
+  hasCredits: boolean;
+  unlimited: boolean;
+  balance: number | null;
+  overageLimitReached?: boolean; // HTTP only
+}
+
+export interface CodexModelAvailability {
+  model: string;             // key of model_usage, e.g. "gpt-6-astra"
+  available: boolean;
+  availableAt?: number;      // ms epoch, when !available and the API says when
+  creditsWouldEnable?: boolean;
+}
 
 export interface CodexUsageSnapshot {
   primary: UsageWindow;
   secondary?: UsageWindow;
+  review?: UsageWindow;             // code_review_rate_limit — HTTP only, display-only
+  planType?: string;                // "team" | "plus" | "pro" | …
+  limitReached?: boolean;           // limit_reached || spend control || reached-type set
+  limitReachedType?: string | null;
+  spendControlReached?: boolean;
+  credits?: CodexCredits;
+  models?: CodexModelAvailability[]; // HTTP only
+  source?: 'http' | 'rollout';
 }
 
 export interface CodexUsageNudgeFlags {
@@ -267,6 +321,46 @@ export interface CodexUsageStatus {
   lastUpdated?: number;
   message?: string;
   nudgeActive?: CodexUsageNudgeFlags;
+}
+
+// ─── Codex TUI status line ───────────────────────────────────────────────────
+// Codex renders its own footer from `[tui] status_line = [...]` in
+// ~/.codex/config.toml — an ordered list of built-in item ids (the serializer
+// table extracted from codex-cli 0.160; there is no custom-command item, and
+// no per-item icon or colour). No script, no bridge: this is a config editor
+// only. Codex reads the file at startup. Ids added after 0.139 are marked in
+// CODEX_ITEM_LABEL so users on an older CLI can avoid them.
+
+export const CODEX_STATUS_LINE_ITEMS = [
+  // identity
+  'model', 'model-with-reasoning', 'reasoning', 'app-name', 'codex-version',
+  // where
+  'current-dir', 'project-name', 'hostname', 'git-branch', 'branch-changes', 'pull-request-number',
+  // thread
+  'thread-title', 'thread-name', 'thread-id', 'workspace-headline',
+  // state
+  'activity', 'run-state', 'approval-mode', 'fast-mode', 'raw-output', 'task-progress',
+  // context
+  'context-remaining', 'context-used', 'context-window-size',
+  // limits
+  'five-hour-limit', 'weekly-limit', 'daily-limit', 'monthly-limit', 'annual-limit',
+  'usage-limit', 'secondary-usage-limit',
+  // spend
+  'used-tokens', 'total-input-tokens', 'total-output-tokens', 'thread-credits', 'estimated-thread-cost',
+] as const;
+export type CodexStatusLineItem = typeof CODEX_STATUS_LINE_ITEMS[number];
+
+export interface CodexStatusLineConfig {
+  items: CodexStatusLineItem[]; // ordered; empty = nothing to install
+}
+
+export type CodexStatusLineState = 'none' | 'ours' | 'foreign';
+
+export interface CodexStatusLineDetectInfo {
+  codexBin: string | null;         // resolved `codex` executable, for the runtime badge
+  state: CodexStatusLineState;
+  configPath: string;              // ~/.codex/config.toml
+  installedItems: string[] | null; // what the file holds now; null when none / unparseable
 }
 
 // ─── Cursor subscription usage ───────────────────────────────────────────────

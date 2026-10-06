@@ -19,7 +19,11 @@ export interface SchedulerConfigUI {
   maxOpenersPerDay: number;
 }
 
+export type SchedulerProvider = 'claude-code' | 'openai-codex';
+
 interface Props {
+  /** Which CLI the engine pings. Only copy and the cost estimate differ. */
+  provider?: SchedulerProvider;
   config: SchedulerConfigUI;
   status: SchedulerStatus;
   onChange: (partial: Partial<SchedulerConfigUI>) => void;
@@ -31,10 +35,51 @@ const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 // One-click preset (offered, never hard-coded into the engine): 6am / 11am / 4pm.
 const PRESET_TIMES = ['06:00', '11:00', '16:00'];
 
-// Rough API-equivalent of one opener ping (Haiku, trivial prompt + the small
-// fixed session overhead). Shown so the negligible cost is never hidden.
-const OPENER_TOKENS = { tokensIn: 2000, tokensOut: 50 };
-const OPENER_COST = estimateCost('claude-haiku-4-5', OPENER_TOKENS).costUsd;
+interface ProviderCopy {
+  title: string;
+  blurb: React.ReactNode;
+  agentName: string;       // "Claude" | "Codex" — used in adaptive-mode hint
+  nudgeBlurb: string;
+  // Rough API-equivalent of one opener ping, shown so the cost is never hidden.
+  costModel: string;
+  costTokens: { tokensIn: number; tokensOut: number; cacheRead?: number };
+  costRatesLabel: string;
+  costNote?: string;
+}
+
+const PROVIDER_COPY: Record<SchedulerProvider, ProviderCopy> = {
+  'claude-code': {
+    title: 'Cowork Scheduler',
+    blurb: (
+      <>
+        Open a fresh 5-hour window on your schedule with one tiny <code className='text-body'>claude -p</code> ping
+        (which also refreshes your login). Turns the rolling window into a daily cadence.
+      </>
+    ),
+    agentName: 'Claude',
+    nudgeBlurb: 'Keeps the usage panel from going stale (mainly in Off mode).',
+    // Haiku, trivial prompt + the small fixed session overhead — a rounding error.
+    costModel: 'claude-haiku-4-5',
+    costTokens: { tokensIn: 2000, tokensOut: 50 },
+    costRatesLabel: 'at Haiku API rates',
+  },
+  'openai-codex': {
+    title: 'Codex Cowork Scheduler',
+    blurb: (
+      <>
+        Open a fresh 5-hour window on your schedule with one tiny <code className='text-body'>codex exec</code> ping
+        (which also refreshes your Codex login). Turns the rolling window into a daily cadence.
+      </>
+    ),
+    agentName: 'Codex',
+    nudgeBlurb: 'Your Codex login expires about 10 days after its last refresh; any Codex command renews it. Off by default because each ping spends subscription tokens.',
+    // One verified ping on codex-cli 0.160: ~16k input (half cached), 5 output.
+    costModel: 'gpt-5-codex',
+    costTokens: { tokensIn: 8000, cacheRead: 8000, tokensOut: 5 },
+    costRatesLabel: 'at GPT-5 Codex API rates (approximate — your default model may differ)',
+    costNote: 'Each ping also spends ~16k tokens of your ChatGPT subscription window.',
+  },
+};
 
 function formatClock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -110,8 +155,10 @@ const SlotRow: React.FC<{
 
 // ── Section ──────────────────────────────────────────────────────────────────
 
-export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, onTestOpener }) => {
+export const SchedulerSection: React.FC<Props> = ({ provider = 'claude-code', config, status, onChange, onTestOpener }) => {
   const [testing, setTesting] = useState(false);
+  const copy = PROVIDER_COPY[provider];
+  const openerCost = estimateCost(copy.costModel, copy.costTokens).costUsd;
 
   const handleTest = async () => {
     setTesting(true);
@@ -153,11 +200,8 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
     <section className='mt-6 glass-primary p-6'>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
-          <h2 className='text-lg font-bold text-strong'>Cowork Scheduler</h2>
-          <p className='text-sm text-muted mt-1'>
-            Open a fresh 5-hour window on your schedule with one tiny <code className='text-body'>claude -p</code> ping
-            (which also refreshes your login). Turns the rolling window into a daily cadence.
-          </p>
+          <h2 className='text-lg font-bold text-strong'>{copy.title}</h2>
+          <p className='text-sm text-muted mt-1'>{copy.blurb}</p>
         </div>
       </div>
 
@@ -258,7 +302,7 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
             />
           </label>
           <p className='text-xs text-faint sm:col-span-3'>
-            Opens a window at each block's reset within work hours. Shifts forward if you message Claude off-script.
+            Opens a window at each block's reset within work hours. Shifts forward if you message {copy.agentName} off-script.
           </p>
         </div>
       )}
@@ -269,7 +313,7 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
           <p className='font-medium text-strong text-sm leading-tight'>Token-refresh nudge</p>
           <p className='text-xs text-muted mt-1'>
             Fire a refresh ping ~{Math.round(config.tokenNudge.leadMs / 60000)} min before your login expires, when no
-            opener is already coming. Keeps the usage panel from going stale (mainly in Off mode).
+            opener is already coming. {copy.nudgeBlurb}
           </p>
         </div>
         <Toggle
@@ -302,8 +346,9 @@ export const SchedulerSection: React.FC<Props> = ({ config, status, onChange, on
           {testing ? 'Sending…' : 'Send test ping now'}
         </Button>
         <p className='text-xs text-faint flex-1 min-w-[12rem]'>
-          Each ping ≈ {formatUsd(OPENER_COST)} at Haiku API rates ({formatUsd(OPENER_COST * config.maxOpenersPerDay)}/day
+          Each ping ≈ {formatUsd(openerCost)} {copy.costRatesLabel} ({formatUsd(openerCost * config.maxOpenersPerDay)}/day
           at the cap). A test ping counts toward today's cap.
+          {copy.costNote ? ` ${copy.costNote}` : ''}
         </p>
       </div>
     </section>

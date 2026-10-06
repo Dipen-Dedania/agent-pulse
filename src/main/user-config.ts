@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, MascotId, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold, AppearanceConfig, ThemeMode } from '../common/types';
+import { CodexStatusLineConfig, CodexStatusLineItem } from '../common/types';
+import { isCodexStatusLineItem } from '../common/codex-statusline';
 import { MASCOT_HOME, MASCOT_IDS } from '../common/mascotGeometry';
 import { TOOL_META } from '../common/toolMeta';
 import { GuardrailConfig } from '../common/guardrails';
@@ -33,11 +35,12 @@ export interface UsageConfig {
   nudge: UsageNotificationConfig;      // notify when remaining ≥ threshold + reset imminent
 }
 
-// Codex tracks a single weekly window (occasionally a secondary one). No
-// per-bar visibility toggle — we always render whatever the API returns.
+// Codex reports a primary window (5-hour on paid plans) and usually a
+// secondary (weekly) one. `showSecondaryBar` mirrors Claude's showSevenDayBar.
 export interface CodexUsageConfig {
   enabled: boolean;
   intervalMs: number;                  // hard floor 600_000 (10m) enforced by poller
+  showSecondaryBar: boolean;           // toggles the second (usually weekly) bar under the Codex bubble
   capWarning: UsageNotificationConfig;
   nudge: UsageNotificationConfig;
 }
@@ -150,6 +153,9 @@ export interface UserConfig {
   updates: UpdaterConfig;
   tour: TourConfig;
   scheduler: SchedulerConfig;
+  // Codex Cowork scheduler — same engine, anchored on Codex's primary (5-hour)
+  // window and firing a `codex exec` ping instead of `claude -p`.
+  codexScheduler: SchedulerConfig;
   // Backlog Scheduler — time RANGES during which queued backlog cards may
   // auto-execute (vs the Cowork scheduler's fire instants). See backlog.md.
   backlogScheduler: BacklogSchedulerConfig;
@@ -159,6 +165,9 @@ export interface UserConfig {
   // Quick-task templates for the backlog board's card creator.
   backlogTemplates: BacklogTemplate[];
   statusLine: StatusLineConfig;
+  // Codex's built-in footer items, written to `[tui] status_line` in
+  // ~/.codex/config.toml by the Codex status line editor.
+  codexStatusLine: CodexStatusLineConfig;
   appearance: AppearanceConfig;
 }
 
@@ -203,6 +212,7 @@ const DEFAULTS: UserConfig = {
   codexUsage: {
     enabled: true,
     intervalMs: 15 * 60 * 1000,
+    showSecondaryBar: true,
     capWarning: { enabled: true, threshold: 20 },
     nudge:      { enabled: false, threshold: 50 },
   },
@@ -266,6 +276,19 @@ const DEFAULTS: UserConfig = {
     tokenNudge: { enabled: true, leadMs: 2 * 60 * 1000 },
     maxOpenersPerDay: 6,
   },
+  codexScheduler: {
+    mode: 'off',
+    fixed: [],
+    adaptive: {
+      workHours: { start: '09:00', end: '18:00' },
+      maxWindowsPerDay: 3,
+    },
+    // Off by default, unlike Claude's: the nudge fires regardless of `mode`,
+    // and a Codex ping spends ~16k tokens of the user's ChatGPT subscription
+    // window (the Claude nudge is a trivial Haiku API call). Opt-in only.
+    tokenNudge: { enabled: false, leadMs: 2 * 60 * 1000 },
+    maxOpenersPerDay: 6,
+  },
   backlogScheduler: {
     enabled: false,
     slots: [],
@@ -313,6 +336,12 @@ const DEFAULTS: UserConfig = {
         'Review the features we have developed so far and smoke-test them by reading the code paths end to end. Find 5 likely bugs that need to be fixed and generate a report about them, with file references and suggested fixes.',
     },
   ],
+  // model+effort in one slot, the folder/branch pair that mirrors the Claude
+  // default, the actionable context figure, and the two limits this tab is
+  // about. Six items stay readable on an 80-column terminal.
+  codexStatusLine: {
+    items: ['model-with-reasoning', 'current-dir', 'git-branch', 'context-remaining', 'five-hour-limit', 'weekly-limit'],
+  },
   statusLine: {
     version: 1,
     separator: '  ·  ',
@@ -370,9 +399,9 @@ const LEGACY_BUBBLE_KEY_RENAMES: Record<string, ToolId> = {
 
 // Merge a persisted scheduler block over DEFAULTS, validating shapes so a
 // corrupt/partial file can't strand the engine. Slots are filtered to valid
-// rows; days are clamped to 0–6 integers.
-function migrateScheduler(raw: unknown): SchedulerConfig {
-  const d = DEFAULTS.scheduler;
+// rows; days are clamped to 0–6 integers. `d` selects which defaults fill the
+// gaps (Claude's `scheduler` block or the Codex one — identical today).
+export function migrateScheduler(raw: unknown, d: SchedulerConfig = DEFAULTS.scheduler): SchedulerConfig {
   if (!raw || typeof raw !== 'object') {
     return { ...d, fixed: [], adaptive: { ...d.adaptive, workHours: { ...d.adaptive.workHours } }, tokenNudge: { ...d.tokenNudge } };
   }
@@ -818,6 +847,24 @@ export function defaultStatusLineConfig(): StatusLineConfig {
   return migrateStatusLine(undefined);
 }
 
+// Validate a persisted Codex status-line block: known item ids only, deduped in
+// order; an empty or unusable list falls back to the shipped default so the
+// installer never writes `status_line = []`.
+export function migrateCodexStatusLine(raw: unknown): CodexStatusLineConfig {
+  const d = DEFAULTS.codexStatusLine;
+  const list = raw && typeof raw === 'object' && Array.isArray((raw as any).items) ? (raw as any).items : null;
+  if (!list) return { items: [...d.items] };
+  const seen = new Set<CodexStatusLineItem>();
+  for (const entry of list) {
+    if (isCodexStatusLineItem(entry)) seen.add(entry);
+  }
+  return { items: seen.size > 0 ? [...seen] : [...d.items] };
+}
+
+export function defaultCodexStatusLineConfig(): CodexStatusLineConfig {
+  return migrateCodexStatusLine(undefined);
+}
+
 function migrateEnabledBubbles(raw: unknown): Partial<Record<ToolId, boolean>> {
   if (!raw || typeof raw !== 'object') return {};
   const out: Partial<Record<ToolId, boolean>> = {};
@@ -897,10 +944,12 @@ export function loadConfig(): UserConfig {
         },
         tour: migrateTour(parsed.tour),
         scheduler: migrateScheduler(parsed.scheduler),
+        codexScheduler: migrateScheduler(parsed.codexScheduler, DEFAULTS.codexScheduler),
         backlogScheduler: migrateBacklogScheduler(parsed.backlogScheduler),
         backlogPopulation: migrateBacklogPopulation(parsed.backlogPopulation),
         backlogTemplates: migrateBacklogTemplates(parsed.backlogTemplates),
         statusLine: migrateStatusLine(parsed.statusLine),
+        codexStatusLine: migrateCodexStatusLine(parsed.codexStatusLine),
         appearance: migrateAppearance(parsed.appearance),
       };
     }
@@ -946,10 +995,12 @@ export function loadConfig(): UserConfig {
     updates: { ...DEFAULTS.updates },
     tour: migrateTour(undefined),
     scheduler: migrateScheduler(undefined),
+    codexScheduler: migrateScheduler(undefined, DEFAULTS.codexScheduler),
     backlogScheduler: migrateBacklogScheduler(undefined),
     backlogPopulation: migrateBacklogPopulation(undefined),
     backlogTemplates: migrateBacklogTemplates(undefined),
     statusLine: migrateStatusLine(undefined),
+    codexStatusLine: migrateCodexStatusLine(undefined),
     appearance: migrateAppearance(undefined),
   };
 }

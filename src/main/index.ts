@@ -39,7 +39,11 @@ import { CursorUsagePoller } from './cursor-usage/poller';
 import { CopilotUsagePoller } from './copilot-usage/poller';
 import { AntigravityUsagePoller } from './antigravity-usage/poller';
 import { LlmPricingPoller } from './llm-pricing/poller';
-import { Scheduler } from './scheduler/scheduler';
+import { Scheduler, ClaudeScheduler, claudeSchedulerDeps } from './scheduler/scheduler';
+import { CodexScheduler, codexSchedulerDeps } from './scheduler/codex-provider';
+import { resolveCodexBin } from './scheduler/codex-opener';
+import { defaultCodexStatusLineConfig, migrateCodexStatusLine } from './user-config';
+import { CodexStatusLineConfig, CodexStatusLineDetectInfo } from '../common/types';
 import { AttentionEngine } from './attention/engine';
 import { isAutoLaunchEnabled, setAutoLaunch } from './auto-launch';
 import { bootTimeline, TimelineHandle } from './timeline';
@@ -75,7 +79,8 @@ class AgentPulseApp {
   private copilotUsagePoller: CopilotUsagePoller;
   private antigravityUsagePoller: AntigravityUsagePoller;
   private llmPricingPoller: LlmPricingPoller;
-  private scheduler: Scheduler;
+  private scheduler: ClaudeScheduler;
+  private codexScheduler: CodexScheduler;
   private attentionEngine: AttentionEngine;
   private screenEdgeManager: ScreenEdgeManager;
   private backlogStore: BacklogStore | null = null;
@@ -184,11 +189,13 @@ class AgentPulseApp {
     this.llmPricingPoller = new LlmPricingPoller();
     // Scheduler consumes the usage poller (live 5-hour resetsAt), so construct
     // it after the poller exists.
-    this.scheduler = new Scheduler(this.userConfig.scheduler, {
-      usagePoller: this.usagePoller,
+    this.scheduler = new Scheduler(
+      this.userConfig.scheduler,
       // Backlog runs spend + anchor windows themselves; skip redundant openers.
-      shouldSkipOpener: () => this.backlogEngine?.isRunningCard() ?? false,
-    });
+      claudeSchedulerDeps(this.usagePoller, () => this.backlogEngine?.isRunningCard() ?? false),
+    );
+    // Same engine for Codex, anchored on its primary (5-hour) window.
+    this.codexScheduler = new Scheduler(this.userConfig.codexScheduler, codexSchedulerDeps(this.codexUsagePoller));
     // Attention escalation watches state transitions from the bridge's state
     // manager, so it can be built as soon as the state manager exists.
     this.attentionEngine = new AttentionEngine(this.userConfig.attention, { stateManager: this.stateManager });
@@ -293,6 +300,8 @@ class AgentPulseApp {
       // state on its first reschedule.
       this.scheduler.init();
       this.scheduler.start();
+      this.codexScheduler.init();
+      this.codexScheduler.start();
 
       // Attention escalation: arms timers off waiting-state transitions.
       this.attentionEngine.init();
@@ -431,6 +440,7 @@ class AgentPulseApp {
       this.antigravityUsagePoller.stop();
       this.llmPricingPoller.stop();
       this.scheduler.stop();
+      this.codexScheduler.stop();
       // Engine stop kills any running claude process tree and finalizes the
       // card as Paused before the DB closes.
       this.backlogEngine?.stop();
@@ -693,6 +703,17 @@ class AgentPulseApp {
       return updated;
     });
 
+    ipcMain.handle('codex-scheduler:update-config', (_event, partial: Partial<SchedulerConfig>) => {
+      this.userConfig.codexScheduler = { ...this.userConfig.codexScheduler, ...partial };
+      saveConfig(this.userConfig);
+      this.codexScheduler.applyConfig(this.userConfig.codexScheduler);
+      const updated = this.userConfig.codexScheduler;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('codex-scheduler:config-updated', updated);
+      }
+      return updated;
+    });
+
     ipcMain.handle('backlog:scheduler:update-config', (_event, partial: Partial<BacklogSchedulerConfig>) => {
       // Revalidate the merged result — renderer payloads get the same
       // guarantees as disk loads (parseable slot times, days clamped 0–6,
@@ -793,6 +814,48 @@ class AgentPulseApp {
     });
 
     ipcMain.handle('status-line:remove', () => this.writer.removeStatusLine());
+
+    // ── Codex status line ─────────────────────────────────────────────────
+    // Codex renders its own footer from `[tui] status_line` in config.toml, so
+    // this is a config editor: detect what's there, write our item list, and
+    // re-write it on every edit while the line is ours (Codex still needs a
+    // restart to pick it up — the UI says so).
+    ipcMain.handle('codex-status-line:detect', (): CodexStatusLineDetectInfo => {
+      const cur = this.writer.readCodexStatusLine();
+      return {
+        codexBin: resolveCodexBin(),
+        state: this.writer.codexStatusLineState(this.userConfig.codexStatusLine),
+        configPath: this.writer.codexConfigTomlPath(),
+        installedItems: cur.items,
+      };
+    });
+
+    ipcMain.handle('codex-status-line:get-config', () => this.userConfig.codexStatusLine);
+
+    ipcMain.handle('codex-status-line:update-config', (_event, partial: Partial<CodexStatusLineConfig>) => {
+      this.userConfig.codexStatusLine = migrateCodexStatusLine({ ...this.userConfig.codexStatusLine, ...partial });
+      saveConfig(this.userConfig);
+      this.refreshDeployedCodexStatusLine();
+      return this.broadcastCodexStatusLineConfig();
+    });
+
+    ipcMain.handle('codex-status-line:reset-config', () => {
+      this.userConfig.codexStatusLine = defaultCodexStatusLineConfig();
+      saveConfig(this.userConfig);
+      this.refreshDeployedCodexStatusLine();
+      return this.broadcastCodexStatusLineConfig();
+    });
+
+    ipcMain.handle('codex-status-line:install', (_event, args: { replace?: boolean } = {}) => {
+      try {
+        return this.writer.installCodexStatusLine(this.userConfig.codexStatusLine, { replace: args.replace });
+      } catch (e) {
+        logger.error('[codex-status-line] install failed', e);
+        return { success: false, reason: 'error' as const, message: String(e) };
+      }
+    });
+
+    ipcMain.handle('codex-status-line:remove', () => this.writer.removeCodexStatusLine());
 
     // ── Guardrails IPC ────────────────────────────────────────────────────
     // Returns built-in rule metadata so the UI can render the rule list
@@ -978,6 +1041,30 @@ class AgentPulseApp {
   // projected JSON and refresh the deployed renderer script to this app
   // version. The script refresh is what lets features added after first
   // install — e.g. icon prefixes — start rendering without a manual re-apply.
+  // Re-write our `[tui] status_line` line after an edit, but only while the
+  // installed line is ours — never touch a hand-written one on a config save.
+  // Detection happens BEFORE the edit is persisted by the callers, so compare
+  // against the file rather than the new config: a marked line is ours; an
+  // unmarked one is ours only if it still matches what we last wrote, which
+  // we can't know after the edit — so require the marker here.
+  private refreshDeployedCodexStatusLine() {
+    try {
+      const cur = this.writer.readCodexStatusLine();
+      if (!cur.present || !cur.marked) return;
+      this.writer.installCodexStatusLine(this.userConfig.codexStatusLine, { replace: true });
+    } catch (e) {
+      logger.error('[codex-status-line] failed to refresh config.toml', e);
+    }
+  }
+
+  private broadcastCodexStatusLineConfig(): CodexStatusLineConfig {
+    const updated = this.userConfig.codexStatusLine;
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('codex-status-line:config-updated', updated);
+    }
+    return updated;
+  }
+
   private refreshDeployedStatusLine() {
     if (this.writer.statusLineState() !== 'ours') return;
     try {

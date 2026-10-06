@@ -1,15 +1,26 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { ToolId } from '../../common/types';
+import { CodexUsageSnapshot, ToolId } from '../../common/types';
 import { logger } from '../../common/logger';
 import { EventsWriter, TokenDelta } from './events-writer';
 import { SessionsDeriver } from './sessions-deriver';
 import { detectLimitHits, LimitHitRecord } from './limit-detector';
+import { parseRolloutRateLimits } from '../codex-usage/parse';
 
 // Sink for usage-limit notices the reader spots while tailing a transcript.
 // bootTimeline wires this to db.insertLimitEvent; tests can pass a spy.
 export type LimitHitSink = (hits: LimitHitRecord[]) => void;
+
+// Sink for the `rate_limits` object Codex writes on every token_count row —
+// a live quota push. bootTimeline wires this to CodexUsagePoller.ingestExternal;
+// `sampledAt` is the row's own timestamp so a stale tail can be rejected.
+export type CodexRateLimitSink = (snapshot: CodexUsageSnapshot, sampledAt: number) => void;
+
+export interface CodexRateLimitSample {
+  snapshot: CodexUsageSnapshot;
+  sampledAt: number;
+}
 
 // Cumulative usage snapshot for a Codex rollout file. Codex reports a running
 // total in every token_count event, so we diff successive snapshots rather than
@@ -75,6 +86,7 @@ export class TranscriptReader {
     private sessionsDeriver: SessionsDeriver,
     private offsetStore?: TranscriptOffsetStore,
     private limitSink?: LimitHitSink,
+    private codexRateLimitSink?: CodexRateLimitSink,
   ) {
     // Restore persisted offsets so reads resume where they left off across
     // restarts instead of re-reading each file from byte 0 (which double-counts).
@@ -231,6 +243,15 @@ export class TranscriptReader {
       const result = aggregateCodexTokenCounts(parseableText, tracked?.codex);
       delta = result.delta;
       if (result.snapshot) nextEntry.codex = result.snapshot;
+      // Push the freshest rate-limit reading. Guarded so a sink failure can
+      // never block the offset from advancing (which would replay the tail).
+      if (result.rateLimits && this.codexRateLimitSink) {
+        try {
+          this.codexRateLimitSink(result.rateLimits.snapshot, result.rateLimits.sampledAt);
+        } catch (e: any) {
+          logger.warn('[Timeline/transcript] codex rate-limit sink threw:', e?.message ?? e);
+        }
+      }
     } else if (toolId === 'grok') {
       delta = aggregateGrokTurnCompleted(parseableText);
     } else {
@@ -331,13 +352,19 @@ export function aggregateAssistantTurns(text: string, sessionId: string): TokenD
  * Mapped to TokenDelta as: tokensIn = input − cached (fresh, uncached prompt),
  * cacheRead = cached, tokensOut = output (reasoning already included),
  * cacheWrite = 0 (Codex reports no separate cache-write). Exported for tests.
+ *
+ * The same token_count rows carry a `rate_limits` object (live quota). The
+ * last parseable one in the slice is returned as `rateLimits`, stamped with
+ * the row's own `timestamp` (falling back to now) — independent of whether
+ * the row also carried token info.
  */
 export function aggregateCodexTokenCounts(
   text: string,
   prev: CodexSnapshot | undefined,
-): { delta: TokenDelta | null; snapshot: CodexSnapshot | null } {
+): { delta: TokenDelta | null; snapshot: CodexSnapshot | null; rateLimits: CodexRateLimitSample | null } {
   let latest: { freshIn: number; cacheRead: number; out: number } | null = null;
   let model: string | undefined = prev?.model;
+  let rateLimits: CodexRateLimitSample | null = null;
 
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
@@ -356,6 +383,15 @@ export function aggregateCodexTokenCounts(
     if (row?.type !== 'event_msg') continue;
     const payload = row.payload;
     if (!payload || payload.type !== 'token_count') continue;
+
+    if (payload.rate_limits) {
+      const parsed = parseRolloutRateLimits(payload.rate_limits);
+      if (parsed) {
+        const stamped = typeof row.timestamp === 'string' ? Date.parse(row.timestamp) : NaN;
+        rateLimits = { snapshot: parsed, sampledAt: Number.isNaN(stamped) ? Date.now() : stamped };
+      }
+    }
+
     const total = payload.info?.total_token_usage;
     if (!total) continue;
 
@@ -369,8 +405,8 @@ export function aggregateCodexTokenCounts(
   if (!latest) {
     // No new token_count lines — nothing to attribute, but carry the model
     // forward if we learned a new one from turn_context.
-    if (model !== prev?.model && prev) return { delta: null, snapshot: { ...prev, model } };
-    return { delta: null, snapshot: null };
+    if (model !== prev?.model && prev) return { delta: null, snapshot: { ...prev, model }, rateLimits };
+    return { delta: null, snapshot: null, rateLimits };
   }
 
   const base = prev ?? { freshIn: 0, cacheRead: 0, out: 0 };
@@ -381,11 +417,12 @@ export function aggregateCodexTokenCounts(
   const snapshot: CodexSnapshot = { ...latest, model };
   if (tokensIn === 0 && cacheRead === 0 && tokensOut === 0) {
     // Cumulative unchanged (e.g. a re-read) — refresh the snapshot but emit no delta.
-    return { delta: null, snapshot };
+    return { delta: null, snapshot, rateLimits };
   }
   return {
     delta: { model, tokensIn, tokensOut, cacheRead, cacheWrite: 0 },
     snapshot,
+    rateLimits,
   };
 }
 

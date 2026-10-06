@@ -144,3 +144,38 @@ describe('UsagePoller.ingestExternal', () => {
     poller.stop();
   });
 });
+
+
+describe('UsagePoller.ingestExternal — carries HTTP-only blocks forward', () => {
+  beforeEach(() => {
+    sentToWindows.length = 0;
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('keeps extraUsage / scopedLimits / planType from the last poll on a windows-only push', () => {
+    const poller = new UsagePoller(config());
+    const extraUsage = {
+      enabled: true, usedCredits: 2.5, monthlyLimit: null, utilization: null, balance: null,
+      currency: 'USD', spendLimitReached: false, userDisabled: false, canPurchaseCredits: false,
+    };
+    // Seed as if an HTTP poll had landed (pushes are the only public entry, so
+    // seed via a push that already carries the enriched blocks).
+    poller.ingestExternal({ ...snapshot(10), extraUsage, planType: 'team',
+      scopedLimits: [{ label: 'Opus', utilization: 19, resetsAt: Date.now() + 86_400_000 }] });
+
+    vi.advanceTimersByTime(20_000);
+    poller.ingestExternal(snapshot(30));
+
+    const snap = poller.getStatus().snapshot!;
+    expect(snap.fiveHour.utilization).toBe(30);
+    expect(snap.extraUsage).toEqual(extraUsage);
+    expect(snap.planType).toBe('team');
+    expect(snap.scopedLimits?.[0].label).toBe('Opus');
+
+    poller.stop();
+  });
+});

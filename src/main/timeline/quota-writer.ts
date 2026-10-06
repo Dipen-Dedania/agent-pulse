@@ -46,12 +46,16 @@ export class QuotaWriter {
     });
   }
 
-  /** Persist Codex primary + (when present) secondary windows. */
+  /**
+   * Persist Codex primary + (when present) secondary and code-review windows.
+   * Keys stay 'primary'/'secondary' (not '5h'/'7d') so historical series are
+   * continuous; the Settings labels derive from windowSeconds instead.
+   */
   public onCodexUsage(status: CodexUsageStatus) {
     if (status.state !== 'ok' || !status.snapshot) return;
     const sampledAt = status.lastUpdated ?? Date.now();
     if (!this.shouldInsert('openai-codex', sampledAt)) return;
-    const { primary, secondary } = status.snapshot;
+    const { primary, secondary, review } = status.snapshot;
     this.db.insertQuotaSample({
       toolId: 'openai-codex',
       windowKey: 'primary',
@@ -65,6 +69,15 @@ export class QuotaWriter {
         windowKey: 'secondary',
         pctRemaining: Math.max(0, Math.min(100, 100 - secondary.utilization)),
         resetsAt: secondary.resetsAt,
+        sampledAt,
+      });
+    }
+    if (review) {
+      this.db.insertQuotaSample({
+        toolId: 'openai-codex',
+        windowKey: 'review',
+        pctRemaining: Math.max(0, Math.min(100, 100 - review.utilization)),
+        resetsAt: review.resetsAt,
         sampledAt,
       });
     }

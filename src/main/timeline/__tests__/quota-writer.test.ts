@@ -69,4 +69,23 @@ describe.skipIf(!dbAvailable)('QuotaWriter', () => {
     expect(countRows(db)).toBe(3);           // 2 claude + 1 codex primary
     db.close();
   });
+
+  it('writes a review row for Codex when the snapshot carries one', () => {
+    const db = freshDb();
+    const writer = new QuotaWriter(db);
+    writer.onCodexUsage({
+      state: 'ok',
+      lastUpdated: NOW,
+      snapshot: {
+        primary: { utilization: 40, resetsAt: NOW + 3_600_000, windowSeconds: 18000 },
+        secondary: { utilization: 10, resetsAt: NOW + 86_400_000, windowSeconds: 604800 },
+        review: { utilization: 70, resetsAt: NOW + 86_400_000 },
+      },
+    });
+    const keys = db
+      .query<{ window_key: string }>('SELECT window_key FROM quota_samples ORDER BY window_key')
+      .map((r) => r.window_key);
+    expect(keys).toEqual(['primary', 'review', 'secondary']);
+    db.close();
+  });
 });

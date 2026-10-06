@@ -24,6 +24,8 @@ export interface CredentialsResult {
   token: string;
   /** ms epoch when the access token expires, if the source exposed it. */
   expiresAt?: number;
+  /** Plan hint Claude Code stores next to the token ("team", "max", "pro", …). */
+  subscriptionType?: string;
 }
 
 export interface CredentialsError {
@@ -103,5 +105,9 @@ function extractToken(raw: string): CredentialsRead {
   // Claude Code stores expiry as `expiresAt` (ms epoch). Optional — absent on
   // some installs / older formats, so callers must treat it as best-effort.
   const expiresAt = typeof oauth?.expiresAt === 'number' ? oauth.expiresAt : undefined;
-  return { ok: true, token, expiresAt };
+  const subscriptionType =
+    typeof oauth?.subscriptionType === 'string' && oauth.subscriptionType.trim() !== ''
+      ? oauth.subscriptionType.trim()
+      : undefined;
+  return { ok: true, token, expiresAt, subscriptionType };
 }

@@ -20,7 +20,7 @@ import { logger } from '../../common/logger';
 import { UsageStatus, UsageSnapshot, UsageNudgeFlags } from '../../common/types';
 import { UsageConfig } from '../user-config';
 import { readAccessToken } from './credentials';
-import { parseUsageResponse } from './parse';
+import { mergeUsageSnapshot, parseUsageResponse } from './parse';
 
 const ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
 const BETA_HEADER = 'oauth-2025-04-20';
@@ -164,10 +164,13 @@ export class UsagePoller {
       return;
     }
     this.lastExternalAt = now;
-    const nudgeActive = this.evaluateAndNotify(snapshot);
+    // Pushes carry windows only; keep the HTTP-only credits / scoped limits /
+    // plan from the last poll so the panel doesn't flicker between pushes.
+    const merged = mergeUsageSnapshot(cur, snapshot);
+    const nudgeActive = this.evaluateAndNotify(merged);
     this.setStatus({
       state: 'ok',
-      snapshot,
+      snapshot: merged,
       lastUpdated: now,
       nudgeActive,
     });
@@ -272,6 +275,8 @@ export class UsagePoller {
         this.scheduleNext(UNAVAILABLE_BACKOFF_MS);
         return;
       }
+
+      if (creds.subscriptionType) snapshot.planType = creds.subscriptionType;
 
       this.currentDelayMs = Math.max(MIN_INTERVAL_MS, this.config.intervalMs);
       const nudgeActive = this.evaluateAndNotify(snapshot);

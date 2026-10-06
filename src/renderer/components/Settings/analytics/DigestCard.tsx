@@ -6,6 +6,11 @@ import { formatUsd } from '../../../../common/pricing';
 import { useDigest } from './useAnalytics';
 import { Card, EmptyState, InfoPill, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
 
+// quota_samples keys are storage identifiers; a few read badly as-is.
+const QUOTA_WINDOW_LABEL: Record<string, string> = {
+  review: 'code review',
+};
+
 const DayColumn: React.FC<{ label: string; digest: DailyDigest | undefined }> = ({ label, digest }) => {
   if (!digest) {
     return (
@@ -83,7 +88,7 @@ const DayColumn: React.FC<{ label: string; digest: DailyDigest | undefined }> = 
                 {digest.quota.map((q) => (
                   <div key={`${q.toolId}/${q.windowKey}`} className='flex items-center justify-between text-[11px]'>
                     <span className='text-muted'>
-                      {TOOL_META[q.toolId as ToolId]?.label ?? q.toolId} · {q.windowKey}
+                      {TOOL_META[q.toolId as ToolId]?.label ?? q.toolId} · {QUOTA_WINDOW_LABEL[q.windowKey] ?? q.windowKey}
                     </span>
                     <span className={`font-mono ${q.deltaPct != null && q.deltaPct > 0 ? 'text-warn' : 'text-faint'}`}>
                       {q.deltaPct != null ? `${q.deltaPct.toFixed(1)}%` : '—'}

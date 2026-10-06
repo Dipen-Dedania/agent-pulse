@@ -8,16 +8,34 @@ const codexMeta = (model?: string) =>
   JSON.stringify({ type: 'session_meta', payload: { id: 's1', model: model ?? null } });
 const codexCtx = (model: string) =>
   JSON.stringify({ type: 'turn_context', payload: { turn_id: 't', model } });
-const codexTokens = (total: {
-  input_tokens: number;
-  cached_input_tokens: number;
-  output_tokens: number;
-  reasoning_output_tokens?: number;
-}) =>
+const codexTokens = (
+  total: {
+    input_tokens: number;
+    cached_input_tokens: number;
+    output_tokens: number;
+    reasoning_output_tokens?: number;
+  } | null,
+  extra: { rate_limits?: object; timestamp?: string } = {},
+) =>
   JSON.stringify({
+    ...(extra.timestamp ? { timestamp: extra.timestamp } : {}),
     type: 'event_msg',
-    payload: { type: 'token_count', info: { total_token_usage: total } },
+    payload: {
+      type: 'token_count',
+      info: total ? { total_token_usage: total } : null,
+      ...(extra.rate_limits ? { rate_limits: extra.rate_limits } : {}),
+    },
   });
+
+// Verified rollout rate_limits shape (codex-cli 0.160.0).
+const codexRateLimits = (primaryUsed: number) => ({
+  limit_id: 'codex', limit_name: null,
+  primary: { used_percent: primaryUsed, window_minutes: 300, resets_at: 1791202340 },
+  secondary: { used_percent: 14.0, window_minutes: 10080, resets_at: 1791789140 },
+  credits: { has_credits: false, unlimited: false, balance: null },
+  individual_limit: null, spend_control_reached: null,
+  plan_type: 'team', rate_limit_reached_type: null,
+});
 
 describe('aggregateAssistantTurns', () => {
   it('returns null when no assistant turns are present', () => {
@@ -183,6 +201,32 @@ describe('aggregateCodexTokenCounts', () => {
     const { delta } = aggregateCodexTokenCounts(text, undefined);
     expect(delta).toEqual({ model: undefined, tokensIn: 5, tokensOut: 3, cacheRead: 2, cacheWrite: 0 });
   });
+
+  it('returns the LAST rate_limits in the slice, stamped with the row timestamp', () => {
+    const text = [
+      codexTokens({ input_tokens: 100, cached_input_tokens: 0, output_tokens: 10 },
+        { rate_limits: codexRateLimits(87), timestamp: '2026-10-05T14:14:10.000Z' }),
+      codexTokens({ input_tokens: 250, cached_input_tokens: 50, output_tokens: 40 },
+        { rate_limits: codexRateLimits(89), timestamp: '2026-10-05T14:14:40.000Z' }),
+    ].join('\n');
+    const { rateLimits } = aggregateCodexTokenCounts(text, undefined);
+    expect(rateLimits?.snapshot.primary).toEqual({ utilization: 89, resetsAt: 1791202340_000, windowSeconds: 18000 });
+    expect(rateLimits?.snapshot.planType).toBe('team');
+    expect(rateLimits?.sampledAt).toBe(Date.parse('2026-10-05T14:14:40.000Z'));
+  });
+
+  it('returns null rateLimits when no row carries them', () => {
+    const text = codexTokens({ input_tokens: 7, cached_input_tokens: 2, output_tokens: 3 });
+    expect(aggregateCodexTokenCounts(text, undefined).rateLimits).toBeNull();
+  });
+
+  it('still surfaces rate_limits from a token_count row that has no token info', () => {
+    const text = codexTokens(null, { rate_limits: codexRateLimits(50) });
+    const { delta, rateLimits } = aggregateCodexTokenCounts(text, undefined);
+    expect(delta).toBeNull();
+    expect(rateLimits?.snapshot.primary.utilization).toBe(50);
+    expect(typeof rateLimits?.sampledAt).toBe('number'); // falls back to now
+  });
 });
 
 // ── Grok updates.jsonl (per-turn usage; SUM turns, unlike Codex) ────────────────
@@ -281,6 +325,44 @@ describe('TranscriptReader offset persistence', () => {
       reader2.onTranscriptEvent(file, 's1', 'claude-code');
       expect(staged2).toHaveLength(1);
       expect(staged2[0]).toMatchObject({ tokensIn: 10, tokensOut: 5 });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('forwards Codex rate_limits to the sink once per new tail', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ap-codex-rl-'));
+    const file = path.join(dir, 'rollout-2026-10-05T14-14-05-s1.jsonl');
+    try {
+      fs.writeFileSync(file, [
+        codexMeta('gpt-6-astra'),
+        codexTokens({ input_tokens: 100, cached_input_tokens: 0, output_tokens: 10 },
+          { rate_limits: codexRateLimits(87), timestamp: '2026-10-05T14:14:10.000Z' }),
+        codexTokens({ input_tokens: 250, cached_input_tokens: 50, output_tokens: 40 },
+          { rate_limits: codexRateLimits(89), timestamp: '2026-10-05T14:14:40.000Z' }),
+      ].join('\n') + '\n');
+
+      const pushes: Array<{ util: number; at: number }> = [];
+      const eventsWriter: any = { stageTokenDelta: () => {} };
+      const reader = new TranscriptReader(
+        eventsWriter,
+        {} as any,
+        undefined,
+        undefined,
+        (snap, at) => pushes.push({ util: snap.primary.utilization, at }),
+      );
+
+      reader.onTranscriptEvent(file, 's1', 'openai-codex');
+      expect(pushes).toEqual([{ util: 89, at: Date.parse('2026-10-05T14:14:40.000Z') }]);
+
+      // No new bytes → no second push.
+      reader.onTranscriptEvent(file, 's1', 'openai-codex');
+      expect(pushes).toHaveLength(1);
+
+      // A new row → one more push with the newer reading.
+      fs.appendFileSync(file, codexTokens(null, { rate_limits: codexRateLimits(91), timestamp: '2026-10-05T14:15:00.000Z' }) + '\n');
+      reader.onTranscriptEvent(file, 's1', 'openai-codex');
+      expect(pushes[1]).toEqual({ util: 91, at: Date.parse('2026-10-05T14:15:00.000Z') });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

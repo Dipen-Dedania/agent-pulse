@@ -5,6 +5,7 @@ import { GuardrailEvent } from '../../../common/guardrails';
 import { SecretAccessEvent } from '../../../common/secretProtection';
 import { TOOL_META } from '../../../common/toolMeta';
 import { colorsFor } from '../../../common/stateColors';
+import { codexWindowShortLabel } from '../../../common/codexWindows';
 import { Meter } from '../Shared';
 import { ParticleOrb } from './ParticleOrb';
 import { WaveformTrace, WAVEFORM_BOX } from './WaveformTrace';
@@ -121,12 +122,17 @@ function claudeTooltipLines(status: UsageStatus, showSevenDay: boolean, schedule
   return lines;
 }
 
-function codexTooltipLines(status: CodexUsageStatus): string[] {
+function codexTooltipLines(status: CodexUsageStatus, showSecondary: boolean): string[] {
   if (status.state === 'ok' && status.snapshot) {
-    const { primary, secondary } = status.snapshot;
-    const lines = [`Weekly · ${100 - primary.utilization}% left · resets ${formatRelativeReset(primary.resetsAt)}`];
-    if (secondary) {
-      lines.push(`Secondary · ${100 - secondary.utilization}% left · resets ${formatRelativeReset(secondary.resetsAt)}`);
+    const { primary, secondary, review, limitReached } = status.snapshot;
+    const lines: string[] = [];
+    if (limitReached) lines.push(`Limit reached · resets ${formatRelativeReset(primary.resetsAt)}`);
+    lines.push(`${codexWindowShortLabel(primary.windowSeconds, 'primary')} · ${100 - primary.utilization}% left · resets ${formatRelativeReset(primary.resetsAt)}`);
+    if (secondary && showSecondary) {
+      lines.push(`${codexWindowShortLabel(secondary.windowSeconds, 'secondary')} · ${100 - secondary.utilization}% left · resets ${formatRelativeReset(secondary.resetsAt)}`);
+    }
+    if (review) {
+      lines.push(`Rev · ${100 - review.utilization}% left · resets ${formatRelativeReset(review.resetsAt)}`);
     }
     return lines;
   }
@@ -236,10 +242,11 @@ const UsageBars: React.FC<UsageBarsProps> = ({ status, isDark, showSevenDay, bar
 interface CodexUsageBarsProps {
   status: CodexUsageStatus;
   isDark: boolean;
+  showSecondary: boolean;
   bar: BarDims;
 }
 
-const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark, bar }) => {
+const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark, showSecondary, bar }) => {
   const isOk = status.state === 'ok' && !!status.snapshot;
   const primary = status.snapshot?.primary;
   const secondary = status.snapshot?.secondary;
@@ -267,7 +274,7 @@ const CodexUsageBars: React.FC<CodexUsageBarsProps> = ({ status, isDark, bar }) 
       style={{ gap: bar.gap }}
     >
       {renderBar(primary)}
-      {secondary && renderBar(secondary)}
+      {showSecondary && secondary && renderBar(secondary)}
     </div>
   );
 };
@@ -455,6 +462,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
   const [showSevenDay, setShowSevenDay] = useState(true);
   const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>({ state: 'unknown' });
+  const [showCodexSecondary, setShowCodexSecondary] = useState(true);
   const [cursorUsageStatus, setCursorUsageStatus] = useState<CursorUsageStatus>({ state: 'unknown' });
   const [copilotUsageStatus, setCopilotUsageStatus] = useState<CopilotUsageStatus>({ state: 'unknown' });
   const [antigravityUsageStatus, setAntigravityUsageStatus] = useState<AntigravityUsageStatus>({ state: 'unknown' });
@@ -560,12 +568,27 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
       .then((s: CodexUsageStatus) => setCodexUsageStatus(s))
       .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] codex-usage:get-current failed`, e));
 
+    // Pull initial config so the bar visibility matches saved prefs on bubble launch.
+    window.electron
+      .invoke('get-config')
+      .then((cfg: { codexUsage?: { showSecondaryBar?: boolean } } | null) => {
+        if (cfg?.codexUsage && typeof cfg.codexUsage.showSecondaryBar === 'boolean') {
+          setShowCodexSecondary(cfg.codexUsage.showSecondaryBar);
+        }
+      })
+      .catch((e: unknown) => logger.debug(`[Bubble:${toolId}] get-config failed`, e));
+
     const handler = (_event: unknown, incoming: CodexUsageStatus) => {
       setCodexUsageStatus(incoming);
     };
+    const configHandler = (_event: unknown, cfg: { showSecondaryBar?: boolean }) => {
+      if (typeof cfg?.showSecondaryBar === 'boolean') setShowCodexSecondary(cfg.showSecondaryBar);
+    };
     window.electron.on('codex-usage:updated', handler);
+    window.electron.on('codex-usage:config-updated', configHandler);
     return () => {
       window.electron.off('codex-usage:updated', handler);
+      window.electron.off('codex-usage:config-updated', configHandler);
     };
   }, [toolId]);
 
@@ -1016,7 +1039,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
     if (toolId === 'claude-code') {
       lines.push(...claudeTooltipLines(demo ? demoUsage : usageStatus, showSevenDay));
     } else if (toolId === 'openai-codex') {
-      lines.push(...codexTooltipLines(codexUsageStatus));
+      lines.push(...codexTooltipLines(codexUsageStatus, showCodexSecondary));
     } else if (toolId === 'cursor') {
       lines.push(...cursorTooltipLines(cursorUsageStatus));
     } else if (toolId === 'vscode-copilot') {
@@ -1027,7 +1050,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
     if (status?.currentTask) lines.unshift(status.currentTask);
 
     return { title: demo ? `${meta.label} · demo` : meta.label, subtitle: subtitle.join(' · '), lines, accent: glow };
-  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, cursorUsageStatus, copilotUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow, tooltipClock, demo, demoUsage]);
+  }, [toolId, state, status?.activeAgents, status?.lastUpdated, status?.currentTask, usageStatus, codexUsageStatus, showCodexSecondary, cursorUsageStatus, copilotUsageStatus, antigravityUsageStatus, schedulerStatus, showSevenDay, meta.label, glow, tooltipClock, demo, demoUsage]);
 
   // Push fresh content to the overlay while hovering (so usage updates show
   // live); the show/position/visibility is handled by the main process.
@@ -1481,7 +1504,12 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
           )}
 
           {toolId === 'openai-codex' && (
-            <CodexUsageBars status={codexUsageStatus} isDark={isDark} bar={dims.bar} />
+            <CodexUsageBars
+              status={codexUsageStatus}
+              isDark={isDark}
+              showSecondary={showCodexSecondary}
+              bar={dims.bar}
+            />
           )}
 
           {toolId === 'cursor' && (

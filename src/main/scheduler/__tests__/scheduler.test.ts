@@ -215,12 +215,14 @@ describe('provider deps', () => {
     expect(deps.anchorResetsAt({ state: 'unauthenticated' })).toBeNull();
   });
 
-  it('Codex: codex-scheduler prefix, anchored on the primary window, no backlog skip', () => {
+  it('Codex: codex-scheduler prefix, anchored on the primary window, backlog skip passed through', () => {
     const poller: any = { getStatus: () => ({ state: 'unknown' }), subscribe: () => () => {}, refreshNow: () => {} };
-    const deps = codexSchedulerDeps(poller);
+    expect(codexSchedulerDeps(poller).shouldSkipOpener).toBeUndefined();
+    const skip = () => true;
+    const deps = codexSchedulerDeps(poller, skip);
     expect(deps.ipcPrefix).toBe('codex-scheduler');
     expect(deps.logTag).toBe('[CodexScheduler]');
-    expect(deps.shouldSkipOpener).toBeUndefined();
+    expect(deps.shouldSkipOpener).toBe(skip);
     const ok: CodexUsageStatus = {
       state: 'ok',
       snapshot: { primary: { utilization: 1, resetsAt: 333 }, secondary: { utilization: 1, resetsAt: 444 } },

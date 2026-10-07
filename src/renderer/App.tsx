@@ -4,6 +4,7 @@ import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { TooltipOverlay, Tooltip } from './components/Shared';
 import { TourCard } from './components/Tour/TourCard';
 import { ScreenEdgeOverlay } from './components/ScreenEdge/ScreenEdgeOverlay';
+import { WindowChrome } from './components/Chrome/WindowChrome';
 import { ToolId, TourState } from '../common/types';
 import { motion, MotionConfig } from 'framer-motion';
 
@@ -202,11 +203,10 @@ const Landing: React.FC = () => {
   const secondaryClass =
     'px-6 py-3 rounded-full text-sm font-semibold text-body border border-edge hover:border-edge-strong hover:text-strong transition-all hover:scale-105 active:scale-95 cursor-pointer';
 
-  // The root carries the same liquid wallpaper as the Settings window: the glass
-  // feature cards below need a real gradient to blur and refract — over a flat
-  // fill the glass is invisible (see .settings-liquid-bg in index.css).
+  // The liquid wallpaper the glass feature cards blur against comes from the
+  // enclosing WindowChrome (see .settings-liquid-bg in index.css).
   return (
-    <div className='h-screen w-screen settings-liquid-bg text-body flex items-center justify-center font-sans overflow-hidden relative py-5'>
+    <div className='h-full w-full text-body flex items-center justify-center font-sans overflow-hidden relative py-5'>
       {/* Accent glows for "Enterprise" feel, now layered over the mesh. Toned
           down in light mode so they tint the pastel base instead of muddying it. */}
       <div className='absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 light:bg-blue-500/10 blur-[120px] rounded-full pointer-events-none' />
@@ -308,9 +308,18 @@ const App: React.FC = () => {
       <Landing />
     );
 
+  // Only the Settings window has a real frame, and it loads with no `view`
+  // (Landing) before navigating to `?view=settings` — both get the custom title
+  // bar. Tooltip / tour / screen-edge are transparent overlay windows.
+  const framed = view === 'settings' || view === null;
+
   // Every non-bubble view honors the OS "reduce motion" setting: transforms and
   // layout animations collapse to instant, cross-fades stay.
-  return <MotionConfig reducedMotion='user'>{content}</MotionConfig>;
+  return (
+    <MotionConfig reducedMotion='user'>
+      {framed ? <WindowChrome>{content}</WindowChrome> : content}
+    </MotionConfig>
+  );
 };
 
 export default App;

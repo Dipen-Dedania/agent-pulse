@@ -52,7 +52,10 @@ type DatabaseConstructor = new (path: string) => Database;
 //     a source link. For Linear, the chosen project's id + name scope scans to
 //     one project instead of the whole team; unused by GitLab. Dedup is
 //     unaffected (the fingerprint still keys on source_ref = team id).
-export const SCHEMA_VERSION = 10;
+// v11: cards.agent ('claude' | 'codex') — which CLI runs the card; plus
+//      attempts.input_tokens / output_tokens so a Codex run's estimated cost
+//      can be recomputed from tokens when rates change (codex-backlog-plan.md).
+export const SCHEMA_VERSION = 11;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -91,6 +94,7 @@ CREATE TABLE IF NOT EXISTS cards (
   blocked_reason      TEXT,
   model               TEXT,
   task_type           TEXT NOT NULL DEFAULT 'research',
+  agent               TEXT NOT NULL DEFAULT 'claude',
   worktree_path       TEXT,
   base_sha            TEXT,
   qa_command          TEXT,
@@ -125,6 +129,8 @@ CREATE TABLE IF NOT EXISTS attempts (
   cost_usd    REAL,
   num_turns   INTEGER,
   session_id  TEXT,
+  input_tokens  INTEGER,
+  output_tokens INTEGER,
   manual      INTEGER NOT NULL DEFAULT 0
 );
 
@@ -299,6 +305,12 @@ export function openBacklogDb(dbPath: string): Database | null {
         // so existing links keep whole-team scope until re-linked with a project.
         db.exec('ALTER TABLE projects ADD COLUMN source_scope_ref TEXT');
         db.exec('ALTER TABLE projects ADD COLUMN source_scope_name TEXT');
+      }
+      if (current < 11) {
+        // Every pre-existing card ran on Claude; the default keeps that true.
+        db.exec("ALTER TABLE cards ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude'");
+        db.exec('ALTER TABLE attempts ADD COLUMN input_tokens INTEGER');
+        db.exec('ALTER TABLE attempts ADD COLUMN output_tokens INTEGER');
       }
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }

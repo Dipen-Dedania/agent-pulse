@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 940" role="img" aria-label="Agent Pulse">
+  <!--
+    Agent Pulse logo — vector rebuild of logo-transparent.png.
+    Static and self-contained (safe as an <img> src / favicon).
+    Parts keep class names so the file can be inlined and animated;
+    see logo-animation-demo.html at the repo root for the animation set.
+  -->
+  <defs>
+    <linearGradient id="lg-body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b58d8"/>
+      <stop offset="1" stop-color="#0f2777"/>
+    </linearGradient>
+    <linearGradient id="lg-visor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c1b52"/>
+      <stop offset="1" stop-color="#0a1744"/>
+    </linearGradient>
+    <!-- bar stroke: lime (left cap) → bright green (spike) → mint (right cap) -->
+    <linearGradient id="lg-bar" gradientUnits="userSpaceOnUse" x1="120" y1="0" x2="835" y2="0">
+      <stop offset="0"   stop-color="#7cfd2f"/>
+      <stop offset=".40" stop-color="#83f838"/>
+      <stop offset=".60" stop-color="#53dc6e"/>
+      <stop offset="1"   stop-color="#48d082"/>
+    </linearGradient>
+    <linearGradient id="lg-fill" gradientUnits="userSpaceOnUse" x1="125" y1="0" x2="400" y2="0">
+      <stop offset="0" stop-color="#1cc158"/>
+      <stop offset="1" stop-color="#1c9c6a"/>
+    </linearGradient>
+    <filter id="lg-glow-s" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="9"/></filter>
+    <filter id="lg-glow-m" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="20"/></filter>
+    <clipPath id="lg-visor-clip"><rect x="245" y="300" width="450" height="260" rx="105"/></clipPath>
+    <clipPath id="lg-house-clip">
+      <rect x="70" y="612" width="800" height="190" rx="95"/>
+      <path d="M330 780 A180 180 0 0 0 610 780 Z"/>
+    </clipPath>
+  </defs>
+
+  <g class="lg-head">
+    <!-- antenna -->
+    <g class="lg-antenna">
+      <rect x="455" y="100" width="30" height="85" rx="8" fill="#1c3f9c" stroke="#0b163f" stroke-width="10"/>
+      <circle cx="470" cy="85" r="46" fill="#1c3f9c" stroke="#0b163f" stroke-width="10"/>
+      <circle class="lg-led-glow" cx="470" cy="85" r="24" fill="#2ee6f0" opacity=".7" filter="url(#lg-glow-s)"/>
+      <circle class="lg-led" cx="470" cy="85" r="20" fill="#2ee6f0"/>
+    </g>
+
+    <!-- ear caps -->
+    <rect x="98"  y="388" width="80" height="154" rx="34" fill="#1c3f9c" stroke="#0b163f" stroke-width="10"/>
+    <rect x="118" y="414" width="40" height="102" rx="18" fill="#1fb6d8" opacity=".9"/>
+    <rect x="762" y="388" width="80" height="154" rx="34" fill="#1c3f9c" stroke="#0b163f" stroke-width="10"/>
+    <rect x="782" y="414" width="40" height="102" rx="18" fill="#1fb6d8" opacity=".9"/>
+
+    <!-- dome -->
+    <path d="M180 614 V460 A290 290 0 0 1 760 460 V614 Z" fill="url(#lg-body)" stroke="#0b163f" stroke-width="12" stroke-linejoin="round"/>
+    <path d="M210 614 V465 A260 260 0 0 1 730 465 V614" fill="none" stroke="#22c5e8" stroke-width="9" opacity=".75"/>
+    <path d="M565 214 V300" fill="none" stroke="#22c5e8" stroke-width="9" opacity=".75"/>
+
+    <!-- visor + eyes -->
+    <rect x="245" y="300" width="450" height="260" rx="105" fill="url(#lg-visor)" stroke="#22c5e8" stroke-width="12"/>
+    <g clip-path="url(#lg-visor-clip)">
+      <g class="lg-pupils">
+        <g class="lg-eye lg-eye-l">
+          <circle class="lg-eye-glow" cx="365" cy="440" r="36" fill="#2ee6f0" opacity=".75" filter="url(#lg-glow-s)"/>
+          <circle class="lg-eye-dot"  cx="365" cy="440" r="30" fill="#2ee6f0"/>
+        </g>
+        <g class="lg-eye lg-eye-r">
+          <circle class="lg-eye-glow" cx="575" cy="440" r="36" fill="#2ee6f0" opacity=".75" filter="url(#lg-glow-s)"/>
+          <circle class="lg-eye-dot"  cx="575" cy="440" r="30" fill="#2ee6f0"/>
+        </g>
+      </g>
+    </g>
+  </g>
+
+  <!-- chin (behind the housing) -->
+  <path d="M330 780 A180 180 0 0 0 610 780 Z" fill="#0a2a55" stroke="#07183d" stroke-width="10"/>
+
+  <!-- bar housing + contained glow -->
+  <rect x="70" y="612" width="800" height="190" rx="95" fill="#06224a" stroke="#07183d" stroke-width="10"/>
+  <g class="lg-bar-glow" clip-path="url(#lg-house-clip)" opacity=".75">
+    <path d="M360 662 H165 A43 43 0 0 0 165 748 H400 L442 642 L485 812 L530 692 L548 748 H790 A43 43 0 0 0 790 662 H572"
+          fill="none" stroke="#22c55e" stroke-width="90" stroke-linecap="round" stroke-linejoin="round" opacity=".45" filter="url(#lg-glow-m)"/>
+    <path d="M360 662 H165 A43 43 0 0 0 165 748 H400 L442 642 L485 812 L530 692 L548 748 H790 A43 43 0 0 0 790 662 H572"
+          fill="none" stroke="#22c55e" stroke-width="44" stroke-linecap="round" stroke-linejoin="round" opacity=".55" filter="url(#lg-glow-s)"/>
+  </g>
+
+  <!-- capsule interiors -->
+  <path class="lg-fill-l" d="M372 662 H165 A43 43 0 0 0 165 748 H396 Z" fill="url(#lg-fill)"/>
+  <path class="lg-fill-r" d="M572 662 H790 A43 43 0 0 1 790 748 H556 Z" fill="#1c9c6a"/>
+
+  <!-- outline: the ECG line is part of the capsule stroke. The outline hides
+       the run under the spike with a dash gap so the spike can animate alone. -->
+  <g class="lg-trace-g">
+    <path class="lg-outline" pathLength="1000" stroke-dasharray="432 113 455"
+          d="M360 662 H165 A43 43 0 0 0 165 748 H400 H548 H790 A43 43 0 0 0 790 662 H572"
+          fill="none" stroke="url(#lg-bar)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+    <path class="lg-spike" d="M400 748 L442 642 L485 812 L530 692 L548 748"
+          fill="none" stroke="url(#lg-bar)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

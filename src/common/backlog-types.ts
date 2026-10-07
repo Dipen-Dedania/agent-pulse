@@ -41,6 +41,22 @@ export type QaProvider = 'browser' | 'tests' | 'lint' | 'typecheck' | 'custom' |
 // live UI, and delivers a report + evidence screenshots. Changes nothing.
 export type BacklogTaskType = 'research' | 'execution' | 'qa';
 
+// Which CLI runs a card headlessly. 'claude' = `claude -p` (the original path);
+// 'codex' = `codex exec` (see codex-backlog-plan.md). Per card, default Claude.
+// Scouts and plan-mode refinement stay on Claude regardless of this value.
+export type BacklogAgent = 'claude' | 'codex';
+export const BACKLOG_AGENTS: BacklogAgent[] = ['claude', 'codex'];
+
+/** Untrusted value → agent; anything unknown is the default (Claude). */
+export function normalizeAgent(value: unknown): BacklogAgent {
+  return value === 'codex' ? 'codex' : 'claude';
+}
+
+/** Short display label for an agent (board badges, settings copy). */
+export function agentLabel(agent: BacklogAgent): string {
+  return agent === 'codex' ? 'Codex' : 'Claude Code';
+}
+
 // Issue population (Phase 3). Which open issues a scan pulls for a linked
 // project. Shared by every provider (GitLab, Linear). See
 // backlog-phase3-gitlab-population-plan.md.
@@ -123,8 +139,9 @@ export interface BacklogCard {
   projectId: string;
   state: BacklogCardState;
   taskType: BacklogTaskType;       // research = read-only report; execution = code edits in a worktree
+  agent: BacklogAgent;             // which CLI executes the card (default 'claude')
   riskTier: RiskTier;
-  model: string | null;            // claude model id/alias for runs; null = project default
+  model: string | null;            // model id/alias for the card's agent; null = that agent's default
   estimatedMinutes: number | null; // drives size-fit + hard time budget
   estimatedCostUsd: number | null; // drives the forecast glance
   prereqIds: string[];             // card ids that must be done first
@@ -156,11 +173,11 @@ export interface BacklogCard {
   updatedAt: number;
 }
 
-// A card's model travels as a `--model` argv entry, which on Windows goes
-// through `cmd.exe /c` where no quoting-safe escape exists — so anything
-// beyond a strict id/alias charset is rejected (store nulls it, runner skips
-// it). Covers aliases ('sonnet'), full ids ('claude-sonnet-4-6'), and
-// bracket-suffixed ids ('claude-fable-5[1m]').
+// A card's model travels as a `--model` / `-m` argv entry, which on Windows
+// may go through `cmd.exe /c` where no quoting-safe escape exists — so
+// anything beyond a strict id/alias charset is rejected (store nulls it,
+// runner skips it). Covers aliases ('sonnet'), full ids ('claude-sonnet-4-6',
+// 'gpt-5-codex'), and bracket-suffixed ids ('claude-fable-5[1m]').
 const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 const MODEL_ID_MAX_LENGTH = 100;
 
@@ -221,9 +238,11 @@ export interface BacklogAttempt {
   endedAt: number | null;
   outcome: BacklogAttemptOutcome | null; // null while running
   reason: string | null;                 // failure/kill detail
-  costUsd: number | null;                // total_cost_usd from claude -p JSON
+  costUsd: number | null;                // Claude: total_cost_usd from the CLI; Codex: ESTIMATED from tokens via pricing
   numTurns: number | null;
-  sessionId: string | null;              // claude session id (future --resume)
+  sessionId: string | null;              // Claude session id / Codex thread id (used for resume)
+  inputTokens: number | null;            // Codex only (Claude's JSON reports cost, not tokens)
+  outputTokens: number | null;
   manual: boolean;                       // true for "Run now"
 }
 
@@ -304,8 +323,9 @@ export interface BacklogSchedulerConfig {
   enabled: boolean;
   slots: BacklogSlot[];
   requireIdle: boolean;    // only claim when no input for K min, even inside a slot
-  // Proactive usage gate: don't claim a new card once the Claude 5-hour window
-  // is at/above this % — a run that would just die mid-task. 100 = never gate
+  // Proactive usage gate: don't claim a card once its agent's current usage
+  // window (Claude 5-hour / Codex primary) is at/above this % — a run that
+  // would just die mid-task. One threshold for both agents. 100 = never gate
   // proactively (only the reactive latch stops runs when the window is truly
   // spent). Clamped to 50–100 by migration.
   usageGatePercent: number;
@@ -367,9 +387,11 @@ export interface BacklogSchedulerStatus {
   runningAttemptStartedAt: number | null;
   waitingForIdle: boolean;          // inside a window, gated on requireIdle
   queueReady: number;               // green todo/paused/rework cards, prereqs met
-  // Usage latch: auto-claims suspended until this time because the Claude
-  // 5-hour window is exhausted. Manual Run-now still works.
-  usagePausedUntil: number | null;
+  // Usage latch, per agent: auto-claims for that agent's cards are suspended
+  // until this time because its usage window is exhausted. Null = not latched.
+  // Manual Run-now still works. Latches are independent — an exhausted Codex
+  // window never blocks Claude cards, and vice versa.
+  usagePausedUntil: Record<BacklogAgent, number | null>;
   lastRun: {
     at: number;
     cardId: string;

@@ -12,6 +12,7 @@ import {
   ApplyMethod,
   ATTACHMENT_MAX_FILE_BYTES,
   AttachmentIntent,
+  BacklogAgent,
   BacklogCardState,
   BacklogState,
   BacklogStatsRange,
@@ -19,13 +20,16 @@ import {
   IssueFilter,
   IssuePopulationState,
   PendingAttachment,
+  normalizeAgent,
 } from '../../common/backlog-types';
 import { BacklogStore, CreateCardInput, UpdateCardPatch } from './store';
 import { BacklogEngine } from './engine';
 import { PopulationScheduler } from './population-scheduler';
 import { resolveProjectDefaultModel, ProjectDefaultModel } from './claude-settings';
+import { resolveCodexDefaultModel } from './codex-settings';
 import { ApplyResult, applyWorktree, applyWorktreeStashed, removeWorktree } from './worktree';
 import { isSafeSessionId } from './runner';
+import { adapterFor, agentAvailability } from './agents';
 import { resolveClaudeBin, resetClaudeBinCache } from '../scheduler/opener';
 import { launchResumeTerminal } from './resume-terminal';
 import { launchPlanTerminal } from './refine-terminal';
@@ -252,14 +256,20 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     return population.dismissCandidates(fps);
   });
 
-  // What "Project default" resolves to for the card editor's model picker.
-  // Looked up by project id (not a renderer-supplied path) so only registered
-  // folders are ever read.
-  ipcMain.handle('backlog:project-default-model', (_e, args: { projectId: string }): ProjectDefaultModel => {
+  // What "Project default" resolves to for the card editor's model picker, per
+  // agent: Claude reads the project's .claude settings chain; Codex has only
+  // the user-level config.toml. Looked up by project id (not a renderer-
+  // supplied path) so only registered folders are ever read.
+  ipcMain.handle('backlog:project-default-model', (_e, args: { projectId: string; agent?: BacklogAgent }): ProjectDefaultModel => {
+    if (normalizeAgent(args?.agent) === 'codex') return resolveCodexDefaultModel();
     const project = store?.listProjects().find((p) => p.id === args?.projectId);
     if (!project) return { model: null, source: null };
     return resolveProjectDefaultModel(project.path);
   });
+
+  // Which agent CLIs are installed — the editor disables an absent agent and
+  // the setup checklist shows a row per agent.
+  ipcMain.handle('backlog:agent-availability', (): Record<BacklogAgent, boolean> => agentAvailability());
 
   ipcMain.handle('backlog:create-card', (_e, input: CreateCardInput) => {
     if (!store) return null;
@@ -420,10 +430,11 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     return { ok: true };
   });
 
-  // "Resume in Claude Code": open an interactive terminal on the worktree that
-  // picks up the latest attempt's session by hand. The session id lives on the
-  // attempt (never the renderer) and the cwd is the DB-stored worktree path, so
-  // resume resolves against the same directory the headless run created it in.
+  // "Resume in terminal": open an interactive terminal on the worktree that
+  // picks up the latest attempt's session by hand, with the card's agent
+  // (`claude --resume` / `codex resume`). The session id lives on the attempt
+  // (never the renderer) and the cwd is the DB-stored worktree path, so resume
+  // resolves against the same directory the headless run created it in.
   ipcMain.handle('backlog:resume-session', (_e, args: { cardId: string }) => {
     if (!store) return { ok: false, reason: 'backlog storage unavailable' };
     const card = store.getCard(args?.cardId);
@@ -433,12 +444,13 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     const sessionId = store.listAttempts(card.id).find((a) => a.sessionId)?.sessionId ?? null;
     if (!sessionId) return { ok: false, reason: 'no resumable session recorded for this card' };
     if (!isSafeSessionId(sessionId)) return { ok: false, reason: 'recorded session id is malformed' };
-    const bin = resolveClaudeBin();
+    const adapter = adapterFor(card.agent);
+    const bin = adapter.resolveBin();
     if (!bin) {
-      resetClaudeBinCache();
-      return { ok: false, reason: 'claude CLI not found on PATH' };
+      adapter.resetBinCache();
+      return { ok: false, reason: `${adapter.id} CLI not found on PATH` };
     }
-    return launchResumeTerminal(bin, card.worktreePath, sessionId);
+    return launchResumeTerminal(bin, card.worktreePath, sessionId, card.agent);
   });
 
   // "Refine Now": open an interactive plan-mode session for a refinement card
@@ -453,10 +465,17 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     if (card.state !== 'refinement') return { ok: false, reason: 'only refinement cards can be planned — move it back to Refinement first' };
     const project = store.listProjects().find((p) => p.id === card.projectId);
     if (!project) return { ok: false, reason: 'project not found for this card' };
+    // Refinement is always Claude Code plan mode, whichever agent will RUN the
+    // card: Codex has no caller-chosen session id and no plan mode to attach from.
     const bin = resolveClaudeBin();
     if (!bin) {
       resetClaudeBinCache();
-      return { ok: false, reason: 'claude CLI not found on PATH' };
+      return {
+        ok: false,
+        reason: card.agent === 'codex'
+          ? 'Refine needs Claude Code installed (planning always uses Claude Code; the run itself will use Codex)'
+          : 'claude CLI not found on PATH',
+      };
     }
     const sessionId = randomUUID();
     store.setRefinementSession(card.id, sessionId);

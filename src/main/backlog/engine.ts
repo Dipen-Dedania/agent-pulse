@@ -10,19 +10,24 @@ import path from 'path';
 import { BrowserWindow, powerMonitor } from 'electron';
 import { logger } from '../../common/logger';
 import {
+  BACKLOG_AGENTS,
+  BacklogAgent,
   BacklogArtifactKind,
   BacklogAttemptOutcome,
   BacklogCard,
   BacklogSchedulerConfig,
   BacklogSchedulerStatus,
+  agentLabel,
   countUnmetPrereqs,
 } from '../../common/backlog-types';
 import { BacklogStore } from './store';
 import { activeWindow, nextWindowStart, pickNextCard, cardBudgetMs, forecastNextWindow, isPickableState } from './timing';
 import { buildExecutionPrompt, buildQaPrompt, buildResearchPrompt } from './prompt';
 import { executeCard, RunnerHandle, RunnerResult } from './runner';
-import { captureDiff, createWorktree, reconcileWorktrees } from './worktree';
+import { adapterFor } from './agents';
+import { captureDiff, createWorktree, reconcileWorktrees, unwindCommits } from './worktree';
 import { runQa } from './qa';
+import { ensureCodexQaProfile } from './codex-qa-profile';
 import { sendWebhook } from '../notifications/webhook';
 
 // Grace period a still-running card gets after its window closes.
@@ -63,20 +68,36 @@ function firstReportLine(report: string | undefined): string | null {
   return null;
 }
 
+export interface UsageWindowSnapshot {
+  utilization: number;
+  resetsAt: number;
+}
+
 export interface BacklogEngineDeps {
   store: BacklogStore;
-  usagePoller: { refreshNow: () => void };
+  /** Ask the agent's usage poller to re-poll (a run just spent window credit). */
+  refreshUsage: (agent: BacklogAgent) => void;
   artifactsDir: string;  // userData/backlog-artifacts
   worktreesDir: string;  // userData/backlog-worktrees
-  /** Claude 5-hour window snapshot for the usage latch; null = unknown. */
-  getUsage?: () => { utilization: number; resetsAt: number } | null;
+  /**
+   * The agent's CURRENT usage window (Claude 5-hour / Codex primary) for the
+   * proactive gate and the latch; null = unknown (no gating).
+   */
+  getUsage?: (agent: BacklogAgent) => UsageWindowSnapshot | null;
   /** Injectable for tests; defaults to Electron's powerMonitor. */
   getIdleSeconds?: () => number;
+  /**
+   * A card just reached `done` under the engine. Observational only (the
+   * GitHub star nudge's "first backlog card" milestone listens here); must
+   * never throw into the run path.
+   */
+  onCardDone?: (card: BacklogCard) => void;
 }
 
 interface RunningCard {
   cardId: string;
   cardTitle: string;
+  agent: BacklogAgent;
   attemptId: string;
   startedAt: number;
   handle: RunnerHandle;
@@ -85,16 +106,18 @@ interface RunningCard {
 export class BacklogEngine {
   private config: BacklogSchedulerConfig;
   private readonly store: BacklogStore;
-  private readonly usagePoller: { refreshNow: () => void };
+  private readonly refreshUsage: (agent: BacklogAgent) => void;
   private readonly artifactsDir: string;
   private readonly worktreesDir: string;
-  private readonly getUsage: () => { utilization: number; resetsAt: number } | null;
+  private readonly getUsage: (agent: BacklogAgent) => UsageWindowSnapshot | null;
   private readonly getIdleSeconds: () => number;
+  private readonly onCardDone: ((card: BacklogCard) => void) | null;
 
   private edgeTimer: NodeJS.Timeout | null = null;   // next window start/end
   private graceTimer: NodeJS.Timeout | null = null;  // window-end grace kill
   private idleTimer: NodeJS.Timeout | null = null;   // requireIdle recheck
-  private usageTimer: NodeJS.Timeout | null = null;  // usage-latch expiry recheck
+  // Usage-latch expiry rechecks, one per latched agent.
+  private usageTimers = new Map<BacklogAgent, NodeJS.Timeout>();
   private running: RunningCard | null = null;
   // Guards the async gap in runCard (worktree creation) — `running` is only
   // set after the spawn, so without this two claims could interleave.
@@ -104,20 +127,23 @@ export class BacklogEngine {
   // next tryClaimNext. Cleared at window end; manual Run-now ignores it.
   private stoppedThisWindow = new Set<string>();
   private waitingForIdle = false;
-  // Usage latch: a run died on (or the snapshot shows) an exhausted 5-hour
-  // usage window — no auto-claims until this timestamp. Manual Run-now bypasses.
-  private usageExhaustedUntil: number | null = null;
+  // Usage latches, per agent: a run died on (or the snapshot shows) that
+  // agent's exhausted usage window — none of ITS cards auto-claim until the
+  // timestamp. Independent per agent, so an exhausted Codex window never
+  // blocks Claude cards (or vice versa). Manual Run-now bypasses.
+  private usageExhaustedUntil = new Map<BacklogAgent, number>();
   private lastRun: BacklogSchedulerStatus['lastRun'] = null;
   private stopped = true;
 
   constructor(config: BacklogSchedulerConfig, deps: BacklogEngineDeps) {
     this.config = config;
     this.store = deps.store;
-    this.usagePoller = deps.usagePoller;
+    this.refreshUsage = deps.refreshUsage;
     this.artifactsDir = deps.artifactsDir;
     this.worktreesDir = deps.worktreesDir;
     this.getUsage = deps.getUsage ?? (() => null);
     this.getIdleSeconds = deps.getIdleSeconds ?? (() => powerMonitor.getSystemIdleTime());
+    this.onCardDone = deps.onCardDone ?? null;
   }
 
   public start() {
@@ -147,7 +173,7 @@ export class BacklogEngine {
       const { cardId, attemptId, handle } = this.running;
       this.running = null;
       // Blocking kill: before-quit is synchronous, so an async taskkill could
-      // be abandoned mid-flight and orphan the claude subtree.
+      // be abandoned mid-flight and orphan the CLI subtree.
       handle.killSync('app quitting');
       this.store.finishAttempt(attemptId, { outcome: 'paused', reason: 'app quit while running' });
       this.store.setCardState(cardId, 'paused');
@@ -164,9 +190,15 @@ export class BacklogEngine {
     return this.computeStatus();
   }
 
-  /** True while a card is executing — the Cowork scheduler skips openers then. */
-  public isRunningCard(): boolean {
-    return this.running !== null;
+  /**
+   * True while a card is executing — the Cowork scheduler skips its opener
+   * ping then (the run already spends and anchors that agent's window). With
+   * `agent` set, only a card of THAT agent counts: a Codex card running must
+   * not suppress the Claude opener, and vice versa.
+   */
+  public isRunningCard(agent?: BacklogAgent): boolean {
+    if (!this.running) return false;
+    return agent === undefined || this.running.agent === agent;
   }
 
   /**
@@ -257,26 +289,30 @@ export class BacklogEngine {
     }
     this.waitingForIdle = false;
 
-    // Usage latch: a previous run died on an exhausted usage window.
-    if (this.usageExhaustedUntil !== null) {
-      if (now < this.usageExhaustedUntil) {
-        this.broadcast();
-        return;
-      }
-      this.usageExhaustedUntil = null;
-    }
-    // Proactive gate: don't start a card the exhausted window would kill anyway.
-    // Threshold is user-configurable; 100 disables it (only the reactive latch
-    // stops runs once the window is truly spent).
+    // Per-agent usage gates. An agent is unavailable this pass when (a) its
+    // latch is still armed — a previous run died on an exhausted window — or
+    // (b) the proactive gate trips: its window is already at/above the
+    // threshold, so a card started now would just be killed mid-task. The
+    // threshold is user-configurable and shared; 100 disables it (only the
+    // reactive latch stops runs once a window is truly spent). Cards of a
+    // latched agent are skipped; the other agent's cards still run.
     const gatePercent = this.config.usageGatePercent ?? USAGE_GATE_UTILIZATION_DEFAULT;
-    const usage = this.getUsage();
-    if (usage && usage.utilization >= gatePercent) {
-      this.engageUsageLatch(`5-hour window at ${Math.round(usage.utilization)}% (limit ${gatePercent}%) — waiting for reset`);
-      return;
+    const latched = new Set<BacklogAgent>();
+    for (const agent of BACKLOG_AGENTS) {
+      const until = this.usageExhaustedUntil.get(agent);
+      if (until !== undefined) {
+        if (now < until) { latched.add(agent); continue; }
+        this.usageExhaustedUntil.delete(agent);
+      }
+      const usage = this.getUsage(agent);
+      if (usage && usage.utilization >= gatePercent) {
+        this.engageUsageLatch(agent, `${agentLabel(agent)} window at ${Math.round(usage.utilization)}% (limit ${gatePercent}%) — waiting for reset`);
+        latched.add(agent);
+      }
     }
 
     const candidates = this.store.listCards().filter((c) => !this.stoppedThisWindow.has(c.id));
-    const card = pickNextCard(candidates, win.end - now);
+    const card = pickNextCard(candidates, win.end - now, latched);
     if (!card) {
       this.broadcast();
       return;
@@ -287,24 +323,26 @@ export class BacklogEngine {
   }
 
   /**
-   * Stop auto-claiming until the usage window resets (plus a small buffer so
-   * the poller has re-polled by the time we retry). Falls back to a periodic
-   * recheck when the snapshot can't say when that is.
+   * Stop auto-claiming THAT agent's cards until its usage window resets (plus
+   * a small buffer so the poller has re-polled by the time we retry). Falls
+   * back to a periodic recheck when the snapshot can't say when that is.
    */
-  private engageUsageLatch(logReason: string) {
+  private engageUsageLatch(agent: BacklogAgent, logReason: string) {
     const now = Date.now();
-    const usage = this.getUsage();
+    const usage = this.getUsage(agent);
     const until = usage && usage.resetsAt > now ? usage.resetsAt + 60_000 : now + USAGE_RECHECK_FALLBACK_MS;
-    this.usageExhaustedUntil = until;
-    logger.info(`[Backlog] usage latch engaged (${logReason}) — resuming ${new Date(until).toLocaleTimeString()}`);
-    this.usagePoller.refreshNow();
-    if (this.usageTimer) clearTimeout(this.usageTimer);
-    this.usageTimer = setTimeout(() => {
-      this.usageTimer = null;
-      this.usageExhaustedUntil = null;
+    this.usageExhaustedUntil.set(agent, until);
+    logger.info(`[Backlog] ${agent} usage latch engaged (${logReason}) — resuming ${new Date(until).toLocaleTimeString()}`);
+    this.refreshUsage(agent);
+    const prior = this.usageTimers.get(agent);
+    if (prior) clearTimeout(prior);
+    const timer = setTimeout(() => {
+      this.usageTimers.delete(agent);
+      this.usageExhaustedUntil.delete(agent);
       this.tryClaimNext();
     }, until - now);
-    this.usageTimer.unref?.();
+    timer.unref?.();
+    this.usageTimers.set(agent, timer);
     this.broadcast();
   }
 
@@ -356,18 +394,22 @@ export class BacklogEngine {
       // Inline any attached files into the prompt so the card can carry context
       // that isn't in the repo (the detached worktree only sees committed files).
       const attachments = this.store.listAttachmentContents(card.id);
+      const adapter = adapterFor(card.agent);
       let mcpConfigPath: string | null = null;
+      let qaProfile: string | null = null;
       let prompt: string;
       if (card.taskType === 'execution') {
         prompt = buildExecutionPrompt(card, attachments);
       } else if (card.taskType === 'qa') {
         // Browser-verification run: the agent needs the chrome-devtools MCP
-        // config and a place the MCP server can save screenshot evidence.
+        // server (Claude: --mcp-config file; Codex: a config profile) and a
+        // place the MCP server can save screenshot evidence.
         let screensDir: string;
         try {
           screensDir = this.screenshotsDir(card.id, attempt.id);
           fs.mkdirSync(screensDir, { recursive: true });
-          mcpConfigPath = this.ensureQaMcpConfig();
+          if (card.agent === 'codex') qaProfile = ensureCodexQaProfile();
+          else mcpConfigPath = this.ensureQaMcpConfig();
         } catch (e: any) {
           const reason = `QA setup failed: ${e?.message ?? e}`;
           this.store.finishAttempt(attempt.id, { outcome: 'failed', reason });
@@ -379,18 +421,35 @@ export class BacklogEngine {
       } else {
         prompt = buildResearchPrompt(card, attachments);
       }
+      // Codex writes its last message to a side file (engine-controlled path
+      // under the artifacts dir); Claude ignores it.
+      let outputFile: string | null = null;
+      if (card.agent === 'codex') {
+        try {
+          const dir = path.join(this.artifactsDir, card.id);
+          fs.mkdirSync(dir, { recursive: true });
+          outputFile = path.join(dir, `${attempt.id}-codex-last.md`);
+        } catch (e: any) {
+          const reason = `artifact dir setup failed: ${e?.message ?? e}`;
+          this.store.finishAttempt(attempt.id, { outcome: 'failed', reason });
+          this.store.setCardState(card.id, 'blocked', reason);
+          this.broadcastChanged();
+          return { ok: false, reason };
+        }
+      }
       const handle = executeCard({
-        prompt, cwd, budgetMs: cardBudgetMs(card),
-        taskType: card.taskType, model: card.model, resumeSessionId, mcpConfigPath,
+        adapter, prompt, cwd, budgetMs: cardBudgetMs(card),
+        taskType: card.taskType, model: card.model, resumeSessionId, mcpConfigPath, qaProfile, outputFile,
       });
       this.running = {
         cardId: card.id,
         cardTitle: card.title,
+        agent: card.agent,
         attemptId: attempt.id,
         startedAt: attempt.startedAt,
         handle,
       };
-      logger.info(`[Backlog] running "${card.title}" (${card.taskType}, ${manual ? 'manual' : 'scheduled'}${resumeSessionId ? ', resumed' : ''}) in ${cwd}`);
+      logger.info(`[Backlog] running "${card.title}" (${card.taskType}, ${card.agent}, ${manual ? 'manual' : 'scheduled'}${resumeSessionId ? ', resumed' : ''}) in ${cwd}`);
       this.broadcast();
       this.broadcastChanged();
 
@@ -425,7 +484,7 @@ export class BacklogEngine {
           // escalation streak, and picked first once the latch clears.
           outcome = 'paused';
           this.store.setCardState(card.id, 'paused');
-          this.engageUsageLatch(reason ?? 'usage limit reached');
+          this.engageUsageLatch(card.agent, reason ?? 'usage limit reached');
         } else {
           outcome = 'failed';
           this.store.setCardState(card.id, 'blocked', reason ?? 'run failed');
@@ -437,6 +496,8 @@ export class BacklogEngine {
           costUsd: result.costUsd,
           numTurns: result.numTurns,
           sessionId: result.sessionId,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
         });
         this.lastRun = { at: Date.now(), cardId: card.id, cardTitle: card.title, outcome };
         logger.info(`[Backlog] "${card.title}" finished: ${outcome}${reason ? ` (${reason})` : ''}`);
@@ -446,8 +507,8 @@ export class BacklogEngine {
         // finishing the attempt or claiming the next card.
         void this.notifyOutcome(card, reason);
 
-        // The run spent real window credit — refresh usage promptly.
-        this.usagePoller.refreshNow();
+        // The run spent real window credit — refresh that agent's usage promptly.
+        this.refreshUsage(card.agent);
         this.broadcast();
         this.broadcastChanged();
         this.tryClaimNext();
@@ -499,11 +560,24 @@ export class BacklogEngine {
         this.store.setCardState(card.id, 'blocked', reason);
         return { outcome: 'blocked', reason };
       }
-      this.store.setCardState(card.id, 'done');
+      this.markDone(card);
       return { outcome: 'success', reason: selfStatus === 'partial' ? 'agent reported partial completion' : undefined };
     }
 
     // Execution: the dirty worktree is the deliverable — capture it as a patch.
+    // First fold any commit the agent made (against the contract) back into
+    // the working tree: Claude has no shell so can't commit, but Codex always
+    // has one and the sandbox is the only thing stopping it. Without this a
+    // committed change would be invisible to the diff and read as no-changes.
+    if (card.baseSha) {
+      const unwound = await unwindCommits(cwd, card.baseSha);
+      if (!unwound.ok) {
+        const reason = `could not unwind agent commits: ${unwound.reason}`;
+        this.store.setCardState(card.id, 'blocked', reason);
+        return { outcome: 'failed', reason };
+      }
+      if (unwound.unwound > 0) logger.warn(`[Backlog] "${card.title}": agent made ${unwound.unwound} commit(s) — folded back into the working tree`);
+    }
     const cap = await captureDiff(cwd);
     if (!cap.ok) {
       const reason = `diff capture failed: ${cap.reason}`;
@@ -569,8 +643,18 @@ export class BacklogEngine {
       return { outcome: 'qa-failed', reason: `QA failed: ${qa.command} (exit ${qa.exitCode ?? 'n/a'})` };
     }
 
-    this.store.setCardState(card.id, 'done');
+    this.markDone(card);
     return { outcome: 'success', reason: selfStatus === 'partial' ? 'agent reported partial completion' : undefined };
+  }
+
+  /** Persist `done` and tell observers; an observer error never fails the run. */
+  private markDone(card: BacklogCard): void {
+    this.store.setCardState(card.id, 'done');
+    try {
+      this.onCardDone?.(card);
+    } catch (err) {
+      logger.warn('[BacklogEngine] onCardDone observer threw', err);
+    }
   }
 
   /**
@@ -597,7 +681,7 @@ export class BacklogEngine {
     const project = this.store.listProjects().find((p) => p.id === card.projectId);
     const bodyLines = [
       project ? `Project: ${project.name}` : null,
-      `Type: ${card.taskType}`,
+      `Type: ${card.taskType} · Agent: ${agentLabel(card.agent)}`,
       reason ? `Detail: ${reason}` : null,
     ].filter((l): l is string => l !== null);
 
@@ -643,7 +727,8 @@ export class BacklogEngine {
    * Chrome profile — no user cookies/sessions, no profile-lock collisions).
    * Lives beside the artifacts dir under userData. npx is a .cmd shim on
    * Windows, so the config routes through cmd /c there — same class of problem
-   * the runner solves for the claude bin itself.
+   * the runner solves for the CLI bin itself. Claude only; the Codex
+   * equivalent is a config profile (see codex-qa-profile.ts).
    */
   private ensureQaMcpConfig(): string {
     const configPath = path.join(path.dirname(this.artifactsDir), 'backlog-qa-mcp.json');
@@ -711,7 +796,10 @@ export class BacklogEngine {
         isPickableState(c.state) &&
         c.riskTier === 'green' &&
         countUnmetPrereqs(c, cards) === 0).length,
-      usagePausedUntil: this.usageExhaustedUntil,
+      usagePausedUntil: {
+        claude: this.usageExhaustedUntil.get('claude') ?? null,
+        codex: this.usageExhaustedUntil.get('codex') ?? null,
+      },
       lastRun: this.lastRun,
       forecast: this.config.enabled ? forecastNextWindow(cards, this.config.slots, now) : null,
     };
@@ -747,7 +835,8 @@ export class BacklogEngine {
     this.clearEdgeTimer();
     this.clearGraceTimer();
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
-    if (this.usageTimer) { clearTimeout(this.usageTimer); this.usageTimer = null; }
+    for (const timer of this.usageTimers.values()) clearTimeout(timer);
+    this.usageTimers.clear();
   }
 
   private broadcast() {

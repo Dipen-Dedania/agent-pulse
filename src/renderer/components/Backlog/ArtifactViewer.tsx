@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BacklogArtifact, BacklogArtifactKind, BacklogAttempt, BacklogCard } from '../../../common/backlog-types';
+import { BacklogArtifact, BacklogArtifactKind, BacklogAttempt, BacklogCard, agentLabel } from '../../../common/backlog-types';
 import { logger } from '../../../common/logger';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { appAlert, appConfirm, Button, Modal, Select, Tooltip } from '../Shared';
@@ -265,7 +265,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
     setResuming(true);
     try {
       const res = await resumeSession(card.id);
-      if (!res.ok && res.reason) void appAlert(res.reason, 'Resume in Claude Code');
+      if (!res.ok && res.reason) void appAlert(res.reason, `Resume in ${agentLabel(card.agent)}`);
     } finally {
       setResuming(false);
     }
@@ -517,14 +517,14 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                   Open folder
                 </Button>
                 {resumeSessionId && (
-                  <Tooltip content='Open an interactive Claude Code session on this worktree, resumed from the last run'>
+                  <Tooltip content={`Open an interactive ${agentLabel(card.agent)} session on this worktree, resumed from the last run`}>
                     <Button
                       variant='secondary'
                       size='sm'
                       onClick={() => void handleResumeSession()}
                       disabled={resuming}
                     >
-                      {resuming ? 'Opening…' : 'Resume in Claude Code'}
+                      {resuming ? 'Opening…' : `Resume in ${agentLabel(card.agent)}`}
                     </Button>
                   </Tooltip>
                 )}

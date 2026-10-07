@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import {
-  AttachmentIntent, BacklogAttachment, BacklogCard, BacklogProject, BacklogTaskType,
-  BacklogTemplate, PendingAttachment, QaProvider, RiskTier, isSafeModelId,
+  AttachmentIntent, BacklogAgent, BacklogAttachment, BacklogCard, BacklogProject, BacklogTaskType,
+  BacklogTemplate, PendingAttachment, QaProvider, RiskTier, agentLabel, isSafeModelId,
 } from '../../../common/backlog-types';
+import { CodexModelAvailability, CodexUsageStatus } from '../../../common/types';
 import { buildPreviewPrompt, PromptAttachment } from '../../../common/backlog-prompt';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { appAlert, Button, Checkbox, Input, Modal, Segmented, Select, Textarea, Tooltip } from '../Shared';
@@ -28,6 +29,7 @@ interface Props {
     input: {
       title: string; description: string; projectId: string;
       taskType: BacklogTaskType;
+      agent: BacklogAgent;
       riskTier: RiskTier;
       model: string | null;
       estimatedMinutes: number | null;
@@ -54,16 +56,42 @@ const QA_PROVIDERS: { value: QaProvider; label: string; hint: string }[] = [
   { value: 'custom', label: 'Custom command…', hint: 'runs the command below in the worktree' },
 ];
 
-// Alias presets the CLI resolves to the latest model of each tier; "custom"
-// reveals a free-text input for full ids (e.g. claude-sonnet-4-6). Empty
-// value = no --model flag — the run uses the project's own default.
+// Claude alias presets the CLI resolves to the latest model of each tier;
+// "custom" reveals a free-text input for full ids (e.g. claude-sonnet-4-6).
+// Empty value = no --model flag — the run uses the project's own default.
+// Codex has NO hard-coded list: its presets come from the live usage
+// snapshot's model availability (codexModelPresets below) so they never go
+// stale, and degrade to default + custom id when the snapshot has none.
 const MODEL_PRESETS: { value: string; label: string }[] = [
   { value: 'haiku', label: 'Haiku — fastest, cheapest' },
   { value: 'sonnet', label: 'Sonnet — balanced' },
   { value: 'opus', label: 'Opus — most capable' },
   { value: 'fable', label: 'Fable — top tier, highest quality' },
 ];
-const isPresetModel = (m: string) => MODEL_PRESETS.some((p) => p.value === m);
+
+function formatAvailableAt(ms: number | undefined): string {
+  if (!ms) return 'unavailable';
+  const d = new Date(ms);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return `available ${sameDay ? '' : d.toLocaleDateString([], { weekday: 'short' }) + ' '}${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+/** Codex presets from the live availability list; unavailable ones stay listed but disabled. */
+function codexModelPresets(models: CodexModelAvailability[] | undefined): { value: string; label: string; disabled?: boolean }[] {
+  if (!models || models.length === 0) return [];
+  return models
+    .filter((m) => isSafeModelId(m.model))
+    .map((m) => ({
+      value: m.model,
+      label: m.available ? m.model : `${m.model} — ${formatAvailableAt(m.availableAt)}`,
+      disabled: !m.available,
+    }));
+}
+
+const AGENT_OPTIONS: { value: BacklogAgent; label: string }[] = [
+  { value: 'claude', label: 'Claude Code' },
+  { value: 'codex', label: 'Codex' },
+];
 
 const labelClass = 'text-xs uppercase tracking-widest text-faint font-semibold';
 // Shared by both <Select>s in the form so their triggers line up with the
@@ -89,6 +117,11 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   const [description, setDescription] = useState(card?.description ?? '');
   const [projectId, setProjectId] = useState(card?.projectId ?? projects[0]?.id ?? '');
   const [taskType, setTaskType] = useState<BacklogTaskType>(card?.taskType ?? 'research');
+  const [agent, setAgent] = useState<BacklogAgent>(card?.agent ?? 'claude');
+  // Which agent CLIs are installed — an absent one can't be picked.
+  const [agentAvailable, setAgentAvailable] = useState<Record<BacklogAgent, boolean> | null>(null);
+  // Live Codex model availability (HTTP usage source only) for the Codex presets.
+  const [codexModels, setCodexModels] = useState<CodexModelAvailability[] | undefined>(undefined);
   const [riskTier, setRiskTier] = useState<RiskTier>(card?.riskTier ?? 'green');
   // One criterion per line in the UI; stored/injected as a string array.
   const [acceptanceCriteria, setAcceptanceCriteria] = useState<string>((card?.acceptanceCriteria ?? []).join('\n'));
@@ -98,12 +131,16 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   const [estimatedMinutes, setEstimatedMinutes] = useState<string>(card?.estimatedMinutes?.toString() ?? '');
   const [estimatedCostUsd, setEstimatedCostUsd] = useState<string>(card?.estimatedCostUsd?.toString() ?? '');
   const [prereqIds, setPrereqIds] = useState<string[]>(card?.prereqIds ?? []);
-  // '' = project default, preset alias, or 'custom' (free-text id below).
+  // '' = agent default, preset id/alias, or 'custom' (free-text id below).
+  // A stored model that isn't a Claude preset starts as custom; once the
+  // Codex availability list arrives, a matching Codex id snaps to its preset
+  // (see the codexModels effect below).
+  const initialPreset = card?.agent !== 'codex' && !!card?.model && MODEL_PRESETS.some((p) => p.value === card.model);
   const [modelChoice, setModelChoice] = useState<string>(
-    card?.model ? (isPresetModel(card.model) ? card.model : 'custom') : '',
+    card?.model ? (initialPreset ? card.model : 'custom') : '',
   );
   const [customModel, setCustomModel] = useState<string>(
-    card?.model && !isPresetModel(card.model) ? card.model : '',
+    card?.model && !initialPreset ? card.model : '',
   );
   const [projectDefaultModel, setProjectDefaultModel] = useState<string | null>(null);
   const [managingTemplates, setManagingTemplates] = useState(false);
@@ -212,20 +249,61 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
     ...pendingAttachments.map((a) => ({ filename: a.filename, content: a.content })),
   ];
 
-  // Resolve what "Project default" means for the selected project (its
-  // .claude/settings.json chain) so the picker's default option says which
-  // model a flag-less run would actually use.
+  // Resolve what the default means for the selected project AND agent (Claude:
+  // the project's .claude/settings.json chain; Codex: ~/.codex/config.toml) so
+  // the picker's default option says which model a flag-less run would use.
   useEffect(() => {
     let cancelled = false;
     setProjectDefaultModel(null);
     if (!projectId) return;
-    window.electron.invoke('backlog:project-default-model', { projectId })
+    window.electron.invoke('backlog:project-default-model', { projectId, agent })
       .then((res: { model: string | null }) => {
         if (!cancelled) setProjectDefaultModel(res?.model ?? null);
       })
       .catch(() => { /* best-effort label — leave it generic */ });
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, agent]);
+
+  // Installed agent CLIs (once per open) + live Codex model availability.
+  useEffect(() => {
+    let cancelled = false;
+    window.electron.invoke('backlog:agent-availability')
+      .then((res: Record<BacklogAgent, boolean>) => { if (!cancelled && res) setAgentAvailable(res); })
+      .catch(() => { /* leave both enabled — the run reports a missing CLI itself */ });
+    const applyCodex = (s: CodexUsageStatus | null) => {
+      if (!cancelled) setCodexModels(s?.snapshot?.models);
+    };
+    window.electron.invoke('codex-usage:get-current').then(applyCodex).catch(() => applyCodex(null));
+    const handler = (_e: unknown, s: CodexUsageStatus) => applyCodex(s);
+    window.electron.on('codex-usage:updated', handler);
+    return () => {
+      cancelled = true;
+      window.electron.off('codex-usage:updated', handler);
+    };
+  }, []);
+
+  // A stored Codex model id that the live list knows becomes its preset entry
+  // instead of lingering in the custom box.
+  useEffect(() => {
+    if (agent !== 'codex' || modelChoice !== 'custom') return;
+    const id = customModel.trim();
+    if (id && codexModelPresets(codexModels).some((p) => p.value === id)) {
+      setModelChoice(id);
+      setCustomModel('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- snap once when the list arrives
+  }, [codexModels]);
+
+  const changeAgent = (next: BacklogAgent) => {
+    if (next === agent) return;
+    setAgent(next);
+    // Presets differ per agent — fall back to that agent's default.
+    setModelChoice('');
+    setCustomModel('');
+  };
+
+  const modelPresets = agent === 'codex' ? codexModelPresets(codexModels) : MODEL_PRESETS;
+  const defaultLabel = agent === 'codex' ? 'Codex default' : 'Project default';
 
   // Any other card on the board can gate this one (the board is global, so
   // cross-project prereqs are allowed). Checked ones sort first for viz.
@@ -246,6 +324,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
     description,
     projectId,
     taskType,
+    agent,
     riskTier,
     model: modelChoice === '' ? null : modelChoice === 'custom' ? (customModel.trim() || null) : modelChoice,
     // Mirror the engine's [5, 120] budget clamp so the card shows the minutes
@@ -488,6 +567,41 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           />
         </div>
 
+        <div className='flex flex-col gap-1.5 sm:col-span-2'>
+          <span className={`${labelClass} inline-flex items-center gap-1.5`}>
+            Agent
+            <InfoHint text='Which CLI runs this card headlessly. Claude Code runs `claude -p`; Codex runs `codex exec` in a sandbox. Issue scouting and Refine Now always use Claude Code.' />
+          </span>
+          <Segmented
+            options={AGENT_OPTIONS.map((o) => ({
+              value: o.value,
+              label: o.label,
+              hint: agentAvailable && !agentAvailable[o.value]
+                ? `${o.label} CLI not found — install it (or fix PATH) to run cards with it`
+                : o.value === 'codex'
+                  ? 'Runs with `codex exec`. Spends the Codex plan’s own usage window directly.'
+                  : 'Runs with `claude -p` (headless Claude Code).',
+            }))}
+            value={agent}
+            onChange={(v) => {
+              const next = v as BacklogAgent;
+              if (agentAvailable && !agentAvailable[next]) return; // can't pick an absent CLI
+              changeAgent(next);
+            }}
+          />
+          {agentAvailable && !agentAvailable[agent] && (
+            <span className='text-[11px] text-danger'>
+              {agentLabel(agent)} CLI not found — this card can’t run until it is installed.
+            </span>
+          )}
+          {agent === 'codex' && (
+            <span className='text-[11px] text-faint'>
+              Refine Now always plans with Claude Code; the run itself uses Codex. Codex runs spend the
+              Codex plan’s usage window directly.
+            </span>
+          )}
+        </div>
+
         <label className='flex flex-col gap-1.5 sm:col-span-2'>
           <span className={labelClass}>Model</span>
           <Select
@@ -496,8 +610,8 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
             className={selectClass}
             ariaLabel='Model'
             options={[
-              { value: '', label: `Project default${projectDefaultModel ? ` (${projectDefaultModel})` : ''}` },
-              ...MODEL_PRESETS,
+              { value: '', label: `${defaultLabel}${projectDefaultModel ? ` (${projectDefaultModel})` : ''}` },
+              ...modelPresets,
               { value: 'custom', label: 'Custom model id…' },
             ]}
           />
@@ -507,7 +621,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
                 invalid={!modelValid}
-                placeholder='e.g. claude-sonnet-4-6'
+                placeholder={agent === 'codex' ? 'e.g. gpt-5-codex' : 'e.g. claude-sonnet-4-6'}
               />
               {!modelValid && (
                 <span className='text-[11px] text-danger'>

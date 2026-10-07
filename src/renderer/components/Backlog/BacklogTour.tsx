@@ -10,12 +10,13 @@ import { Button } from '../Shared';
 // An in-panel spotlight/coachmark walk anchored to the REAL Backlog-tab DOM,
 // hoisted to SettingsPanel level so it survives the tab-swap unmount
 // (SettingsPanel keys <AnimatePresence> on activeTab). It drives both
-// setActiveTab and setUsageSubTab live, so the walk continues into
-// Usage → Claude Code to cover the Scheduler + Population, then awaits each
-// anchor (tab exit-animation + async config load) before positioning. When an
-// anchor never mounts (e.g. Claude Code usage isn't configured, so the section
-// never renders) the step degrades to a centered, unanchored callout rather
-// than hanging. Reuses the Tooltip positioning approach: fixed position,
+// setActiveTab and setUsageSubTab live, so the walk can step out to
+// Usage → Claude Code for issue population and back to the board, awaiting
+// each anchor (tab exit-animation + async config load) before positioning.
+// The scheduler step spotlights the board's ⚙ button rather than opening the
+// modal under the scrim. When an anchor never mounts (e.g. Claude Code usage
+// isn't configured, so the section never renders) the step degrades to a
+// centered, unanchored callout rather than hanging. Reuses the Tooltip positioning approach: fixed position,
 // getBoundingClientRect, viewport clamping, placement flip, reposition on
 // scroll/resize. All motion is Framer, so it inherits the app's global
 // <MotionConfig reducedMotion="user">.
@@ -92,14 +93,13 @@ const STEPS: TourStep[] = [
   {
     key: 'scheduler',
     kicker: 'Step 6',
-    title: 'Use the night session of Claude Code',
-    body: 'Set the windows when queued green cards run themselves — the Nights 23–07 preset is one click. Idle-gated so it won’t fight a late session, budget-capped per card. Wake up to the work done.',
-    tab: 'usage',
-    subTab: 'claude-code',
+    title: 'Use the night session',
+    body: 'This ⚙ opens the scheduler: set the windows when queued green cards run themselves (on Claude Code or Codex, per card) — the Nights 23–07 preset is one click. Idle-gated so it won’t fight a late session, budget-capped per card. Wake up to the work done.',
+    tab: 'backlog',
     selector: 'backlog-scheduler',
-    placement: 'top',
+    placement: 'bottom',
     demoState: 'working',
-    degradeBody: 'The night session lives under Usage → Claude Code → Backlog Scheduler. Configure Claude Code usage there, then set your windows to arm overnight autorun.',
+    degradeBody: 'The night session lives behind the ⚙ button in the board header. Open it and set your windows to arm overnight autorun.',
   },
   {
     key: 'population',
@@ -118,8 +118,7 @@ const STEPS: TourStep[] = [
     kicker: 'That’s the tour',
     title: 'Queue it. Walk away.',
     body: 'Shape cards, drop the safe ones into Todo, and let the night session turn idle time into finished research. Replay this tour any time from the board.',
-    tab: 'usage',
-    subTab: 'claude-code',
+    tab: 'backlog',
     placement: 'center',
     demoState: 'idle',
   },

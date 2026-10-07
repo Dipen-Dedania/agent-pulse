@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { BacklogSchedulerConfig, BacklogSchedulerStatus, BacklogSlot } from '../../../common/backlog-types';
+import { BACKLOG_AGENTS, BacklogSchedulerConfig, BacklogSchedulerStatus, BacklogSlot, agentLabel } from '../../../common/backlog-types';
 import { WebhookTarget } from '../../../common/types';
 import { formatUsd } from '../../../common/pricing';
-import { WebhookRow } from './WebhookRow';
+import { WebhookRow } from '../Settings/WebhookRow';
 import { Button, GlassToggle, IconButton, Input, Tooltip } from '../Shared';
 
-// Backlog Scheduler — sits beside the Cowork Scheduler in Usage → Claude Code.
-// The Cowork slot is a fire INSTANT (opens a window); a backlog slot is a time
-// RANGE during which queued board cards auto-execute. Mirrors the
-// SchedulerSection row/toggle patterns. Board lives in the Backlog tab.
+// Backlog Scheduler — the body of BacklogSchedulerModal, opened from the ⚙
+// button in the board header. It used to sit under Plans & Limits → Claude
+// Code, but cards now run on either agent, so it belongs to the board, not a
+// tool. A Cowork slot is a fire INSTANT (opens a window); a backlog slot is a
+// time RANGE during which queued board cards auto-execute. Mirrors the
+// SchedulerSection row/toggle patterns. The Modal supplies the shell + title.
 
 interface Props {
   config: BacklogSchedulerConfig;
@@ -169,14 +171,13 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
   })();
 
   return (
-    <section className='mt-6 glass-primary p-6' data-tour='backlog-scheduler'>
+    <div>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
-          <h2 className='text-lg font-bold text-strong'>Backlog Scheduler</h2>
-          <p className='text-sm text-muted mt-1'>
-            Time windows when queued cards from the <span className='text-body'>Backlog</span> board
-            auto-execute — night hours, weekends. Green cards only, one at a time, research reports only in
-            this phase. Turns idle window credit into finished work.
+          <p className='text-sm text-muted'>
+            Time windows when queued cards on this board auto-execute — night hours, weekends. Green
+            cards only, one at a time, on the agent each card names (Claude Code or Codex). Turns idle
+            window credit into finished work.
           </p>
         </div>
         <Toggle on={config.enabled} onClick={() => onChange({ enabled: !config.enabled })} label='Toggle backlog scheduler' />
@@ -185,11 +186,20 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       {/* Status glance */}
       <div className='mt-4 glass-secondary px-4 py-3'>
         <p className='text-sm text-strong'>{glance}</p>
-        {status?.usagePausedUntil != null && status.usagePausedUntil > Date.now() && (
-          <p className='text-xs mt-1 text-warn/90'>
-            usage window exhausted · resumes ~{formatClock(status.usagePausedUntil)}
-          </p>
-        )}
+        {(() => {
+          // Per-agent latches: list only the agents currently paused. Cards of
+          // the other agent keep running.
+          const now = Date.now();
+          const paused = BACKLOG_AGENTS
+            .map((agent) => ({ agent, until: status?.usagePausedUntil?.[agent] ?? null }))
+            .filter((p): p is { agent: typeof p.agent; until: number } => p.until != null && p.until > now);
+          if (paused.length === 0) return null;
+          return (
+            <p className='text-xs mt-1 text-warn/90'>
+              {paused.map((p) => `${agentLabel(p.agent)} usage window exhausted · resumes ~${formatClock(p.until)}`).join(' · ')}
+            </p>
+          );
+        })()}
         {status?.lastRun && (
           <p className='text-xs mt-1 text-muted'>
             Last run {formatClock(status.lastRun.at)} — {status.lastRun.cardTitle}:{' '}
@@ -262,15 +272,17 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
         />
       </div>
 
-      {/* Proactive usage gate — how full the Claude 5-hour window may get before
-          the scheduler stops claiming NEW cards (a run started near the ceiling
-          just dies mid-task). 100 = never gate proactively. */}
+      {/* Proactive usage gate — how full an agent's current usage window may
+          get before the scheduler stops claiming NEW cards for that agent (a
+          run started near the ceiling just dies mid-task). One threshold for
+          both agents; latches are per agent. 100 = never gate proactively. */}
       <div className='mt-5 glass-secondary p-4 flex items-start gap-3'>
         <div className='flex-1 min-w-0'>
           <p className='font-medium text-strong text-sm leading-tight'>Pause new tasks near the usage limit</p>
           <p className='text-xs text-muted mt-1'>
-            Stop claiming new cards once the Claude 5-hour window is this full — a task started with
-            little left just dies partway through.{' '}
+            Stop claiming new cards once an agent’s current usage window (Claude 5-hour / Codex primary)
+            is this full — a task started with little left just dies partway through. Each agent is
+            paused on its own; the other keeps running.{' '}
             {config.usageGatePercent >= 100
               ? 'At 100% the scheduler keeps claiming until the window is fully spent.'
               : `Currently pausing at ${config.usageGatePercent}% used.`}
@@ -354,6 +366,6 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
         window end gets a 10-minute grace period, then pauses and resumes first in the next window. Backlog
         runs anchor 5-hour windows themselves, so Cowork opener pings are skipped while a card is running.
       </p>
-    </section>
+    </div>
   );
 };

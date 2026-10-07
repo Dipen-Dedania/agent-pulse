@@ -49,6 +49,9 @@ import { isAutoLaunchEnabled, setAutoLaunch } from './auto-launch';
 import { bootTimeline, TimelineHandle } from './timeline';
 import { bootUpdater, UpdaterHandle } from './updater';
 import { hasPendingUpdate } from '../common/updater-types';
+import { REPO_URL } from '../common/links';
+import type { StarNudgeState } from '../common/star-types';
+import { evaluateStarMilestone, pickStarVoice, projectStarState, STAR_POLL_MS } from './star-nudge';
 
 // Windows uses this to group windows under our identity and show our taskbar icon.
 if (process.platform === 'win32') {
@@ -104,10 +107,19 @@ class AgentPulseApp {
   private lastSecretEventKey: string | null = null;
   private lastSecretEventTs = 0;
   private static readonly SECRET_DEDUP_MS = 10_000;
+  // GitHub star nudge: hourly re-check of the "one week since first event"
+  // milestone. The backlog "first card done" trigger is event-driven.
+  private starPollTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     this.stateManager = new StatusStateManager();
     this.userConfig = loadConfig();
+    // Assign the star-nudge copy voice once per install so every placement
+    // reads the same voice from the first paint onward.
+    if (!this.userConfig.starNudge.voice) {
+      this.userConfig.starNudge = { ...this.userConfig.starNudge, voice: pickStarVoice() };
+      saveConfig(this.userConfig);
+    }
     // Publish the bridge port + a shared secret for the Claude Code MCP server
     // (a separate process) to authenticate with. Null if the file can't be
     // written — the /backlog routes then reject everything, which is the safe
@@ -191,11 +203,15 @@ class AgentPulseApp {
     // it after the poller exists.
     this.scheduler = new Scheduler(
       this.userConfig.scheduler,
-      // Backlog runs spend + anchor windows themselves; skip redundant openers.
-      claudeSchedulerDeps(this.usagePoller, () => this.backlogEngine?.isRunningCard() ?? false),
+      // A running backlog card spends + anchors ITS agent's window itself;
+      // skip the redundant opener for that agent only.
+      claudeSchedulerDeps(this.usagePoller, () => this.backlogEngine?.isRunningCard('claude') ?? false),
     );
     // Same engine for Codex, anchored on its primary (5-hour) window.
-    this.codexScheduler = new Scheduler(this.userConfig.codexScheduler, codexSchedulerDeps(this.codexUsagePoller));
+    this.codexScheduler = new Scheduler(
+      this.userConfig.codexScheduler,
+      codexSchedulerDeps(this.codexUsagePoller, () => this.backlogEngine?.isRunningCard('codex') ?? false),
+    );
     // Attention escalation watches state transitions from the bridge's state
     // manager, so it can be built as soon as the state manager exists.
     this.attentionEngine = new AttentionEngine(this.userConfig.attention, { stateManager: this.stateManager });
@@ -282,6 +298,11 @@ class AgentPulseApp {
           unsubscribe();
         });
       }
+      // Star nudge "week" milestone: check now (the install may already be
+      // past 7 days) and then hourly. unref so the timer never holds quit.
+      this.checkStarMilestone(false);
+      this.starPollTimer = setInterval(() => this.checkStarMilestone(false), STAR_POLL_MS);
+      this.starPollTimer.unref();
       this.usagePoller.init();
       this.usagePoller.start();
       this.codexUsagePoller.init();
@@ -334,15 +355,25 @@ class AgentPulseApp {
         this.backlogStore = new BacklogStore(backlogDb);
         this.backlogEngine = new BacklogEngine(this.userConfig.backlogScheduler, {
           store: this.backlogStore,
-          usagePoller: this.usagePoller,
+          refreshUsage: (agent) => {
+            if (agent === 'codex') this.codexUsagePoller.refreshNow();
+            else this.usagePoller.refreshNow();
+          },
           artifactsDir: path.join(app.getPath('userData'), 'backlog-artifacts'),
           worktreesDir: path.join(app.getPath('userData'), 'backlog-worktrees'),
-          // Usage latch: the engine pauses auto-claims while the Claude
-          // 5-hour window is exhausted and re-arms at its reset time.
-          getUsage: () => {
+          // Usage latch, per agent: the engine pauses auto-claims for an
+          // agent's cards while ITS current window (Claude 5-hour / Codex
+          // primary) is exhausted and re-arms at that window's reset time.
+          getUsage: (agent) => {
+            if (agent === 'codex') {
+              const snap = this.codexUsagePoller.getStatus().snapshot;
+              return snap ? { utilization: snap.primary.utilization, resetsAt: snap.primary.resetsAt } : null;
+            }
             const snap = this.usagePoller.getStatus().snapshot;
             return snap ? { utilization: snap.fiveHour.utilization, resetsAt: snap.fiveHour.resetsAt } : null;
           },
+          // Star nudge "first backlog card" milestone.
+          onCardDone: () => this.checkStarMilestone(true),
         });
         this.backlogEngine.start();
 
@@ -441,6 +472,7 @@ class AgentPulseApp {
       this.llmPricingPoller.stop();
       this.scheduler.stop();
       this.codexScheduler.stop();
+      if (this.starPollTimer) { clearInterval(this.starPollTimer); this.starPollTimer = null; }
       // Engine stop kills any running claude process tree and finalizes the
       // card as Paused before the DB closes.
       this.backlogEngine?.stop();
@@ -994,6 +1026,39 @@ class AgentPulseApp {
       return this.projectTourState();
     });
 
+    // ── GitHub star nudge IPC ─────────────────────────────────────────────
+    // One persisted block drives the title-bar icon, the Updates-tab line and
+    // the one-time milestone toast; a click on any of them stamps starredAt
+    // and every placement hides for good. See star-nudge-plan.md.
+    ipcMain.handle('star:get-state', (): StarNudgeState => projectStarState(this.userConfig.starNudge));
+
+    ipcMain.handle('star:open', async (): Promise<StarNudgeState> => {
+      const now = Date.now();
+      this.userConfig.starNudge = {
+        ...this.userConfig.starNudge,
+        starredAt: this.userConfig.starNudge.starredAt ?? now,
+        milestoneShownAt: this.userConfig.starNudge.milestoneShownAt ?? now,
+      };
+      saveConfig(this.userConfig);
+      this.broadcastStarState();
+      try {
+        await shell.openExternal(REPO_URL);
+      } catch (err) {
+        logger.warn('[AgentPulseApp] failed to open repo page', err);
+      }
+      return projectStarState(this.userConfig.starNudge);
+    });
+
+    ipcMain.handle('star:dismiss-toast', (): StarNudgeState => {
+      this.userConfig.starNudge = {
+        ...this.userConfig.starNudge,
+        milestoneShownAt: this.userConfig.starNudge.milestoneShownAt ?? Date.now(),
+      };
+      saveConfig(this.userConfig);
+      this.broadcastStarState();
+      return projectStarState(this.userConfig.starNudge);
+    });
+
     // ── Auto-launch IPC ───────────────────────────────────────────────────
     ipcMain.handle('auto-launch:get', () => ({
       enabled: this.userConfig.autoLaunch,
@@ -1035,6 +1100,24 @@ class AgentPulseApp {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('tour:state-updated', state);
     }
+  }
+
+  private broadcastStarState() {
+    const state = projectStarState(this.userConfig.starNudge);
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('star:state-updated', state);
+    }
+  }
+
+  // Stamp a star-nudge milestone when one is due. The evaluator is one-shot:
+  // once stamped (or starred, or answered) it returns null forever, so this is
+  // safe to call from the hourly timer and from every backlog completion.
+  private checkStarMilestone(backlogDone: boolean) {
+    const kind = evaluateStarMilestone(this.userConfig.starNudge, this.userConfig.tour, Date.now(), backlogDone);
+    if (!kind) return;
+    this.userConfig.starNudge = { ...this.userConfig.starNudge, milestoneDueAt: Date.now(), milestoneKind: kind };
+    saveConfig(this.userConfig);
+    this.broadcastStarState();
   }
 
   // When the status line is installed (ours), push the current config to its

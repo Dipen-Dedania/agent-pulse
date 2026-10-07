@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { createWorktree, captureDiff, applyWorktree, applyWorktreeStashed, removeWorktree, reconcileWorktrees, patchLineStats } from '../worktree';
+import { createWorktree, captureDiff, applyWorktree, applyWorktreeStashed, removeWorktree, reconcileWorktrees, patchLineStats, unwindCommits } from '../worktree';
 
 // Pure helper — no git needed, so it runs even on git-less CI images.
 describe('patchLineStats', () => {
@@ -68,6 +68,48 @@ describe.skipIf(!gitAvailable())('backlog worktree module', () => {
 
   afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('unwindCommits folds agent commits back into the working tree so captureDiff sees them', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-unwind');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // No commits yet → no-op.
+    expect(await unwindCommits(res.worktreePath, res.baseSha)).toEqual({ ok: true, unwound: 0 });
+
+    // The agent (against the contract) commits twice on top of the base.
+    git(res.worktreePath, 'config', 'user.email', 'agent@test.local');
+    git(res.worktreePath, 'config', 'user.name', 'agent');
+    fs.writeFileSync(path.join(res.worktreePath, 'b.txt'), 'new file\n');
+    git(res.worktreePath, 'add', '-A');
+    git(res.worktreePath, 'commit', '-m', 'agent commit 1');
+    fs.writeFileSync(path.join(res.worktreePath, 'a.txt'), 'hello\nworld\n');
+    git(res.worktreePath, 'commit', '-am', 'agent commit 2');
+    expect(git(res.worktreePath, 'rev-parse', 'HEAD').trim()).not.toBe(res.baseSha);
+
+    const unwound = await unwindCommits(res.worktreePath, res.baseSha);
+    expect(unwound).toEqual({ ok: true, unwound: 2 });
+    expect(git(res.worktreePath, 'rev-parse', 'HEAD').trim()).toBe(res.baseSha);
+
+    const cap = await captureDiff(res.worktreePath);
+    expect(cap.ok).toBe(true);
+    if (!cap.ok) return;
+    expect(cap.diff.patch).toContain('b.txt');
+    expect(cap.diff.patch).toContain('+world');
+    expect(cap.diff.statusSummary).toContain('b.txt');
+  });
+
+  it('unwindCommits refuses when HEAD is not a descendant of the base', async () => {
+    const res = await createWorktree(repo, worktreesDir, 'card-foreign');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Pretend the base is some unrelated sha: an orphan commit in the worktree.
+    git(res.worktreePath, 'config', 'user.email', 'agent@test.local');
+    git(res.worktreePath, 'config', 'user.name', 'agent');
+    git(res.worktreePath, 'checkout', '-q', '--orphan', 'tmp');
+    git(res.worktreePath, 'commit', '-qm', 'orphan root');
+    const out = await unwindCommits(res.worktreePath, res.baseSha);
+    expect(out.ok).toBe(false);
   });
 
   it('creates a detached worktree at HEAD and reports the base sha', async () => {

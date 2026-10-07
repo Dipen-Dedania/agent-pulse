@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { BacklogCard, BacklogCardState } from '../../../common/backlog-types';
+import { BacklogCard, BacklogCardState, agentLabel } from '../../../common/backlog-types';
 import { projectColor } from './project-colors';
 import { hoverLift } from '../../motion';
 import { Spinner, Tooltip } from '../Shared';
@@ -202,18 +202,25 @@ export const CardTile: React.FC<Props> = ({
           </Tooltip>
         )}
         <ShippedRibbon card={card} />
-        {/* Effective model: card override stands out, inherited default stays quiet */}
-        {(card.model ?? projectDefaultModel) && (
-          <Tooltip content={card.model ? 'Model override for this card' : 'Project default model'}>
-            <span
-              className={`px-1.5 py-0.5 rounded ${
-                card.model ? 'bg-indigo-500/15 text-indigo-300 light:text-indigo-700' : 'bg-control/40 text-faint'
-              }`}
-            >
-              {card.model ?? projectDefaultModel}
-            </span>
-          </Tooltip>
-        )}
+        {/* Agent + effective model: card override stands out, inherited default stays quiet */}
+        <Tooltip
+          content={
+            card.model
+              ? `Runs on ${agentLabel(card.agent)} — model override for this card`
+              : projectDefaultModel
+                ? `Runs on ${agentLabel(card.agent)} — its default model`
+                : `Runs on ${agentLabel(card.agent)}`
+          }
+        >
+          <span
+            className={`px-1.5 py-0.5 rounded ${
+              card.model ? 'bg-indigo-500/15 text-indigo-300 light:text-indigo-700' : 'bg-control/40 text-faint'
+            }`}
+          >
+            {card.agent === 'codex' ? 'Codex' : 'Claude'}
+            {(card.model ?? projectDefaultModel) && ` · ${card.model ?? projectDefaultModel}`}
+          </span>
+        </Tooltip>
         {card.estimatedMinutes != null && <span>~{card.estimatedMinutes}m</span>}
         {card.estimatedCostUsd != null && <span>~${card.estimatedCostUsd.toFixed(2)}</span>}
         {unmetPrereqs > 0 && (card.state === 'todo' || card.state === 'paused') && (

@@ -6,6 +6,7 @@ import {
   ATTACHMENT_MAX_FILE_BYTES,
   ATTACHMENT_MAX_TOTAL_BYTES,
   AttachmentIntent,
+  BacklogAgent,
   BacklogArtifact,
   BacklogArtifactKind,
   BacklogAttachment,
@@ -24,6 +25,7 @@ import {
   QaProvider,
   RiskTier,
   isSafeModelId,
+  normalizeAgent,
 } from '../../common/backlog-types';
 import { Database } from './db';
 
@@ -55,6 +57,7 @@ interface CardRow {
   applied_at: number | null; apply_method: string | null; applied_autorun: number;
   applied_additions: number | null; applied_deletions: number | null; applied_files: number | null;
   sort_order: number; blocked_reason: string | null; model: string | null;
+  agent: string | null;
   source_url: string | null; source_fingerprint: string | null;
   created_at: number; updated_at: number;
 }
@@ -214,6 +217,7 @@ function rowToCard(row: CardRow): BacklogCard {
     projectId: row.project_id,
     state: row.state as BacklogCardState,
     taskType: row.task_type === 'execution' || row.task_type === 'qa' ? row.task_type : 'research',
+    agent: normalizeAgent(row.agent),
     riskTier: row.risk_tier as RiskTier,
     model: row.model,
     estimatedMinutes: row.estimated_minutes,
@@ -248,6 +252,7 @@ export interface CreateCardInput {
   projectId: string;
   state?: 'refinement' | 'todo';
   taskType?: BacklogTaskType;
+  agent?: BacklogAgent;
   riskTier?: RiskTier;
   model?: string | null;
   estimatedMinutes?: number | null;
@@ -264,7 +269,7 @@ export interface CreateCardInput {
 }
 
 export type UpdateCardPatch = Partial<Pick<BacklogCard,
-  'title' | 'description' | 'projectId' | 'taskType' | 'riskTier' | 'model' |
+  'title' | 'description' | 'projectId' | 'taskType' | 'agent' | 'riskTier' | 'model' |
   'estimatedMinutes' | 'estimatedCostUsd' | 'prereqIds' |
   'qaProvider' | 'qaCommand' | 'qaUrl' | 'acceptanceCriteria'
 >>;
@@ -446,6 +451,7 @@ export class BacklogStore {
       projectId: input.projectId,
       state,
       taskType: TASK_TYPES.includes(input.taskType as BacklogTaskType) ? (input.taskType as BacklogTaskType) : 'research',
+      agent: normalizeAgent(input.agent),
       riskTier: RISK_TIERS.includes(input.riskTier as RiskTier) ? (input.riskTier as RiskTier) : 'green',
       model: normalizeModel(input.model),
       estimatedMinutes: typeof input.estimatedMinutes === 'number' ? input.estimatedMinutes : null,
@@ -474,12 +480,12 @@ export class BacklogStore {
     };
     this.db.prepare(`
       INSERT INTO cards (
-        id, title, description, project_id, state, task_type, risk_tier, model,
+        id, title, description, project_id, state, task_type, agent, risk_tier, model,
         estimated_minutes, estimated_cost_usd, prereq_ids, qa_provider, qa_command,
         qa_url, acceptance_criteria, worktree_path, base_sha, sort_order,
         blocked_reason, source_url, source_fingerprint, created_at, updated_at
       ) VALUES (
-        @id, @title, @description, @projectId, @state, @taskType, @riskTier, @model,
+        @id, @title, @description, @projectId, @state, @taskType, @agent, @riskTier, @model,
         @estimatedMinutes, @estimatedCostUsd, @prereqIds, @qaProvider, @qaCommand,
         @qaUrl, @acceptanceCriteria, @worktreePath, @baseSha, @sortOrder,
         @blockedReason, @sourceUrl, @sourceFingerprint, @createdAt, @updatedAt
@@ -501,6 +507,7 @@ export class BacklogStore {
       ...(typeof patch.description === 'string' ? { description: patch.description } : {}),
       ...(typeof patch.projectId === 'string' ? { projectId: patch.projectId } : {}),
       ...(TASK_TYPES.includes(patch.taskType as BacklogTaskType) ? { taskType: patch.taskType as BacklogTaskType } : {}),
+      ...(patch.agent !== undefined ? { agent: normalizeAgent(patch.agent) } : {}),
       ...(RISK_TIERS.includes(patch.riskTier as RiskTier) ? { riskTier: patch.riskTier as RiskTier } : {}),
       ...(patch.model !== undefined ? { model: normalizeModel(patch.model) } : {}),
       ...(patch.estimatedMinutes !== undefined ? { estimatedMinutes: patch.estimatedMinutes } : {}),
@@ -515,7 +522,7 @@ export class BacklogStore {
     this.db.prepare(`
       UPDATE cards SET
         title = @title, description = @description, project_id = @projectId,
-        task_type = @taskType, risk_tier = @riskTier, model = @model,
+        task_type = @taskType, agent = @agent, risk_tier = @riskTier, model = @model,
         estimated_minutes = @estimatedMinutes,
         estimated_cost_usd = @estimatedCostUsd, prereq_ids = @prereqIds,
         qa_provider = @qaProvider, qa_command = @qaCommand, qa_url = @qaUrl,
@@ -801,11 +808,13 @@ export class BacklogStore {
       costUsd: null,
       numTurns: null,
       sessionId: null,
+      inputTokens: null,
+      outputTokens: null,
       manual,
     };
     this.db.prepare(`
-      INSERT INTO attempts (id, card_id, started_at, ended_at, outcome, reason, cost_usd, num_turns, session_id, manual)
-      VALUES (@id, @cardId, @startedAt, @endedAt, @outcome, @reason, @costUsd, @numTurns, @sessionId, @manual)
+      INSERT INTO attempts (id, card_id, started_at, ended_at, outcome, reason, cost_usd, num_turns, session_id, input_tokens, output_tokens, manual)
+      VALUES (@id, @cardId, @startedAt, @endedAt, @outcome, @reason, @costUsd, @numTurns, @sessionId, @inputTokens, @outputTokens, @manual)
     `).run({ ...attempt, manual: manual ? 1 : 0 });
     return attempt;
   }
@@ -818,14 +827,18 @@ export class BacklogStore {
       costUsd?: number | null;
       numTurns?: number | null;
       sessionId?: string | null;
+      inputTokens?: number | null;
+      outputTokens?: number | null;
     },
   ): void {
     this.db.prepare(`
-      UPDATE attempts SET ended_at = ?, outcome = ?, reason = ?, cost_usd = ?, num_turns = ?, session_id = ?
+      UPDATE attempts SET ended_at = ?, outcome = ?, reason = ?, cost_usd = ?, num_turns = ?, session_id = ?,
+        input_tokens = ?, output_tokens = ?
       WHERE id = ?
     `).run([
       Date.now(), result.outcome, result.reason ?? null,
-      result.costUsd ?? null, result.numTurns ?? null, result.sessionId ?? null, id,
+      result.costUsd ?? null, result.numTurns ?? null, result.sessionId ?? null,
+      result.inputTokens ?? null, result.outputTokens ?? null, id,
     ]);
   }
 
@@ -865,7 +878,9 @@ export class BacklogStore {
     return rows.map((r) => ({
       id: r.id, cardId: r.card_id, startedAt: r.started_at, endedAt: r.ended_at,
       outcome: r.outcome, reason: r.reason, costUsd: r.cost_usd,
-      numTurns: r.num_turns, sessionId: r.session_id, manual: r.manual === 1,
+      numTurns: r.num_turns, sessionId: r.session_id,
+      inputTokens: r.input_tokens ?? null, outputTokens: r.output_tokens ?? null,
+      manual: r.manual === 1,
     }));
   }
 

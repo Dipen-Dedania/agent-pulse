@@ -1,92 +1,36 @@
-// Headless executor for one backlog card: spawns `claude -p` in the card's
-// project repo (research) or its detached worktree (execution), feeds the
-// prompt via STDIN, and parses the single-JSON-object output. Never throws —
+// Headless executor for one backlog card. Spawns the card's agent CLI
+// (`claude -p` or `codex exec`, via src/main/backlog/agents) in the card's
+// project repo (research / qa) or its detached worktree (execution), feeds the
+// prompt via STDIN, and hands stdout to the adapter to parse. Never throws —
 // every failure comes back as a structured result, mirroring fireOpener in
 // ../scheduler/opener.
 //
-// Safety posture:
-//  - research: never passes --dangerously-skip-permissions — headless mode
-//    denies permission-gated tools (Write/Edit/Bash) by default, so runs are
-//    read-only by construction; --disallowedTools is belt-and-braces.
-//  - execution (Phase 2): --permission-mode acceptEdits auto-approves
-//    Write/Edit INSIDE the cwd only (outside prompts → dies headlessly), and
-//    Bash stays disallowed — with no Bash the agent structurally cannot run
-//    `git commit`/`git push`, so "no commits" needs no fragile command
-//    patterns. --setting-sources user stops the target repo's own
-//    .claude/settings.json from granting more than we intend. The worktree is
-//    the blast-radius limiter; QA commands are run by the ENGINE, not the agent.
-//  - the prompt goes over stdin, never argv — user text through `cmd.exe /c`
-//    is not quoting-safe (the opener's argv args are fixed constants; ours
-//    are not). Variable argv entries are gated: the card's model by
-//    isSafeModelId, the resume session id by isSafeSessionId (both strict
-//    charsets, no cmd.exe metacharacters). The resume continuation prompt is
-//    a fixed constant, so argv is safe for it.
+// What lives here is agent-agnostic: process spawn (with the Windows cmd.exe
+// shim when the adapter says the bin needs it), the stdin feed, the hard time
+// budget, output caps, and tree kills. Everything agent-specific — the bin,
+// the argv, the safety posture, output parsing, usage-limit wording — is the
+// adapter's. See agents/claude.ts and agents/codex.ts for each posture.
+//
+// The prompt goes over stdin, never argv — user text through `cmd.exe /c` is
+// not quoting-safe. Variable argv entries are gated by the adapters (model by
+// isSafeModelId, session/thread id by isSafeSessionId, engine-controlled paths
+// quoted by buildCmdShimArgs); the resume continuation prompt is a fixed
+// constant.
 
 import { spawn, execFile, execFileSync, ChildProcess } from 'child_process';
 import { logger } from '../../common/logger';
-import { BacklogTaskType, isSafeModelId } from '../../common/backlog-types';
-import { buildCmdShimArgs, resolveClaudeBin, resetClaudeBinCache } from '../scheduler/opener';
+import { BacklogTaskType } from '../../common/backlog-types';
+import { buildCmdShimArgs } from '../scheduler/opener';
+import { AgentAdapter, AgentRunSpec } from './agents';
 
-// Verified against the installed CLI (2.1.170, Phase 2 spike): --disallowedTools
-// takes a comma-separated list; --permission-mode acceptEdits, --setting-sources
-// and -r/--resume exist; --output-format json emits one result object with
-// result/is_error/total_cost_usd/num_turns/session_id. NO --max-turns in this
-// version — the time budget kill below is the hard cap (--max-budget-usd exists
-// but card cost estimates are forecasts, not enforcement, so it is not passed).
-const RESEARCH_DISALLOWED_TOOLS = 'Write,Edit,NotebookEdit,Bash';
-const EXECUTION_DISALLOWED_TOOLS = 'Bash,NotebookEdit';
-// QA cards: research's read-only posture + ONLY the chrome-devtools-mcp tools
-// auto-approved. --strict-mcp-config ignores every other configured MCP server
-// (user-level ones included), so the run gets browser eyes and nothing else.
-const QA_ALLOWED_TOOLS = 'mcp__chrome-devtools__*';
+// Re-exported so existing imports (ipc.ts, tests) keep working after the
+// adapter split.
+export { isSafeSessionId } from './agents';
+export { parseClaudeJsonOutput, isUsageLimitError, classifyNonZeroExit } from './agents/claude';
+export type { ParsedClaudeOutput } from './agents/claude';
+
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024; // guard against a runaway stdout
 const POSIX_SIGKILL_DELAY_MS = 5_000;
-
-// Fixed constant (argv-safe: no cmd.exe metacharacters, no quotes) used with
-// --resume — print mode takes the continuation prompt on argv, not stdin.
-const RESUME_PROMPT =
-  'Continue the task from where you left off. Re-read the current state of the working directory, finish the remaining work, and follow the same output contract as before.';
-
-// Claude session ids are uuid-shaped; anything else never reaches argv.
-const SESSION_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
-export function isSafeSessionId(value: string): boolean {
-  return SESSION_ID_RE.test(value);
-}
-
-// A run that died because the subscription's usage window is exhausted is not
-// the card's fault — the engine pauses the card and latches until reset
-// instead of blocking it. Pattern-based; unmatched wordings fall back to the
-// generic failure path (one card blocked, no cascade thanks to the engine's
-// proactive gate).
-const USAGE_LIMIT_RE = /usage limit|rate.?limit|session limit|limit (?:reached|exceeded)|out of (?:credits?|quota)|exceeded.*quota|hit.*limit/i;
-export function isUsageLimitError(text: string | null | undefined): boolean {
-  return !!text && USAGE_LIMIT_RE.test(text);
-}
-
-/** Last up-to-3 non-empty lines of a stream, capped, for a compact failure detail. */
-function tailDetail(text: string): string {
-  return text.trim().split(/\r?\n/).slice(-3).join(' ').slice(0, 500);
-}
-
-/**
- * Classify a non-zero `claude -p` exit whose stdout held no parseable JSON
- * result. Usage/session-limit notices are printed to STDOUT and the process
- * exits 1 BEFORE emitting the result object, so stderr is typically empty —
- * the detail (and the usage-limit verdict) must consider stdout too. Missing
- * this is why a limit exhaustion is misfiled as a generic blocked failure and
- * cascades into the next card instead of latching until reset. Pure + tested.
- */
-export function classifyNonZeroExit(
-  code: number | null,
-  stdout: string,
-  stderr: string,
-): { reason: string; usageLimit: boolean } {
-  const detail = tailDetail(stderr) || tailDetail(stdout);
-  return {
-    reason: `claude exited with code ${code}${detail ? `: ${detail}` : ''}`,
-    usageLimit: isUsageLimitError(detail),
-  };
-}
 
 export type RunnerOutcome = 'success' | 'failed' | 'killed';
 
@@ -126,9 +70,13 @@ export interface RunnerResult {
   costUsd: number | null;
   numTurns: number | null;
   sessionId: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
 }
 
 export interface ExecuteCardOptions {
+  /** The card's agent (Claude Code or Codex). */
+  adapter: AgentAdapter;
   prompt: string;
   cwd: string;                 // project repo (research/qa) or worktree (execution)
   budgetMs: number;
@@ -136,10 +84,12 @@ export interface ExecuteCardOptions {
   model?: string | null;
   /** Resume a paused run's session (execution cards keep their worktree). */
   resumeSessionId?: string | null;
-  /** QA cards: path to the generated chrome-devtools MCP config (engine-written
-   * fixed location under userData — spaced paths are fine, buildCmdShimArgs
-   * quotes argv entries with whitespace). Required when taskType is 'qa'. */
+  /** Claude QA cards: path to the generated chrome-devtools MCP config. */
   mcpConfigPath?: string | null;
+  /** Codex QA cards: the Codex config profile carrying the chrome-devtools server. */
+  qaProfile?: string | null;
+  /** Codex: engine-controlled path for the agent's last message (`-o`). */
+  outputFile?: string | null;
 }
 
 export interface RunnerHandle {
@@ -153,58 +103,9 @@ export interface RunnerHandle {
   /**
    * Blocking variant for app quit: `before-quit` is synchronous, so an async
    * taskkill may not finish before Electron exits, orphaning the cmd.exe →
-   * claude subtree (which keeps spending tokens).
+   * CLI subtree (which keeps spending tokens).
    */
   killSync: (reason: string) => void;
-}
-
-export interface ParsedClaudeOutput {
-  ok: boolean;
-  report?: string;
-  reason?: string;
-  costUsd: number | null;
-  numTurns: number | null;
-  sessionId: string | null;
-}
-
-/**
- * Parse `claude -p --output-format json` stdout: a single JSON object, though
- * warnings may precede it — scan lines from the end for the result object.
- * Pure function, unit-tested.
- */
-export function parseClaudeJsonOutput(stdout: string): ParsedClaudeOutput {
-  const fail = (reason: string): ParsedClaudeOutput =>
-    ({ ok: false, reason, costUsd: null, numTurns: null, sessionId: null });
-
-  const lines = stdout.trim().split(/\r?\n/);
-  let parsed: any = null;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line.startsWith('{')) continue;
-    try {
-      const candidate = JSON.parse(line);
-      if (candidate && typeof candidate === 'object' && 'result' in candidate) {
-        parsed = candidate;
-        break;
-      }
-    } catch {
-      // keep scanning
-    }
-  }
-  if (!parsed) return fail('no JSON result object found in claude output');
-
-  const costUsd = typeof parsed.total_cost_usd === 'number' ? parsed.total_cost_usd : null;
-  const numTurns = typeof parsed.num_turns === 'number' ? parsed.num_turns : null;
-  const sessionId = typeof parsed.session_id === 'string' ? parsed.session_id : null;
-
-  if (parsed.is_error) {
-    return { ok: false, reason: typeof parsed.result === 'string' && parsed.result ? parsed.result : 'claude reported an error', costUsd, numTurns, sessionId };
-  }
-  const report = typeof parsed.result === 'string' ? parsed.result.trim() : '';
-  if (!report) {
-    return { ok: false, reason: 'claude returned an empty result', costUsd, numTurns, sessionId };
-  }
-  return { ok: true, report, costUsd, numTurns, sessionId };
 }
 
 /** Kill a child and (on Windows) its whole cmd.exe subtree. */
@@ -241,27 +142,35 @@ function killTreeSync(child: ChildProcess): void {
 }
 
 /**
- * Execute one card run: `claude -p` with `cwd` set to the project repo
- * (research) or the card's worktree (execution), under a hard time budget.
- * `model` (the card's override) is passed as `--model` when set; null falls
- * back to the project/CLI default. When `resumeSessionId` is set the run
- * continues a paused session in place (fixed continuation prompt on argv);
- * an unusable session id degrades to a fresh run — the worktree still holds
- * the partial work. The returned handle's `kill` is also used by the engine
- * for window-end grace expiry and app quit.
+ * Execute one card run with the card's agent, `cwd` set to the project repo
+ * (research / qa) or the card's worktree (execution), under a hard time
+ * budget. `model` (the card's override) is passed through the adapter when
+ * set; null falls back to the agent's default. When `resumeSessionId` is set
+ * the run continues a paused session in place; an unusable session id
+ * degrades to a fresh run — the worktree still holds the partial work. The
+ * returned handle's `kill` is also used by the engine for window-end grace
+ * expiry and app quit.
  */
 export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
-  const { prompt, cwd, budgetMs, taskType, model, resumeSessionId, mcpConfigPath } = opts;
+  const { adapter, prompt, cwd, budgetMs, taskType, model, resumeSessionId, mcpConfigPath, qaProfile, outputFile } = opts;
+  const tag = `[Backlog/runner:${adapter.id}]`;
   let killInfo: { reason: string; attemptOutcome: 'killed' | 'paused' } | null = null;
   let child: ChildProcess | null = null;
 
   const promise = new Promise<RunnerResult>((resolve) => {
     const failed = (reason: string): RunnerResult =>
-      ({ outcome: 'failed', reason, costUsd: null, numTurns: null, sessionId: null });
+      ({ outcome: 'failed', reason, costUsd: null, numTurns: null, sessionId: null, inputTokens: null, outputTokens: null });
 
-    const bin = resolveClaudeBin();
+    const bin = adapter.resolveBin();
     if (!bin) {
-      resolve(failed('claude CLI not found on PATH'));
+      resolve(failed(`${adapter.id} CLI not found on PATH`));
+      return;
+    }
+
+    const spec: AgentRunSpec = { taskType, model, resumeSessionId, cwd, mcpConfigPath, qaProfile, outputFile };
+    const built = adapter.buildArgs(spec);
+    if (!built.ok) {
+      resolve(failed(built.reason));
       return;
     }
 
@@ -270,57 +179,19 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
     // the opener). A bare `['/c', bin, ...]` breaks the moment a SECOND spaced
     // argv entry appears (the resume prompt): cmd then strips the first/last
     // quote and a spaced bin path like `C:\Program Files\...` dies as
-    // `'C:\Program' is not recognized`. The bin path comes from `where`, and
-    // all argv entries are fixed constants or strict-charset-gated; the
-    // untrusted prompt goes over stdin.
-    const isWin = process.platform === 'win32';
-    const file = isWin ? (process.env.ComSpec || 'cmd.exe') : bin;
-    if (taskType === 'qa' && !mcpConfigPath) {
-      // The browser tools ARE the task — a QA run without them would burn a
-      // turn discovering it can't see anything.
-      resolve(failed('QA run started without an MCP config path'));
-      return;
-    }
-    const baseArgs = taskType === 'execution'
-      ? ['-p', '--output-format', 'json', '--permission-mode', 'acceptEdits',
-         '--disallowedTools', EXECUTION_DISALLOWED_TOOLS, '--setting-sources', 'user']
-      : ['-p', '--output-format', 'json', '--disallowedTools', RESEARCH_DISALLOWED_TOOLS];
-    if (taskType === 'qa') {
-      // The config path is engine-controlled (fixed file under userData), not
-      // user text; buildCmdShimArgs quotes it if the path contains spaces.
-      baseArgs.push(
-        '--mcp-config', mcpConfigPath!,
-        '--strict-mcp-config',
-        '--allowedTools', QA_ALLOWED_TOOLS,
-      );
-    }
-    if (model) {
-      // Store normalization should have rejected unsafe values already —
-      // re-check here since this string reaches cmd.exe argv.
-      if (isSafeModelId(model)) baseArgs.push('--model', model);
-      else logger.warn(`[Backlog/runner] ignoring unsafe model id ${JSON.stringify(model)} — using default`);
-    }
-    let resuming = false;
-    if (resumeSessionId) {
-      if (isSafeSessionId(resumeSessionId)) {
-        // Print mode takes the continuation prompt on argv, not stdin; both
-        // entries are safe (gated id + fixed constant).
-        baseArgs.push('--resume', resumeSessionId, RESUME_PROMPT);
-        resuming = true;
-      } else {
-        logger.warn('[Backlog/runner] unsafe session id — starting a fresh run instead of resuming');
-      }
-    }
-    const args = isWin ? buildCmdShimArgs(bin, baseArgs) : baseArgs;
+    // `'C:\Program' is not recognized`. A real .exe spawns directly.
+    const viaCmd = adapter.needsCmdShim(bin);
+    const file = viaCmd ? (process.env.ComSpec || 'cmd.exe') : bin;
+    const args = viaCmd ? buildCmdShimArgs(bin, built.args) : built.args;
 
     let proc: ChildProcess;
     try {
       proc = spawn(file, args, {
         cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
-        windowsVerbatimArguments: isWin,
+        windowsVerbatimArguments: viaCmd,
       });
     } catch (e: any) {
-      resolve(failed(`failed to spawn claude: ${e?.message ?? e}`));
+      resolve(failed(`failed to spawn ${adapter.id}: ${e?.message ?? e}`));
       return;
     }
     child = proc;
@@ -333,7 +204,7 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
     const budgetTimer = setTimeout(() => {
       if (killInfo) return; // an earlier kill already owns the outcome
       killInfo = { reason: `time budget exceeded (${Math.round(budgetMs / 60_000)} min)`, attemptOutcome: 'killed' };
-      logger.warn(`[Backlog/runner] ${killInfo.reason} — killing process tree`);
+      logger.warn(`${tag} ${killInfo.reason} — killing process tree`);
       killTree(proc);
     }, budgetMs);
     budgetTimer.unref?.();
@@ -354,8 +225,8 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
     });
 
     proc.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'ENOENT') resetClaudeBinCache();
-      settle(failed(`claude process error: ${err.message}`));
+      if (err.code === 'ENOENT') adapter.resetBinCache();
+      settle(failed(`${adapter.id} process error: ${err.message}`));
     });
 
     proc.on('close', (code) => {
@@ -364,27 +235,26 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
           outcome: 'killed',
           reason: killInfo.reason,
           killOutcome: killInfo.attemptOutcome,
-          costUsd: null,
-          numTurns: null,
-          sessionId: null,
+          costUsd: null, numTurns: null, sessionId: null, inputTokens: null, outputTokens: null,
         });
         return;
       }
-      const parsed = parseClaudeJsonOutput(stdout);
+      const parsed = adapter.parseOutput(stdout, spec);
       if (!parsed.ok && stdoutTruncated) {
-        settle(failed(`claude output exceeded ${MAX_OUTPUT_BYTES / (1024 * 1024)}MB and was truncated — the result could not be parsed`));
+        settle(failed(`${adapter.id} output exceeded ${MAX_OUTPUT_BYTES / (1024 * 1024)}MB and was truncated — the result could not be parsed`));
         return;
       }
+      const tokens = { inputTokens: parsed.inputTokens, outputTokens: parsed.outputTokens };
       if (code !== 0 && !parsed.ok) {
-        const { reason, usageLimit } = classifyNonZeroExit(code, stdout, stderr);
-        settle({ ...failed(reason), usageLimit });
+        const { reason, usageLimit } = adapter.classifyNonZeroExit(code, stdout, stderr);
+        settle({ ...failed(reason), usageLimit, costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId, ...tokens });
         return;
       }
       if (!parsed.ok) {
         settle({
           outcome: 'failed', reason: parsed.reason,
-          usageLimit: isUsageLimitError(parsed.reason),
-          costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId,
+          usageLimit: adapter.isUsageLimitError(parsed.reason),
+          costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId, ...tokens,
         });
         return;
       }
@@ -392,14 +262,14 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
         outcome: 'success',
         report: parsed.report,
         selfStatus: parseSelfReportedStatus(parsed.report),
-        costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId,
+        costUsd: parsed.costUsd, numTurns: parsed.numTurns, sessionId: parsed.sessionId, ...tokens,
       });
     });
 
-    // Feed the prompt and close stdin so -p reads it as the full input. On
-    // resume the prompt already went on argv — just close stdin.
+    // Feed the prompt and close stdin so the CLI reads it as the full input.
+    // On resume the prompt already went on argv — just close stdin.
     proc.stdin?.on('error', () => { /* EPIPE if the child died early — close handler reports it */ });
-    if (!resuming) proc.stdin?.write(prompt, 'utf8');
+    if (!built.resuming) proc.stdin?.write(prompt, 'utf8');
     proc.stdin?.end();
   });
 
@@ -408,13 +278,13 @@ export function executeCard(opts: ExecuteCardOptions): RunnerHandle {
     kill: (reason, attemptOutcome) => {
       if (!child || child.exitCode !== null || killInfo) return;
       killInfo = { reason, attemptOutcome };
-      logger.info(`[Backlog/runner] kill requested: ${reason}`);
+      logger.info(`${tag} kill requested: ${reason}`);
       killTree(child);
     },
     killSync: (reason) => {
       if (!child || child.exitCode !== null) return;
       if (!killInfo) killInfo = { reason, attemptOutcome: 'paused' };
-      logger.info(`[Backlog/runner] sync kill: ${reason}`);
+      logger.info(`${tag} sync kill: ${reason}`);
       killTreeSync(child);
     },
   };

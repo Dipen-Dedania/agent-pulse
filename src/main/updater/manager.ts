@@ -8,6 +8,7 @@ import {
   UpdateProgressLite,
 } from '../../common/updater-types';
 import { UserConfig, UpdaterConfig } from '../user-config';
+import { RELEASES_PAGE } from '../../common/links';
 
 // On-launch check fires after a random delay in this window so a fleet of
 // users behind one corporate NAT don't all hit the GitHub API simultaneously
@@ -23,10 +24,8 @@ const PERIODIC_CHECK_MS = 6 * 60 * 60 * 1000;
 // "Check now" and chew through 60 unauthenticated requests in a minute.
 const MANUAL_CHECK_THROTTLE_MS = 10 * 60 * 1000;
 
-// Human-facing release page. Owner/repo mirror GITHUB_PUBLISH in
-// electron-builder.config.cjs; the release workflow attaches every
-// installer (exe, dmg, AppImage) to the GitHub Release for the tag.
-const RELEASES_PAGE = 'https://github.com/Dipen-Dedania/agent-pulse/releases';
+// RELEASES_PAGE (common/links.ts) is the human-facing release page; the
+// release workflow attaches every installer (exe, dmg, AppImage) there.
 
 // macOS: electron-updater can *check* against latest-mac.yml without any
 // signing, but Squirrel.Mac refuses to install an unsigned bundle. Until a

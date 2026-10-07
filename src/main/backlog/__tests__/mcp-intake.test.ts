@@ -29,14 +29,16 @@ describe('normalizeCardRequest', () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.value.title).toBe('Fix the bubble');
-    expect(res.value).toMatchObject({ taskType: 'execution', riskTier: 'green', state: 'todo', estimatedMinutes: null });
+    expect(res.value).toMatchObject({ taskType: 'execution', agent: 'claude', riskTier: 'green', state: 'todo', estimatedMinutes: null });
   });
 
   it('keeps valid enums and drops invalid ones back to the default', () => {
     const good = normalizeCardRequest({ ...base, taskType: 'research', riskTier: 'amber', state: 'refinement' });
     expect(good.ok && good.value).toMatchObject({ taskType: 'research', riskTier: 'amber', state: 'refinement' });
-    const bad = normalizeCardRequest({ ...base, taskType: 'deploy', riskTier: 'chartreuse', state: 'done' });
-    expect(bad.ok && bad.value).toMatchObject({ taskType: 'execution', riskTier: 'green', state: 'todo' });
+    const bad = normalizeCardRequest({ ...base, taskType: 'deploy', riskTier: 'chartreuse', state: 'done', agent: 'gemini' });
+    expect(bad.ok && bad.value).toMatchObject({ taskType: 'execution', agent: 'claude', riskTier: 'green', state: 'todo' });
+    const codex = normalizeCardRequest({ ...base, agent: 'codex' });
+    expect(codex.ok && codex.value).toMatchObject({ agent: 'codex' });
   });
 
   it('cleans acceptance criteria and rounds estimates up to at least a minute', () => {

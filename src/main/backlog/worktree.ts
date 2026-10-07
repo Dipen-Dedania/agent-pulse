@@ -131,6 +131,35 @@ export async function captureDiff(worktreePath: string): Promise<
   return { ok: true, diff: { patch, statusSummary: status.stdout.trimEnd(), truncated } };
 }
 
+/**
+ * Fold any commits the executor made on top of `baseSha` back into the working
+ * tree (`git reset --soft`), so captureDiff still sees them as uncommitted
+ * changes. The contract says "never commit": Claude can't (no shell), and the
+ * Codex sandbox blocks the worktree's git dir in the main repo (verified in
+ * the plan spike), but this is the guarantee that doesn't depend on either.
+ * Returns how many commits were unwound; 0 when HEAD is still the base.
+ */
+export async function unwindCommits(
+  worktreePath: string,
+  baseSha: string,
+): Promise<{ ok: true; unwound: number } | { ok: false; reason: string }> {
+  const head = await runGit(worktreePath, ['rev-parse', 'HEAD']);
+  if (!head.ok) return { ok: false, reason: head.reason };
+  if (head.stdout.trim() === baseSha) return { ok: true, unwound: 0 };
+
+  // Only unwind forward history from the base; if HEAD isn't a descendant
+  // (checkout elsewhere, rewritten history) refuse rather than destroy work.
+  const ancestry = await runGit(worktreePath, ['merge-base', '--is-ancestor', baseSha, 'HEAD']);
+  if (!ancestry.ok) return { ok: false, reason: `worktree HEAD is not a descendant of the base commit ${baseSha.slice(0, 12)}` };
+  const count = await runGit(worktreePath, ['rev-list', '--count', `${baseSha}..HEAD`]);
+  const unwound = count.ok ? Number.parseInt(count.stdout.trim(), 10) || 0 : 0;
+
+  const reset = await runGit(worktreePath, ['reset', '--soft', baseSha]);
+  if (!reset.ok) return { ok: false, reason: reset.reason };
+  logger.warn(`[Backlog/worktree] unwound ${unwound} commit(s) in ${worktreePath} back to ${baseSha.slice(0, 12)}`);
+  return { ok: true, unwound };
+}
+
 export type ApplyResult =
   | { ok: true; empty?: boolean; alreadyApplied?: boolean; threeWay?: boolean; stashed?: boolean; stashConflicted?: boolean; statusSummary?: string; changedFiles?: string[]; additions?: number; deletions?: number }
   | { ok: false; reason: string; conflicted?: boolean; dirtyTarget?: boolean };

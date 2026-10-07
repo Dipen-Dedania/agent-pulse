@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { BacklogPopulationConfig, IssueFilterMode } from '../../../common/backlog-types';
 import { GlassToggle, Input, Select } from '../Shared';
 
-// Settings → Usage → Claude Code: issue population config (Phase 3), sibling of
-// the Backlog Scheduler section. Governs GitLab + Linear population defaults.
+// Settings → Usage → Claude Code: issue population config (Phase 3). Stays under
+// Claude Code because the scouts run on `claude -p`; the agent-neutral Backlog
+// Scheduler moved behind ⚙ on the board. Governs GitLab + Linear population defaults.
 // The per-project link + scan + review live on the board itself; this governs
 // defaults + the optional background refresh. See backlog-phase3-gitlab-population-plan.md.
 

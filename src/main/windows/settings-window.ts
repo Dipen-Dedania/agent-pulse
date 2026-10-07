@@ -1,6 +1,7 @@
 import { BrowserWindow, app, nativeTheme } from 'electron';
 import path from 'path';
 import { ENABLE_APP_MENU } from '../feature-flags';
+import { TITLE_BAR_HEIGHT, titleBarOverlayColors } from '../../common/title-bar';
 
 function getAppIconPath(): string {
   // 512x512 PNG works on every platform and scales down to taskbar/title-bar sizes
@@ -30,6 +31,7 @@ export class SettingsWindow {
       return;
     }
 
+    const isMac = process.platform === 'darwin';
     this.window = new BrowserWindow({
       width: 900,
       height: 680,
@@ -37,6 +39,17 @@ export class SettingsWindow {
       icon: getAppIconPath(),
       backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f172a' : '#f8fafc',
       autoHideMenuBar: !ENABLE_APP_MENU,
+      // Custom title bar: hide the OS caption and let the renderer draw the bar
+      // (src/renderer/components/Chrome). The OS still paints min/max/close on
+      // Windows/Linux and the traffic lights on macOS, so snap layouts,
+      // double-click-to-maximize and the system menu keep working. On macOS
+      // `true` only switches on the `titlebar-area-*` CSS env vars; colours are
+      // a Windows/Linux concept.
+      titleBarStyle: 'hidden',
+      titleBarOverlay: isMac
+        ? true
+        : { ...titleBarOverlayColors(nativeTheme.shouldUseDarkColors), height: TITLE_BAR_HEIGHT },
+      ...(isMac ? { trafficLightPosition: { x: 14, y: 14 } } : {}),
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'), // Will create preload later
         nodeIntegration: false,
@@ -72,8 +85,25 @@ export class SettingsWindow {
       });
     }
 
+    // Keep the native caption buttons in step with the theme. Both the user's
+    // toggle (appearance:update-config → nativeTheme.themeSource) and an OS
+    // theme change in `auto` surface as nativeTheme 'updated'.
+    nativeTheme.on('updated', this.syncTitleBarOverlay);
+
     this.window.on('closed', () => {
+      nativeTheme.off('updated', this.syncTitleBarOverlay);
       this.window = null;
     });
   }
+
+  private syncTitleBarOverlay = () => {
+    if (process.platform === 'darwin') return;
+    const win = this.window;
+    if (!win || win.isDestroyed()) return;
+    try {
+      win.setTitleBarOverlay(titleBarOverlayColors(nativeTheme.shouldUseDarkColors));
+    } catch {
+      // Some Linux window managers don't expose the overlay; the bar still works.
+    }
+  };
 }

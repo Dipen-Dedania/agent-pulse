@@ -58,6 +58,7 @@ interface BacklogStore {
     title: string; description: string; projectId: string;
     state?: 'refinement' | 'todo';
     taskType?: BacklogCard['taskType'];
+    agent?: BacklogCard['agent'];
     riskTier?: BacklogCard['riskTier'];
     model?: string | null;
     estimatedMinutes?: number | null;

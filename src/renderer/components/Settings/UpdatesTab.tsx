@@ -2,6 +2,7 @@ import React from 'react';
 import { UpdaterState } from '../../../common/updater-types';
 import { logger } from '../../../common/logger';
 import { useUpdaterState } from '../../hooks/useUpdaterState';
+import { useStarNudge } from '../../hooks/useStarNudge';
 import { Badge, GlassToggle, Button, Meter, type BadgeTone } from '../Shared';
 
 function formatBytes(n: number): string {
@@ -44,6 +45,9 @@ const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ chi
 export const UpdatesTab: React.FC = () => {
   // Live state from main (shared with the Settings panel's tab badge).
   const [state, setState] = useUpdaterState();
+  // GitHub star nudge: a line under "Up to date", gone once the user has
+  // clicked any star control. Hooks run before the early return below.
+  const starNudge = useStarNudge();
 
   if (!state) {
     return <p className='text-muted text-sm'>Loading…</p>;
@@ -147,6 +151,17 @@ export const UpdatesTab: React.FC = () => {
           <p className='mt-3 text-xs text-danger font-mono bg-red-500/10 border border-red-500/30 rounded-lg p-2'>
             {state.errorMessage}
           </p>
+        )}
+        {state.status === 'not-available' && starNudge.state && starNudge.copy && !starNudge.state.starred && (
+          <div
+            data-testid='star-nudge-up-to-date'
+            className='mt-4 pt-4 border-t border-edge/40 flex items-center justify-between gap-4'
+          >
+            <p className='text-sm text-muted'>{starNudge.copy.upToDate}</p>
+            <Button variant='secondary' size='sm' onClick={starNudge.star} className='shrink-0'>
+              {starNudge.copy.star}
+            </Button>
+          </div>
         )}
       </Card>
 

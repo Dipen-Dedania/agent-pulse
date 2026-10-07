@@ -7,7 +7,7 @@ const NOW = Date.UTC(2026, 7, 3, 12, 0, 0);
 function card(over: Partial<BacklogCard> = {}): BacklogCard {
   return {
     id: 'c1', title: 't', description: '', projectId: 'p1',
-    state: 'todo', taskType: 'research', riskTier: 'green',
+    state: 'todo', taskType: 'research', agent: 'claude', riskTier: 'green',
     model: null, estimatedMinutes: null, estimatedCostUsd: null,
     prereqIds: [], qaProvider: 'none', qaCommand: null, qaUrl: null,
     acceptanceCriteria: [], worktreePath: null, baseSha: null,

@@ -45,6 +45,10 @@ rounded-2xl` shells. `npm run lint:ui` enforces these rules and runs as part of 
 ## 📂 Project Structure
 - `src/main/bridge/`: HTTP server (port 4242) and status state management.
 - `src/main/installer/`: Tool detection and hook configuration writing logic.
+- `src/main/backlog/`: Backlog board + scheduler engine. Cards run headlessly on a per-card
+  agent (`claude -p` or `codex exec`) behind the `AgentAdapter` seam in `backlog/agents/` —
+  the engine and `runner.ts` never branch on the CLI; add agent-specific argv, parsing, or
+  usage-limit wording in the adapter, not the engine. See `codex-backlog-plan.md`.
 - `src/main/mcp/`: The Agent Pulse MCP server for Claude Code (backlog capture from a
   terminal chat) plus its `~/.claude.json` registration. `server.ts` runs as its own
   process — it must never import Electron or add npm dependencies.

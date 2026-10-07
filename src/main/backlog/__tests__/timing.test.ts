@@ -30,6 +30,7 @@ function card(partial: Partial<BacklogCard>): BacklogCard {
     projectId: 'p1',
     state: 'todo',
     taskType: 'research',
+    agent: 'claude',
     riskTier: 'green',
     model: null,
     estimatedMinutes: null,
@@ -256,5 +257,29 @@ describe('forecastNextWindow', () => {
       card({ id: 'gated', sortOrder: 10, estimatedMinutes: 30, prereqIds: ['dep'] }),
     ];
     expect(forecastNextWindow(cards, [NIGHTS], now)!.cardCount).toBe(2);
+  });
+});
+
+describe('pickNextCard — per-agent usage latch', () => {
+  const HOUR = 60 * 60_000;
+
+  it('skips cards whose agent is latched and keeps the other agent flowing', () => {
+    const cards = [
+      card({ id: 'codex-first', agent: 'codex', sortOrder: 0 }),
+      card({ id: 'claude-second', agent: 'claude', sortOrder: 10 }),
+    ];
+    expect(pickNextCard(cards, HOUR)!.id).toBe('codex-first');
+    expect(pickNextCard(cards, HOUR, new Set(['codex']))!.id).toBe('claude-second');
+    expect(pickNextCard(cards, HOUR, new Set(['claude']))!.id).toBe('codex-first');
+    expect(pickNextCard(cards, HOUR, new Set(['claude', 'codex']))).toBeNull();
+  });
+
+  it('a latched agent still loses its paused-first priority to the other agent', () => {
+    const cards = [
+      card({ id: 'codex-paused', agent: 'codex', state: 'paused', sortOrder: 99 }),
+      card({ id: 'claude-todo', agent: 'claude', sortOrder: 0 }),
+    ];
+    expect(pickNextCard(cards, HOUR)!.id).toBe('codex-paused');
+    expect(pickNextCard(cards, HOUR, new Set(['codex']))!.id).toBe('claude-todo');
   });
 });

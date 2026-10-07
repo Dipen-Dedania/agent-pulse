@@ -39,6 +39,12 @@ interface ModalProps {
    * callers are unaffected.
    */
   portal?: boolean;
+  /**
+   * Focus the first field (or focusable) on open. Defaults to true. Turn off
+   * for a long settings dialog whose first input sits below the fold — the
+   * autofocus would scroll the opening view past its own summary.
+   */
+  autoFocus?: boolean;
 }
 
 const FOCUSABLE =
@@ -55,6 +61,7 @@ export const Modal: React.FC<ModalProps> = ({
   panelClass = '',
   zClass = 'z-50',
   portal = false,
+  autoFocus = true,
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -62,9 +69,11 @@ export const Modal: React.FC<ModalProps> = ({
     const panel = panelRef.current;
     // Land focus on the first real field so keyboard users start inside the
     // form, not on the close button behind them.
-    const firstField = panel?.querySelector<HTMLElement>('input, textarea, select');
-    const firstFocusable = panel?.querySelector<HTMLElement>(FOCUSABLE);
-    (firstField ?? firstFocusable)?.focus();
+    if (autoFocus) {
+      const firstField = panel?.querySelector<HTMLElement>('input, textarea, select');
+      const firstFocusable = panel?.querySelector<HTMLElement>(FOCUSABLE);
+      (firstField ?? firstFocusable)?.focus();
+    }
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -88,7 +97,7 @@ export const Modal: React.FC<ModalProps> = ({
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, autoFocus]);
 
   const tree = (
     <motion.div

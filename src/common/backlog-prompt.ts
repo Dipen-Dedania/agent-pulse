@@ -34,13 +34,15 @@ export function attachmentLines(attachments: PromptAttachment[]): string[] {
   return lines;
 }
 
-// Phase 1 contract: research only. The runner never grants write permissions
-// (headless `claude -p` denies Write/Edit/Bash by default and we add
-// --disallowedTools as belt-and-braces), so this instruction is the third
-// layer — it shapes the output into a report instead of attempted edits.
+// Research contract. The runner never grants write access (Claude: headless
+// `claude -p` denies Write/Edit/Bash and we add --disallowedTools; Codex:
+// `-s read-only` sandbox), so this instruction is the last layer — it shapes
+// the output into a report instead of attempted edits. Wording is agent-
+// neutral: capabilities, not tool names.
 const RESEARCH_CONTRACT = `---
 This is a READ-ONLY research task. Do not create, modify, or delete any files;
-do not run commands that change state. Investigate using read-only tools only.
+do not run commands that change state. Investigate using read-only means only
+(reading files, searching, listing).
 
 Output your findings as a complete, self-contained markdown report as your
 final message. The final message IS the deliverable — include all sections,
@@ -68,16 +70,20 @@ export function buildResearchPrompt(
   ].join('\n');
 }
 
-// Phase 2 execution contract. Layer 3 of the safety posture: the runner
-// already denies Bash (no git possible) and confines Write/Edit to the
-// worktree cwd via acceptEdits — this shapes behavior and the output format.
+// Execution contract. Last layer of the safety posture: the runner confines
+// edits to the worktree (Claude: acceptEdits with no Bash, so git is
+// impossible; Codex: workspace-write sandbox, where the worktree's git dir in
+// the main repo is outside the writable root) and the engine folds any commit
+// back into the working tree before capturing the diff — this shapes behavior
+// and the output format. Wording is agent-neutral.
 const EXECUTION_CONTRACT = `---
 This is a CODE CHANGE task running in an isolated git worktree.
 
 Rules:
 - Edit files only inside the current working directory.
 - Do NOT commit, stage, branch, or push — leave ALL changes as uncommitted
-  files in the working tree. The diff is your deliverable.
+  files in the working tree. The diff is your deliverable. If a git command
+  is denied, that is expected: do not retry it or work around it.
 - If the task turns out to be impossible or unsafe, change nothing and explain
   why in your final message.
 
@@ -93,8 +99,9 @@ Finish your final message with a status line on its own line, exactly one of:
                        Do not guess at an implementation you cannot verify.`;
 
 // QA contract: research's read-only posture + chrome-devtools-mcp browser
-// tools. The runner allows ONLY mcp__chrome-devtools__* beyond the read-only
-// defaults (Write/Edit/Bash stay disallowed), so "changes nothing" is
+// tools. The runner keeps the run read-only (Claude: only the chrome-devtools
+// MCP tools are allowed beyond the read-only defaults; Codex: `-s read-only`
+// with the MCP server injected via a config profile), so "changes nothing" is
 // structural; screenshots are written by the MCP server via take_screenshot's
 // filePath parameter, not by the agent.
 const QA_CONTRACT = `---

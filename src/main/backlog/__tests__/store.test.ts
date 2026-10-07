@@ -132,7 +132,7 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
   it('attempts and artifacts round-trip with outcome fields', () => {
     const card = store.createCard({ title: 'x', projectId, state: 'todo' });
     const attempt = store.insertAttempt(card.id, false);
-    store.finishAttempt(attempt.id, { outcome: 'success', costUsd: 0.42, numTurns: 7, sessionId: 'sess-1' });
+    store.finishAttempt(attempt.id, { outcome: 'success', costUsd: 0.42, numTurns: 7, sessionId: 'sess-1', inputTokens: 1700, outputTokens: 12 });
     store.insertArtifact({ cardId: card.id, attemptId: attempt.id, path: 'C:\\x\\r.md', preview: 'hello' });
 
     const attempts = store.listAttempts(card.id);
@@ -140,11 +140,24 @@ describe.skipIf(!dbAvailable)('BacklogStore', () => {
     expect(attempts[0].outcome).toBe('success');
     expect(attempts[0].costUsd).toBeCloseTo(0.42);
     expect(attempts[0].manual).toBe(false);
+    expect(attempts[0].inputTokens).toBe(1700);
+    expect(attempts[0].outputTokens).toBe(12);
 
     const artifacts = store.listArtifacts(card.id);
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0].preview).toBe('hello');
     expect(store.getArtifact(artifacts[0].id)!.path).toBe('C:\\x\\r.md');
+  });
+
+  it('cards carry an agent: default claude, codex accepted, unknown normalized', () => {
+    expect(store.createCard({ title: 'a', projectId }).agent).toBe('claude');
+    const codex = store.createCard({ title: 'b', projectId, agent: 'codex' });
+    expect(codex.agent).toBe('codex');
+    expect(store.getCard(codex.id)!.agent).toBe('codex');
+    expect(store.updateCard(codex.id, { agent: 'gemini' as any })!.agent).toBe('claude');
+    expect(store.updateCard(codex.id, { agent: 'codex' })!.agent).toBe('codex');
+    // A patch without `agent` leaves it alone.
+    expect(store.updateCard(codex.id, { title: 'b2' })!.agent).toBe('codex');
   });
 
   it('countConsecutiveKills counts trailing budget kills and resets on other outcomes', () => {
@@ -648,6 +661,11 @@ describe.skipIf(!dbAvailable)('backlog schema migration v2 → v9', () => {
       const project = store.listProjects().find((p) => p.id === 'p1')!;
       expect(project.source).toBeNull();
       expect(project.sourceLastScanAt).toBeNull();
+      // v11: every pre-existing card ran on Claude; attempts gain token columns.
+      expect(card.agent).toBe('claude');
+      const att = store.insertAttempt('c1', false);
+      store.finishAttempt(att.id, { outcome: 'success', inputTokens: 10, outputTokens: 2 });
+      expect(store.listAttempts('c1')[0]).toMatchObject({ inputTokens: 10, outputTokens: 2 });
       expect(project.issueFilter).toEqual({ mode: 'assigned', labels: [] });
       expect(card.sourceUrl).toBeNull();
       expect(card.sourceFingerprint).toBeNull();

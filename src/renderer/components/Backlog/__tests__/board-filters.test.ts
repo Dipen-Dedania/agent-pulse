@@ -15,7 +15,7 @@ const DAY = 86_400_000;
 function card(over: Partial<BacklogCard> = {}): BacklogCard {
   return {
     id: 'c1', title: 't', description: '', projectId: 'p1',
-    state: 'done', taskType: 'execution', riskTier: 'green',
+    state: 'done', taskType: 'execution', agent: 'claude', riskTier: 'green',
     model: null, estimatedMinutes: null, estimatedCostUsd: null,
     prereqIds: [], qaProvider: 'none', qaCommand: null, qaUrl: null,
     acceptanceCriteria: [], worktreePath: 'E:/wt/c1', baseSha: 'sha',

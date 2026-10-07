@@ -231,6 +231,48 @@ input[type='range']:disabled::-webkit-slider-thumb {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
+/* ── Custom title bar (Window Controls Overlay) ─────────────────────────────
+   The Settings window hides the OS caption; this strip is what the renderer
+   draws instead (components/Chrome/TitleBar). The OS paints its own controls
+   in the overlay — min/max/close at the right on Windows/Linux, traffic lights
+   at the left on macOS — and exposes the free region through the
+   `titlebar-area-*` env vars, so `.title-bar-inner` never overlaps them and no
+   per-platform branching is needed in JSX. Height and the solid colours mirror
+   src/common/title-bar.ts. */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+.title-bar {
+  position: relative;
+  z-index: 2; /* above the fixed wallpaper noise layer */
+  flex-shrink: 0;
+  width: 100%;
+  height: env(titlebar-area-height, 40px);
+  user-select: none;
+}
+.title-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0 0.75rem;
+  margin-left: env(titlebar-area-x, 0px);
+  width: env(titlebar-area-width, 100%);
+}
+/* Solid fallback: matches TITLE_BAR_COLORS so the strip and the native overlay
+   read as one bar. Dropped when TITLE_BAR_OVERLAY_TRANSPARENT is on. */
+.title-bar-solid {
+  background: #0f172a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+[data-theme='light'] .title-bar-solid {
+  background: #f8fafc;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
 /* ── Liquid Glass surfaces (Phase 3) ─────────────────────────────────────── */
 @layer components {
   /* Tier 1 — Section cards, tab bar */

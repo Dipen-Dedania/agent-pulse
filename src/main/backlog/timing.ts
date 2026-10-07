@@ -8,7 +8,7 @@
 // unlike the Cowork scheduler's fire instants.
 
 import { parseHHmm } from '../scheduler/timing';
-import { BacklogCard, BacklogSlot, countUnmetPrereqs } from '../../common/backlog-types';
+import { BacklogAgent, BacklogCard, BacklogSlot, countUnmetPrereqs } from '../../common/backlog-types';
 
 // Per-card hard time budget (minutes) when the card has no estimate, and the
 // clamp applied to user estimates so a typo can't produce a 10-hour run.
@@ -117,14 +117,21 @@ const PICKABLE_RANK: Partial<Record<BacklogCard['state'], number>> = {
  *  4. only green-tier cards autorun,
  *  5. prereqs: every prereq card must be Done (deleted prereqs are ignored),
  *  6. size-fit at the tail: skip a card whose hard budget exceeds the
- *     remaining window, but keep scanning — a smaller card behind it may fit.
+ *     remaining window, but keep scanning — a smaller card behind it may fit;
+ *  7. cards whose agent is in `latchedAgents` (its usage window is exhausted)
+ *     are skipped — the other agent's cards keep flowing.
  * Returns null when nothing runnable fits.
  */
-export function pickNextCard(cards: BacklogCard[], remainingMs: number): BacklogCard | null {
+export function pickNextCard(
+  cards: BacklogCard[],
+  remainingMs: number,
+  latchedAgents: ReadonlySet<BacklogAgent> = new Set(),
+): BacklogCard | null {
   const candidates = cards
     .filter((c) =>
       PICKABLE_RANK[c.state] !== undefined &&
       c.riskTier === 'green' &&
+      !latchedAgents.has(c.agent) &&
       countUnmetPrereqs(c, cards) === 0)
     .sort((a, b) => {
       if (a.state !== b.state) return PICKABLE_RANK[a.state]! - PICKABLE_RANK[b.state]!;

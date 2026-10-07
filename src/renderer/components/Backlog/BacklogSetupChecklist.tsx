@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TourState } from '../../../common/types';
+import { BacklogAgent } from '../../../common/backlog-types';
 import { logger } from '../../../common/logger';
 import { Button, IconButton, Tooltip } from '../Shared';
 
@@ -26,6 +27,8 @@ interface Item {
   label: string;
   hint: string;
   done: boolean;
+  /** Informational — never counts toward completion (e.g. the Codex CLI). */
+  optional?: boolean;
   action?: { label: string; onClick: () => void; disabled?: boolean; disabledHint?: string };
 }
 
@@ -66,6 +69,9 @@ export const BacklogSetupChecklist: React.FC<Props> = ({
 }) => {
   const [tourState, setTourState] = useState<TourState | null>(null);
   const [hidden, setHidden] = useState(false);
+  // Which agent CLIs are on PATH. Claude Code is what the board needs; Codex
+  // is optional (only cards set to Codex use it). null until answered.
+  const [agents, setAgents] = useState<Record<BacklogAgent, boolean> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +79,10 @@ export const BacklogSetupChecklist: React.FC<Props> = ({
       .invoke('tour:get-state')
       .then((s: TourState) => { if (!cancelled) setTourState(s); })
       .catch((e: unknown) => logger.debug('[BacklogSetupChecklist] tour:get-state failed', e));
+    window.electron
+      .invoke('backlog:agent-availability')
+      .then((a: Record<BacklogAgent, boolean>) => { if (!cancelled && a) setAgents(a); })
+      .catch((e: unknown) => logger.debug('[BacklogSetupChecklist] backlog:agent-availability failed', e));
     const handler = (_e: unknown, s: TourState) => setTourState(s);
     window.electron.on('tour:state-updated', handler);
     return () => {
@@ -91,6 +101,17 @@ export const BacklogSetupChecklist: React.FC<Props> = ({
   if (!tourState || tourState.backlogSetupDismissed || hidden) return null;
 
   const items: Item[] = [
+    {
+      label: 'Claude Code CLI found',
+      hint: 'Cards run with `claude -p` — install Claude Code (or fix PATH) so the board can run them.',
+      done: agents?.claude ?? false,
+    },
+    {
+      label: 'Codex CLI found (optional)',
+      hint: 'Only cards set to the Codex agent need it. Install Codex to run cards with `codex exec`.',
+      done: agents?.codex ?? false,
+      optional: true,
+    },
     {
       label: 'Add a project',
       hint: 'Register a repo folder — that’s where the agent runs.',
@@ -114,8 +135,10 @@ export const BacklogSetupChecklist: React.FC<Props> = ({
       done: ranOne,
     },
   ];
-  const doneCount = items.filter((i) => i.done).length;
-  const allDone = doneCount === items.length;
+  // Optional rows are shown but never gate completion.
+  const required = items.filter((i) => !i.optional);
+  const doneCount = required.filter((i) => i.done).length;
+  const allDone = doneCount === required.length;
 
   return (
     <motion.div
@@ -133,7 +156,7 @@ export const BacklogSetupChecklist: React.FC<Props> = ({
           <p className='text-xs text-muted mt-0.5'>
             {allDone
               ? 'Queue green cards and let the night session run them while you sleep.'
-              : `${doneCount} of ${items.length} — new to the planner? Take the tour.`}
+              : `${doneCount} of ${required.length} — new to the planner? Take the tour.`}
           </p>
         </div>
         <Button variant='secondary' size='sm' onClick={onStartTour}>

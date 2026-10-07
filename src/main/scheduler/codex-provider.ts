@@ -2,8 +2,10 @@
 // window (the 5-hour window on paid plans), token expiry from the JWT in
 // ~/.codex/auth.json, `codex exec` ping, `codex-scheduler:*` IPC.
 //
-// No `shouldSkipOpener`: the backlog engine runs Claude only, so a Claude
-// backlog card never anchors a Codex window.
+// `shouldSkipOpener` mirrors the Claude provider: a backlog card running on
+// Codex already spends (and so anchors) the Codex window, so the ping would be
+// redundant. The caller passes an agent-scoped check — a Claude card running
+// must not suppress the Codex opener.
 
 import { CodexUsageStatus } from '../../common/types';
 import { CodexUsagePoller } from '../codex-usage/poller';
@@ -13,7 +15,10 @@ import { fireCodexOpener } from './codex-opener';
 
 export type CodexScheduler = Scheduler<CodexUsageStatus>;
 
-export function codexSchedulerDeps(poller: CodexUsagePoller): SchedulerDeps<CodexUsageStatus> {
+export function codexSchedulerDeps(
+  poller: CodexUsagePoller,
+  shouldSkipOpener?: () => boolean,
+): SchedulerDeps<CodexUsageStatus> {
   return {
     usageSource: poller,
     anchorResetsAt: (s) => (s.state === 'ok' && s.snapshot ? s.snapshot.primary.resetsAt : null),
@@ -24,5 +29,6 @@ export function codexSchedulerDeps(poller: CodexUsagePoller): SchedulerDeps<Code
     fire: fireCodexOpener,
     ipcPrefix: 'codex-scheduler',
     logTag: '[CodexScheduler]',
+    shouldSkipOpener,
   };
 }

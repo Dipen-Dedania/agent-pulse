@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import type { UpdaterState } from '../../../../common/updater-types';
+import type { StarNudgeState } from '../../../../common/star-types';
+import { STAR_COPY } from '../../../../common/star-copy';
 import { UpdatesTab } from '../UpdatesTab';
 
 function makeState(over: Partial<UpdaterState>): UpdaterState {
@@ -26,10 +28,14 @@ function makeState(over: Partial<UpdaterState>): UpdaterState {
 }
 
 const invoke = vi.fn();
-function installElectronMock(state: UpdaterState) {
+function installElectronMock(state: UpdaterState, starState?: StarNudgeState) {
   invoke.mockReset();
   invoke.mockImplementation((channel: string) =>
-    channel === 'updates:get-state' ? Promise.resolve(state) : Promise.resolve(undefined),
+    channel === 'updates:get-state'
+      ? Promise.resolve(state)
+      : channel === 'star:get-state'
+        ? Promise.resolve(starState)
+        : Promise.resolve(undefined),
   );
   Object.defineProperty(window, 'electron', {
     value: { invoke, on: vi.fn(), off: vi.fn(), send: vi.fn(), platform: state.platform },
@@ -76,5 +82,34 @@ describe('UpdatesTab — Windows', () => {
     expect(await screen.findByRole('button', { name: 'Download update' })).toBeInTheDocument();
     expect(screen.queryByText('Manual install on macOS')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Open download page' })).toBeNull();
+  });
+});
+
+describe('UpdatesTab — GitHub star nudge', () => {
+  const upToDate = makeState({ status: 'not-available', info: null });
+  const notStarred: StarNudgeState = { voice: 'playful', starred: false, toastPending: false, milestoneKind: null };
+
+  it('shows the voice-specific line under "Up to date" and opens the repo on click', async () => {
+    installElectronMock(upToDate, notStarred);
+    render(<UpdatesTab />);
+    expect(await screen.findByText(STAR_COPY.playful.upToDate)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: STAR_COPY.playful.star }));
+    expect(invoke).toHaveBeenCalledWith('star:open');
+    // Hides optimistically, before the broadcast lands.
+    expect(screen.queryByTestId('star-nudge-up-to-date')).toBeNull();
+  });
+
+  it('stays hidden while an update is available', async () => {
+    installElectronMock(makeState({}), notStarred);
+    render(<UpdatesTab />);
+    await screen.findByRole('button', { name: 'Download update' });
+    expect(screen.queryByTestId('star-nudge-up-to-date')).toBeNull();
+  });
+
+  it('stays hidden once the user has starred', async () => {
+    installElectronMock(upToDate, { ...notStarred, starred: true });
+    render(<UpdatesTab />);
+    await screen.findByText('Up to date');
+    expect(screen.queryByTestId('star-nudge-up-to-date')).toBeNull();
   });
 });

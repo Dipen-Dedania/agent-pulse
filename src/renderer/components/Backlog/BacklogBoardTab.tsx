@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BacklogCard, BacklogCardState, countUnmetPrereqs, isAwaitingReview } from '../../../common/backlog-types';
+import { BACKLOG_AGENTS, BacklogAgent, BacklogCard, BacklogCardState, BacklogSchedulerConfig, agentLabel, countUnmetPrereqs, isAwaitingReview } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { logger } from '../../../common/logger';
 import { BoardColumn } from './BoardColumn';
@@ -20,11 +20,12 @@ import { SOURCE_META } from './source-meta';
 import { SourceIcon } from './SourceIcon';
 import { projectColor } from './project-colors';
 import { BacklogSetupChecklist } from './BacklogSetupChecklist';
+import { BacklogSchedulerModal } from './BacklogSchedulerModal';
 import { listItem } from '../../motion';
 
 // Global Kanban board (backlog.md Phase 1): all projects on one board, every
 // card labelled by project and filterable down to one. The Todo column is the
-// autorun queue for the Backlog Scheduler (Settings → Usage → Claude Code).
+// autorun queue for the Backlog Scheduler (⚙ in the header below).
 
 const FLOW_COLUMNS: { state: BacklogCardState; title: string; hint?: string; accent?: string }[] = [
   { state: 'refinement', title: 'Refinement', hint: 'raw ideas' },
@@ -121,9 +122,20 @@ const DoneFilterChips: React.FC<{
 interface BacklogBoardTabProps {
   /** Launches the in-panel guided tour (owned by SettingsPanel). */
   onStartTour?: () => void;
+  /**
+   * Backlog Scheduler config for the ⚙ modal. SettingsPanel owns it (one
+   * config loader + `backlog:scheduler:config-updated` subscription for the
+   * whole panel); the board only threads it through. null until loaded.
+   */
+  schedulerConfig?: BacklogSchedulerConfig | null;
+  onSchedulerConfigChange?: (partial: Partial<BacklogSchedulerConfig>) => void;
 }
 
-export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour }) => {
+export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
+  onStartTour,
+  schedulerConfig = null,
+  onSchedulerConfigChange,
+}) => {
   const store = useBacklogStore();
 
   const [projectFilter, setProjectFilter] = useState<string>('all');
@@ -142,23 +154,27 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour })
   const [detailCard, setDetailCard] = useState<BacklogCard | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [dragCardId, setDragCardId] = useState<string | null>(null);
-  // projectId → default model from its .claude/settings.json chain, so tiles
-  // can show what a card without an override would actually run with.
+  // `${projectId}:${agent}` → default model (Claude: the project's
+  // .claude/settings.json chain; Codex: ~/.codex/config.toml), so tiles can
+  // show what a card without an override would actually run with.
   const [defaultModels, setDefaultModels] = useState<Record<string, string | null>>({});
+  const defaultModelKey = (projectId: string, agent: BacklogAgent) => `${projectId}:${agent}`;
 
   const projectIdsKey = store.projects.map((p) => p.id).join(',');
   useEffect(() => {
     let cancelled = false;
     void Promise.all(
-      store.projects.map(async (p): Promise<[string, string | null]> => {
-        try {
-          const res = await window.electron.invoke('backlog:project-default-model', { projectId: p.id });
-          return [p.id, res?.model ?? null];
-        } catch {
-          return [p.id, null];
-        }
-      }),
+      store.projects.flatMap((p) =>
+        BACKLOG_AGENTS.map(async (agent): Promise<[string, string | null]> => {
+          try {
+            const res = await window.electron.invoke('backlog:project-default-model', { projectId: p.id, agent });
+            return [defaultModelKey(p.id, agent), res?.model ?? null];
+          } catch {
+            return [defaultModelKey(p.id, agent), null];
+          }
+        })),
     ).then((entries) => {
       if (!cancelled) setDefaultModels(Object.fromEntries(entries));
     });
@@ -250,7 +266,7 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour })
     if (card.riskTier !== 'green') {
       const ok = await appConfirm({
         title: `Run "${card.title}" now?`,
-        message: `This is a ${card.riskTier} card (manual only). Running it will spend real Claude usage.`,
+        message: `This is a ${card.riskTier} card (manual only). Running it will spend real ${agentLabel(card.agent)} usage.`,
         confirmLabel: 'Run now',
       });
       if (!ok) return;
@@ -460,7 +476,7 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour })
         <CardTile
           card={card}
           projectName={projectName(card.projectId)}
-          projectDefaultModel={defaultModels[card.projectId] ?? null}
+          projectDefaultModel={defaultModels[defaultModelKey(card.projectId, card.agent)] ?? null}
           isRunning={card.state === 'in-progress' || card.state === 'claimed'}
           unmetPrereqs={countUnmetPrereqs(card, store.cards)}
           canMoveUp={todoIndex > 0}
@@ -548,6 +564,22 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour })
             </Button>
           </Tooltip>
           <IssueSourceHeaderActions projectFilter={projectFilter} onReview={() => setImportOpen(true)} />
+          {/* Scheduler lives behind ⚙ rather than on a Settings tab: its
+              windows/gates govern this board, and cards run on either agent,
+              so no tool's Plans & Limits sub-tab is the right home. */}
+          <Tooltip content={schedulerConfig ? 'Backlog Scheduler — windows when queued cards run themselves' : 'Scheduler settings are loading…'}>
+            <IconButton
+              onClick={() => setSchedulerOpen(true)}
+              disabled={!schedulerConfig || !onSchedulerConfigChange}
+              aria-label='Open the Backlog Scheduler'
+              data-tour='backlog-scheduler'
+            >
+              <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={1.75} strokeLinecap='round' strokeLinejoin='round' className='w-3.5 h-3.5' aria-hidden='true'>
+                <circle cx='12' cy='12' r='3' />
+                <path d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' />
+              </svg>
+            </IconButton>
+          </Tooltip>
           {onStartTour && (
             <Tooltip content='Replay the guided tour'>
               <IconButton
@@ -638,8 +670,8 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour })
           <h2 className='text-lg font-bold text-strong'>Add your first project</h2>
           <p className='text-sm text-muted mt-2 max-w-xl'>
             Cards belong to a project (a repo folder — the agent runs there). Register one, queue research
-            cards, and the night session of Claude Code works through them during your idle windows —
-            so reports are waiting for you in the morning.
+            cards, and the night session (Claude Code or Codex, per card) works through them during your
+            idle windows — so reports are waiting for you in the morning.
           </p>
           <div className='mt-4 flex items-center gap-2 flex-wrap'>
             <Button variant='primary' size='sm' onClick={() => void handleAddProject()}>
@@ -724,6 +756,16 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({ onStartTour })
       </AnimatePresence>
       <AnimatePresence>
         {importOpen && <IssueImportModal projectFilter={projectFilter} onClose={() => setImportOpen(false)} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {schedulerOpen && schedulerConfig && onSchedulerConfigChange && (
+          <BacklogSchedulerModal
+            config={schedulerConfig}
+            status={status}
+            onChange={onSchedulerConfigChange}
+            onClose={() => setSchedulerOpen(false)}
+          />
+        )}
       </AnimatePresence>
       <AnimatePresence>
         {paletteOpen && (

@@ -19,7 +19,7 @@ Agent Pulse is a cross-platform Electron desktop app that surfaces the state of 
 
 It also bundles a unified status bridge, subscription usage meters for Claude / Codex / Cursor / Antigravity, a local Pulse Timeline with estimated-cost analytics, a self-running Backlog board that executes queued tasks during your idle windows, a configurable Claude Code status line, Discord/Slack attention webhooks, a cowork session scheduler, and a configurable shell-command guardrail engine.
 
-To everyone who has used Agent Pulse, challenged its assumptions, reported a problem, contributed code or documentation, given start, shared an idea, or helped someone else get started: thank you.
+To everyone who has used Agent Pulse, challenged its assumptions, reported a problem, contributed code or documentation, given a star, shared an idea, or helped someone else get started: thank you.
 
 <p align="center">
   <a href="https://github.com/Dipen-Dedania/agent-pulse/raw/main/brag-output/brag.mp4"><img src="github-pages/public/assets/demo-preview.gif" alt="Agent Pulse demo" width="720" /></a>

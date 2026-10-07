@@ -103,6 +103,11 @@ export const TOOLS = [
           enum: ['execution', 'research', 'qa'],
           description: 'execution = changes code in a worktree (default); research = read-only investigation producing a report; qa = verification pass.',
         },
+        agent: {
+          type: 'string',
+          enum: ['claude', 'codex'],
+          description: 'Which CLI runs the card headlessly: claude (default, `claude -p`) or codex (`codex exec`). Only pass codex when the user asked for it.',
+        },
         riskTier: {
           type: 'string',
           enum: ['green', 'amber', 'red'],

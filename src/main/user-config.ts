@@ -16,6 +16,7 @@ import {
   isSafeModelId,
 } from '../common/backlog-types';
 import { SecretProtectionConfig, SecretRule } from '../common/secretProtection';
+import type { StarMilestoneKind, StarVoice } from '../common/star-types';
 import { parseHHmm } from './scheduler/timing';
 import { logger } from '../common/logger';
 
@@ -137,6 +138,17 @@ export interface TourConfig {
   backlogSetupDismissed: boolean; // user closed the Backlog-board setup checklist
 }
 
+// GitHub star nudge (see star-nudge-plan.md). One shared block for the three
+// placements (title-bar icon, Updates-tab line, milestone toast) so a single
+// click anywhere silences all of them. All timestamps are unix ms.
+export interface StarNudgeConfig {
+  voice: StarVoice | null;                 // assigned on first boot, then frozen
+  starredAt: number | null;                // any star click, anywhere → hides every placement
+  milestoneDueAt: number | null;           // main stamped a trigger; toast pending
+  milestoneShownAt: number | null;         // toast answered (star or not now) → never again
+  milestoneKind: StarMilestoneKind | null; // which copy row the toast uses
+}
+
 export interface UserConfig {
   enabledBubbles: Partial<Record<ToolId, boolean>>;
   bubble: BubbleConfig;
@@ -169,6 +181,7 @@ export interface UserConfig {
   // ~/.codex/config.toml by the Codex status line editor.
   codexStatusLine: CodexStatusLineConfig;
   appearance: AppearanceConfig;
+  starNudge: StarNudgeConfig;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse-config.json');
@@ -265,6 +278,13 @@ const DEFAULTS: UserConfig = {
     setupDismissed: false,
     hasSeenBacklogTour: false,
     backlogSetupDismissed: false,
+  },
+  starNudge: {
+    voice: null,
+    starredAt: null,
+    milestoneDueAt: null,
+    milestoneShownAt: null,
+    milestoneKind: null,
   },
   scheduler: {
     mode: 'off',
@@ -712,6 +732,25 @@ function migrateTour(raw: unknown): TourConfig {
   };
 }
 
+// Validate a persisted star-nudge block. Same rules as migrateTour: timestamps
+// must be positive finite numbers or null; an unknown voice or kind becomes
+// null (the voice is then re-assigned on boot, the kind only matters while a
+// toast is pending).
+export function migrateStarNudge(raw: unknown): StarNudgeConfig {
+  const VOICES: StarVoice[] = ['earnest', 'playful'];
+  const KINDS: StarMilestoneKind[] = ['week', 'backlog'];
+  const s = (raw && typeof raw === 'object' ? raw : {}) as Partial<StarNudgeConfig>;
+  const ts = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : null;
+  return {
+    voice: VOICES.includes(s.voice as StarVoice) ? (s.voice as StarVoice) : null,
+    starredAt: ts(s.starredAt),
+    milestoneDueAt: ts(s.milestoneDueAt),
+    milestoneShownAt: ts(s.milestoneShownAt),
+    milestoneKind: KINDS.includes(s.milestoneKind as StarMilestoneKind) ? (s.milestoneKind as StarMilestoneKind) : null,
+  };
+}
+
 export function migrateAppearance(raw: unknown): AppearanceConfig {
   const THEMES: ThemeMode[] = ['light', 'dark', 'auto'];
   const a = (raw && typeof raw === 'object' ? raw : {}) as Partial<AppearanceConfig>;
@@ -943,6 +982,7 @@ export function loadConfig(): UserConfig {
           lastRunVersion: typeof updates.lastRunVersion === 'string' && updates.lastRunVersion ? updates.lastRunVersion : null,
         },
         tour: migrateTour(parsed.tour),
+        starNudge: migrateStarNudge(parsed.starNudge),
         scheduler: migrateScheduler(parsed.scheduler),
         codexScheduler: migrateScheduler(parsed.codexScheduler, DEFAULTS.codexScheduler),
         backlogScheduler: migrateBacklogScheduler(parsed.backlogScheduler),
@@ -994,6 +1034,7 @@ export function loadConfig(): UserConfig {
     analytics: { ...DEFAULTS.analytics },
     updates: { ...DEFAULTS.updates },
     tour: migrateTour(undefined),
+    starNudge: migrateStarNudge(undefined),
     scheduler: migrateScheduler(undefined),
     codexScheduler: migrateScheduler(undefined, DEFAULTS.codexScheduler),
     backlogScheduler: migrateBacklogScheduler(undefined),

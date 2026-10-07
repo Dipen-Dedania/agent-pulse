@@ -16,3 +16,12 @@ describe('buildWindowsResumeLine', () => {
     expect(line).toContain('--resume sess-123abc');
   });
 });
+
+describe('buildWindowsResumeLine (codex)', () => {
+  it('uses the Codex CLI resume subcommand with the thread id', () => {
+    const line = buildWindowsResumeLine('C:\Users\me\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe', '01a10fab-0053-7c11-a8c3-b4bbf69e4890', 'codex');
+    expect(line).toBe(
+      'start "Agent Pulse - Resume" cmd /k "C:\Users\me\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe" resume 01a10fab-0053-7c11-a8c3-b4bbf69e4890',
+    );
+  });
+});

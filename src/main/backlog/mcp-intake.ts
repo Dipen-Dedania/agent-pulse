@@ -12,7 +12,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { BacklogCard, BacklogTaskType, RiskTier } from '../../common/backlog-types';
+import { BacklogAgent, BacklogCard, BacklogTaskType, RiskTier, normalizeAgent } from '../../common/backlog-types';
 import { BacklogStore } from './store';
 
 const TASK_TYPES: BacklogTaskType[] = ['research', 'execution', 'qa'];
@@ -31,6 +31,7 @@ export interface McpCardRequest {
   /** The chat's cwd. Resolved to the enclosing git repo, then to a board project. */
   projectPath?: unknown;
   taskType?: unknown;
+  agent?: unknown;
   riskTier?: unknown;
   acceptanceCriteria?: unknown;
   estimatedMinutes?: unknown;
@@ -42,6 +43,7 @@ export interface NormalizedCard {
   description: string;
   projectPath: string;
   taskType: BacklogTaskType;
+  agent: BacklogAgent;
   riskTier: RiskTier;
   acceptanceCriteria: string[];
   estimatedMinutes: number | null;
@@ -95,6 +97,7 @@ export function normalizeCardRequest(req: McpCardRequest): { ok: true; value: No
       description,
       projectPath,
       taskType: TASK_TYPES.includes(req?.taskType as BacklogTaskType) ? (req.taskType as BacklogTaskType) : 'execution',
+      agent: normalizeAgent(req?.agent),
       riskTier: RISK_TIERS.includes(req?.riskTier as RiskTier) ? (req.riskTier as RiskTier) : 'green',
       acceptanceCriteria: criteria,
       estimatedMinutes: minutes,
@@ -202,6 +205,7 @@ export function intakeCard(store: BacklogStore, req: McpCardRequest): McpCardRes
     projectId: project.projectId,
     state: card.state,
     taskType: card.taskType,
+    agent: card.agent,
     riskTier: card.riskTier,
     estimatedMinutes: card.estimatedMinutes,
     acceptanceCriteria: card.acceptanceCriteria,

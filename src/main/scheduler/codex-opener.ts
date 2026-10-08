@@ -11,6 +11,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { resetAugmentedPathCache } from '../shell-path';
+import { lookupOnPathAsync } from '../installer/which';
 import { OpenerResult, lookupOnPath, spawnPing } from './opener';
 
 const PROMPT = 'ok';
@@ -84,7 +85,20 @@ function wellKnownCandidates(): string[] {
  */
 export function resolveCodexBin(): string | null {
   if (cachedBin) return cachedBin;
-  const hits = lookupOnPath('codex');
+  return resolveFromHits(lookupOnPath('codex'));
+}
+
+/**
+ * Non-blocking twin of `resolveCodexBin` for the launch path (the Settings
+ * Codex status-line card asks for it at mount). Same selection rules and the
+ * same positive-only cache; only the PATH lookup differs.
+ */
+export async function resolveCodexBinAsync(): Promise<string | null> {
+  if (cachedBin) return cachedBin;
+  return resolveFromHits(await lookupOnPathAsync('codex'));
+}
+
+function resolveFromHits(hits: string[]): string | null {
   if (hits.length > 0) {
     if (isWin()) {
       const byExt = (ext: string) => hits.find((p) => p.toLowerCase().endsWith(ext));

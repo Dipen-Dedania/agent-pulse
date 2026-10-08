@@ -2,7 +2,7 @@ import React from 'react';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { formatUsd } from '../../../../common/pricing';
-import { AnimatedNumber, Meter } from '../../Shared';
+import { AnimatedNumber, Eyebrow, Meter } from '../../Shared';
 import { useCacheEfficiency } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, InfoPill, SkeletonLine, formatCompactNumber } from './shared';
@@ -23,14 +23,14 @@ export const CacheEfficiencyCard: React.FC = () => {
         <div className='flex flex-col gap-4'>
           <div className='grid grid-cols-2 gap-3'>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Cache hit rate</p>
+              <Eyebrow size='sm' className='mb-1'>Cache hit rate</Eyebrow>
               <p className='text-xl font-semibold text-primary font-mono tabular-nums'>
                 <AnimatedNumber value={data.overallHitRatio * 100} format={(n) => `${n.toFixed(0)}%`} />
               </p>
               <p className='text-[11px] text-muted mt-0.5'>of input tokens</p>
             </div>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Est. saved</p>
+              <Eyebrow size='sm' className='mb-1'>Est. saved</Eyebrow>
               <p className='text-xl font-semibold text-ok font-mono tabular-nums'>
                 <AnimatedNumber value={data.totalSavedUsd} format={formatUsd} />
               </p>

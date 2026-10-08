@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { TourState } from '../../../common/types';
 import { logger } from '../../../common/logger';
 import { IconButton, Tooltip } from '../Shared';
+import { pop, smooth } from '../../motion';
 
 // ── "Get set up" checklist ───────────────────────────────────────────────────
 // Lives at the top of the Hooks tab until dismissed. The three items check off
@@ -33,7 +34,7 @@ const CheckCircle: React.FC<{ done: boolean }> = ({ done }) => (
         <motion.svg
           initial={{ scale: 0, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 500, damping: 22 }}
+          transition={pop}
           viewBox='0 0 20 20'
           className='w-3 h-3'
           fill='white'
@@ -103,7 +104,7 @@ export const SetupChecklist: React.FC<SetupChecklistProps> = ({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
+      transition={smooth}
       className={`mb-6 glass-primary p-5 ${
         allDone ? 'border-green-500/40' : ''
       }`}

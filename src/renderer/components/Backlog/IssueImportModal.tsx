@@ -7,7 +7,7 @@ import { SOURCE_META, issueRefLabel } from './source-meta';
 import { SourceIcon } from './SourceIcon';
 
 // Review & Import picker (Phase 3), source-neutral. The candidate list a scan
-// produced (GitLab or Linear). The user ticks issues to import as Refinement
+// produced (GitLab, Linear, or JIRA). The user ticks issues to import as Refinement
 // cards, or dismisses the rest (tombstoned so they don't re-surface). A scan
 // creates NO cards on its own.
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
-import { Tooltip } from '../../Shared';
+import { Eyebrow, Tooltip } from '../../Shared';
 import { useSecretAccessAnalytics } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, SkeletonLine, formatCompactNumber } from './shared';
@@ -29,7 +29,7 @@ export const SecretProtectionCard: React.FC = () => {
 
           {data.byTool.length > 0 && (
             <div className='mb-5'>
-              <p className='text-[11px] uppercase tracking-wide text-faint mb-2'>By tool</p>
+              <Eyebrow size='sm' className='mb-2'>By tool</Eyebrow>
               <div className='space-y-1.5'>
                 {data.byTool.map((t) => {
                   const label = TOOL_META[t.toolId as ToolId]?.label ?? t.toolId;
@@ -56,7 +56,7 @@ export const SecretProtectionCard: React.FC = () => {
 
           {data.byFile.length > 0 && (
             <div className='mb-5'>
-              <p className='text-[11px] uppercase tracking-wide text-faint mb-2'>Top files</p>
+              <Eyebrow size='sm' className='mb-2'>Top files</Eyebrow>
               <div className='space-y-1.5'>
                 {data.byFile.slice(0, 8).map((f) => (
                   <div key={f.filePath} className='flex items-center gap-3 text-xs'>
@@ -76,7 +76,7 @@ export const SecretProtectionCard: React.FC = () => {
 
           {data.byRule.length > 0 && (
             <div>
-              <p className='text-[11px] uppercase tracking-wide text-faint mb-2'>Top rules</p>
+              <Eyebrow size='sm' className='mb-2'>Top rules</Eyebrow>
               <div className='space-y-1.5'>
                 {data.byRule.slice(0, 8).map((r) => (
                   <div key={r.ruleId} className='flex items-start gap-3 text-xs'>
@@ -105,7 +105,7 @@ const Stat: React.FC<{ label: string; value: number; tone: 'neutral' | 'warn' | 
                        'text-primary border-edge/60 bg-inset/40';
   return (
     <div className={`rounded-xl border px-3 py-2.5 ${toneCls}`}>
-      <p className='text-[10px] uppercase tracking-wide opacity-70'>{label}</p>
+      <Eyebrow size='sm'>{label}</Eyebrow>
       <p className='text-lg font-semibold font-mono tabular-nums leading-tight mt-0.5'>
         {formatCompactNumber(value)}
       </p>

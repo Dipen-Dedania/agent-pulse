@@ -3,6 +3,7 @@ import { DailyDigest } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { formatUsd } from '../../../../common/pricing';
+import { Eyebrow } from '../../Shared';
 import { useDigest } from './useAnalytics';
 import { Card, EmptyState, InfoPill, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
 
@@ -15,7 +16,7 @@ const DayColumn: React.FC<{ label: string; digest: DailyDigest | undefined }> = 
   if (!digest) {
     return (
       <div className='flex-1 min-w-0'>
-        <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-2'>{label}</p>
+        <Eyebrow size='md' className='mb-2'>{label}</Eyebrow>
         <SkeletonLine width='60%' />
       </div>
     );
@@ -23,10 +24,13 @@ const DayColumn: React.FC<{ label: string; digest: DailyDigest | undefined }> = 
   const hasAny = digest.perTool.length > 0;
   return (
     <div className='flex-1 min-w-0'>
-      <div className='flex items-baseline gap-2 mb-3'>
-        <p className='text-xs font-semibold uppercase tracking-widest text-faint'>{label}</p>
-        <p className='text-[10px] text-ghost font-mono'>{digest.date}</p>
-      </div>
+      <Eyebrow
+        size='md'
+        className='mb-3'
+        right={<span className='text-[10px] text-ghost font-mono'>{digest.date}</span>}
+      >
+        {label}
+      </Eyebrow>
       {!hasAny ? (
         <p className='text-sm text-faint italic'>No agent activity yet.</p>
       ) : (
@@ -57,10 +61,9 @@ const DayColumn: React.FC<{ label: string; digest: DailyDigest | undefined }> = 
           </div>
           {digest.tokens && (
             <div className='mt-4 pt-3 border-t border-edge/60'>
-              <div className='flex items-center gap-2 mb-2'>
-                <p className='text-[10px] uppercase tracking-widest text-faint'>Tokens</p>
-                <InfoPill>token-reporting agents</InfoPill>
-              </div>
+              <Eyebrow size='sm' className='mb-2' right={<InfoPill>token-reporting agents</InfoPill>}>
+                Tokens
+              </Eyebrow>
               <div className='grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-mono'>
                 <span className='text-muted'>in</span>
                 <span className='text-primary text-right'>{formatCompactNumber(digest.tokens.tokensIn)}</span>
@@ -73,7 +76,7 @@ const DayColumn: React.FC<{ label: string; digest: DailyDigest | undefined }> = 
               </div>
               {digest.tokens.costUsd > 0 && (
                 <div className='flex items-center justify-between mt-2 pt-2 border-t border-edge/40'>
-                  <span className='text-[10px] uppercase tracking-widest text-faint'>Est. spend</span>
+                  <Eyebrow size='sm' as='span'>Est. spend</Eyebrow>
                   <span className='text-sm font-semibold text-ok font-mono tabular-nums'>
                     {formatUsd(digest.tokens.costUsd)}
                   </span>
@@ -83,7 +86,7 @@ const DayColumn: React.FC<{ label: string; digest: DailyDigest | undefined }> = 
           )}
           {digest.quota.length > 0 && (
             <div className='mt-4 pt-3 border-t border-edge/60'>
-              <p className='text-[10px] uppercase tracking-widest text-faint mb-2'>Quota burned</p>
+              <Eyebrow size='sm' className='mb-2'>Quota burned</Eyebrow>
               <div className='flex flex-col gap-1.5'>
                 {digest.quota.map((q) => (
                   <div key={`${q.toolId}/${q.windowKey}`} className='flex items-center justify-between text-[11px]'>

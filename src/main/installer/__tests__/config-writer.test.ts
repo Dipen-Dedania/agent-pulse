@@ -1252,8 +1252,8 @@ describe('ConfigWriter — status line', () => {
 });
 
 describe('ToolDetector — status line runtime', () => {
-  it('detects a runtime with an absolute interpreter path (node in the test env)', () => {
-    const detected = new ToolDetector().detectStatusLineRuntime();
+  it('detects a runtime with an absolute interpreter path (node in the test env)', async () => {
+    const detected = await new ToolDetector().detectStatusLineRuntime();
     expect(detected).not.toBeNull();
     expect(detected?.runtime).toBe('node');
     expect(detected?.binPath && detected.binPath.length).toBeGreaterThan(0);

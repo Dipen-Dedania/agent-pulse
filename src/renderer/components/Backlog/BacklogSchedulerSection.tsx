@@ -3,10 +3,10 @@ import { BACKLOG_AGENTS, BacklogSchedulerConfig, BacklogSchedulerStatus, Backlog
 import { WebhookTarget } from '../../../common/types';
 import { formatUsd } from '../../../common/pricing';
 import { WebhookRow } from '../Settings/WebhookRow';
-import { Button, GlassToggle, IconButton, Input, Tooltip } from '../Shared';
+import { Button, ChipGroup, Eyebrow, GlassToggle, IconButton, Input, SettingRow, Tooltip } from '../Shared';
 
-// Backlog Scheduler — the body of BacklogSchedulerModal, opened from the ⚙
-// button in the board header. It used to sit under Plans & Limits → Claude
+// Backlog Scheduler — the Night session tab of BacklogSettingsModal, opened
+// from the ⚙ button in the board header. It used to sit under Plans & Limits → Claude
 // Code, but cards now run on either agent, so it belongs to the board, not a
 // tool. A Cowork slot is a fire INSTANT (opens a window); a backlog slot is a
 // time RANGE during which queued board cards auto-execute. Mirrors the
@@ -61,10 +61,6 @@ const SlotRow: React.FC<{
   onChange: (next: BacklogSlot) => void;
   onRemove: () => void;
 }> = ({ slot, onChange, onRemove }) => {
-  const toggleDay = (d: number) => {
-    const days = slot.days.includes(d) ? slot.days.filter((x) => x !== d) : [...slot.days, d].sort();
-    onChange({ ...slot, days });
-  };
   return (
     <div className={`glass-secondary p-3 flex flex-wrap items-center gap-3 ${slot.enabled ? '' : 'opacity-50'}`}>
       <div className='flex items-center gap-1.5'>
@@ -89,23 +85,15 @@ const SlotRow: React.FC<{
           </Tooltip>
         )}
       </div>
-      <div className='flex gap-1'>
-        {WEEKDAYS.map((label, d) => {
-          const active = slot.days.includes(d);
-          return (
-            <Tooltip key={d} content={`${label} (window start day)`}>
-              <button
-                onClick={() => toggleDay(d)}
-                className={`w-7 h-7 rounded-md text-[11px] font-medium cursor-pointer transition-colors ${
-                  active ? 'bg-blue-500/80 text-white' : 'bg-control/50 text-muted hover:bg-control'
-                }`}
-              >
-                {label}
-              </button>
-            </Tooltip>
-          );
-        })}
-      </div>
+      <ChipGroup
+        multiple
+        size='sm'
+        ariaLabel='Days of the week'
+        options={WEEKDAYS.map((label, i) => ({ value: String(i), label }))}
+        value={slot.days.map(String)}
+        onChange={(v) => onChange({ ...slot, days: (v as string[]).map(Number) })}
+        className='flex flex-nowrap gap-1'
+      />
       <div className='flex items-center gap-2 ml-auto'>
         <Toggle small on={slot.enabled} onClick={() => onChange({ ...slot, enabled: !slot.enabled })} label='Toggle window' />
         <IconButton shape='square' tone='danger' onClick={onRemove} aria-label='Remove window'>
@@ -219,7 +207,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       {/* Windows editor */}
       <div className='mt-5'>
         <div className='flex items-center justify-between mb-3 flex-wrap gap-2'>
-          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Windows</p>
+          <Eyebrow size='md'>Windows</Eyebrow>
           <div className='flex gap-2'>
             <Button
               onClick={() => addPreset(PRESET_NIGHTS)}
@@ -256,83 +244,90 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
       </div>
 
       {/* requireIdle gate */}
-      <div className='mt-5 glass-secondary p-4 flex items-start gap-3'>
-        <div className='flex-1 min-w-0'>
-          <p className='font-medium text-strong text-sm leading-tight'>Only run while idle</p>
-          <p className='text-xs text-muted mt-1'>
+      <SettingRow
+        className='mt-5'
+        title='Only run while idle'
+        description={
+          <>
             Even inside a window, wait until the keyboard/mouse have been untouched for 5 minutes — so a
             late-night session of yours isn't interrupted by an agent claiming the queue.
-          </p>
-        </div>
-        <Toggle
-          small
-          on={config.requireIdle}
-          onClick={() => onChange({ requireIdle: !config.requireIdle })}
-          label='Toggle idle requirement'
-        />
-      </div>
+          </>
+        }
+        control={
+          <Toggle
+            small
+            on={config.requireIdle}
+            onClick={() => onChange({ requireIdle: !config.requireIdle })}
+            label='Toggle idle requirement'
+          />
+        }
+      />
 
       {/* Proactive usage gate — how full an agent's current usage window may
           get before the scheduler stops claiming NEW cards for that agent (a
           run started near the ceiling just dies mid-task). One threshold for
           both agents; latches are per agent. 100 = never gate proactively. */}
-      <div className='mt-5 glass-secondary p-4 flex items-start gap-3'>
-        <div className='flex-1 min-w-0'>
-          <p className='font-medium text-strong text-sm leading-tight'>Pause new tasks near the usage limit</p>
-          <p className='text-xs text-muted mt-1'>
+      <SettingRow
+        className='mt-5'
+        title='Pause new tasks near the usage limit'
+        description={
+          <>
             Stop claiming new cards once an agent’s current usage window (Claude 5-hour / Codex primary)
             is this full — a task started with little left just dies partway through. Each agent is
             paused on its own; the other keeps running.{' '}
             {config.usageGatePercent >= 100
               ? 'At 100% the scheduler keeps claiming until the window is fully spent.'
               : `Currently pausing at ${config.usageGatePercent}% used.`}
-          </p>
-        </div>
-        <div className='flex items-center gap-1.5 shrink-0'>
-          <Input
-            size='sm'
-            className='w-16 text-right'
-            type='number'
-            min={50}
-            max={100}
-            step={5}
-            value={config.usageGatePercent}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n)) return;
-              onChange({ usageGatePercent: Math.min(100, Math.max(50, Math.round(n))) });
-            }}
-            aria-label='Usage limit percentage to pause new tasks'
-          />
-          <span className='text-faint text-sm'>%</span>
-        </div>
-      </div>
+          </>
+        }
+        control={
+          <div className='flex items-center gap-1.5'>
+            <Input
+              size='sm'
+              className='w-16 text-right'
+              type='number'
+              min={50}
+              max={100}
+              step={5}
+              value={config.usageGatePercent}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (!Number.isFinite(n)) return;
+                onChange({ usageGatePercent: Math.min(100, Math.max(50, Math.round(n))) });
+              }}
+              aria-label='Usage limit percentage to pause new tasks'
+            />
+            <span className='text-faint text-sm'>%</span>
+          </div>
+        }
+      />
 
       {/* Completion notifications — collapsed behind a toggle so an empty list
           doesn't clutter the section; expands inline (no screen-covering modal). */}
-      <div className='mt-5 glass-secondary p-4'>
-        <div className='flex items-start gap-3'>
-          <div className='flex-1 min-w-0'>
-            <p className='font-medium text-strong text-sm leading-tight'>Task notifications</p>
-            <p className='text-xs text-muted mt-1'>
+      <div className='mt-5'>
+        <SettingRow
+          title='Task notifications'
+          description={
+            <>
               Ping a Discord/Slack channel when a card finishes — <span className='text-ok'>done</span>,{' '}
               <span className='text-danger'>blocked</span>, or <span className='text-warn'>rework</span>. Get told on
               your phone the moment a queued task lands, without watching the board.
-            </p>
-          </div>
-          <Button
-            onClick={() => setNotificationsOpen((v) => !v)}
-            aria-expanded={notificationsOpen}
-            variant='secondary'
-            size='sm'
-            className='shrink-0'
-          >
-            {notificationsOpen ? 'Hide' : activeWebhooks > 0 ? `Configure · ${activeWebhooks} active` : 'Configure'}
-          </Button>
-        </div>
+            </>
+          }
+          control={
+            <Button
+              onClick={() => setNotificationsOpen((v) => !v)}
+              aria-expanded={notificationsOpen}
+              variant='secondary'
+              size='sm'
+            >
+              {notificationsOpen ? 'Hide' : activeWebhooks > 0 ? `Configure · ${activeWebhooks} active` : 'Configure'}
+            </Button>
+          }
+        />
 
         {notificationsOpen && (
-          <div className='mt-4 flex flex-col gap-3 border-t border-edge/40 pt-4'>
+          <div className='glass-secondary mt-2 p-4 flex flex-col gap-3'>
             <p className='text-xs text-faint'>
               Create a webhook in Discord (Server Settings → Integrations → Webhooks) or Slack (Incoming Webhooks).
               Paused / usage-limit runs auto-resume, so they stay silent.

@@ -4,6 +4,7 @@ import { TourState } from '../../../common/types';
 import { BacklogAgent } from '../../../common/backlog-types';
 import { logger } from '../../../common/logger';
 import { Button, IconButton, Tooltip } from '../Shared';
+import { pop, smooth } from '../../motion';
 
 // ── Backlog board setup checklist ────────────────────────────────────────────
 // Sits at the top of the Backlog board until dismissed. Its three items check
@@ -43,7 +44,7 @@ const CheckCircle: React.FC<{ done: boolean }> = ({ done }) => (
         <motion.svg
           initial={{ scale: 0, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 500, damping: 22 }}
+          transition={pop}
           viewBox='0 0 20 20'
           className='w-3 h-3'
           fill='white'
@@ -120,7 +121,7 @@ export const BacklogSetupChecklist: React.FC<Props> = ({
     },
     {
       label: 'Create or import a card',
-      hint: 'Write one, or pull open issues from GitLab / Linear.',
+      hint: 'Write one, or pull open issues from GitLab, Linear, or JIRA.',
       done: hasCard,
       action: {
         label: 'New card',
@@ -144,7 +145,7 @@ export const BacklogSetupChecklist: React.FC<Props> = ({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
+      transition={smooth}
       className={`glass-primary p-5 ${allDone ? 'border-green-500/40' : ''}`}
       style={allDone ? { boxShadow: '0 0 24px rgba(34,197,94,0.15)' } : undefined}
     >

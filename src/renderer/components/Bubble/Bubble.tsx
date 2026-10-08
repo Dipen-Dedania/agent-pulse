@@ -1238,7 +1238,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
               background: isDark ? 'rgba(249,115,22,0.95)' : 'rgba(234,88,12,0.95)',
               boxShadow: isDark ? '0 0 8px rgba(249,115,22,0.7)' : '0 0 6px rgba(234,88,12,0.5)',
             }}
-            title='Waiting on you'
+            title='Needs you'
           >
             <svg viewBox='0 0 24 24' className='w-2.5 h-2.5' fill='white'>
               <path d='M12 2a6 6 0 0 0-6 6v3.6L4.3 15a1 1 0 0 0 .9 1.4h13.6a1 1 0 0 0 .9-1.4L18 11.6V8a6 6 0 0 0-6-6zm0 20a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22z' />

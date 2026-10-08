@@ -4,10 +4,33 @@
  * accessibility. Each item is a white card with a hairline border.
  * The chevron indicator rotates when the details element is open via
  * the CSS `group-open:` modifier.
+ * Items with an `id` can be deep-linked (#id); the target opens automatically.
  */
+import { useEffect } from 'react';
 import { faqItems } from '../data/faq';
+import CopyCommand from './CopyCommand';
+
+/** Open the <details> named by the URL hash (on load and on in-page links). */
+function useOpenHashTarget() {
+  useEffect(() => {
+    const open = () => {
+      const id = window.location.hash.slice(1);
+      if (!id) return;
+      const el = document.getElementById(id);
+      if (el instanceof HTMLDetailsElement) {
+        el.open = true;
+        el.scrollIntoView({ block: 'start' });
+      }
+    };
+    open();
+    window.addEventListener('hashchange', open);
+    return () => window.removeEventListener('hashchange', open);
+  }, []);
+}
 
 export default function FAQ() {
+  useOpenHashTarget();
+
   return (
     <section id="faq" className="py-20">
       <div className="mx-auto max-w-[720px] px-6">
@@ -21,7 +44,8 @@ export default function FAQ() {
           {faqItems.map((item) => (
             <details
               key={item.question}
-              className="group rounded-cards border border-mist-border bg-paper shadow-sm"
+              id={item.id}
+              className="group scroll-mt-24 rounded-cards border border-mist-border bg-paper shadow-sm"
             >
               {/* Question row */}
               <summary
@@ -53,7 +77,22 @@ export default function FAQ() {
               </summary>
 
               {/* Answer */}
-              <p className="px-6 pb-6 text-body-sm text-slate-blue">{item.answer}</p>
+              <div className="px-6 pb-6 text-body-sm text-slate-blue">
+                <p>{item.answer}</p>
+                {item.steps && (
+                  <ol className="mt-3 list-decimal space-y-1.5 pl-5">
+                    {item.steps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
+                )}
+                {item.command && (
+                  <div className="mt-4">
+                    <p className="mb-2">{item.command.intro}</p>
+                    <CopyCommand label="$" command={item.command.text} />
+                  </div>
+                )}
+              </div>
             </details>
           ))}
         </div>

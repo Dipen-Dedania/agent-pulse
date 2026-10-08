@@ -1,5 +1,5 @@
 import React from 'react';
-import { AnimatedNumber } from '../../Shared';
+import { AnimatedNumber, Eyebrow } from '../../Shared';
 import { useLifecycle } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, SkeletonLine, formatSpan } from './shared';
@@ -11,7 +11,7 @@ const Stat: React.FC<{ label: string; value: number; format: (n: number) => stri
   hint,
 }) => (
   <div className='glass-secondary p-3'>
-    <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>{label}</p>
+    <Eyebrow size='sm' className='mb-1'>{label}</Eyebrow>
     <p className='text-lg font-semibold text-primary font-mono tabular-nums'>
       <AnimatedNumber value={value} format={format} />
     </p>

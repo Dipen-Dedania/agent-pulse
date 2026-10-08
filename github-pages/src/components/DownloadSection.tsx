@@ -208,8 +208,15 @@ export default function DownloadSection() {
 
         {/* macOS notarization footnote */}
         <p className='mb-6 text-center text-[12px] text-steel-blue'>
-          macOS builds aren&apos;t notarized yet &mdash; right-click the app and
-          choose &ldquo;Open&rdquo; the first time.
+          macOS builds aren&apos;t notarized yet &mdash; if macOS says
+          &ldquo;Agent Pulse&rdquo; Not Opened,{' '}
+          <a
+            href='#mac-not-opened'
+            className='font-medium underline underline-offset-2 hover:text-signal-blue'
+          >
+            here&apos;s the one-time fix
+          </a>
+          .
         </p>
 
         {/* Fallback to all releases */}

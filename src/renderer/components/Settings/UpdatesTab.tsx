@@ -3,7 +3,7 @@ import { UpdaterState } from '../../../common/updater-types';
 import { logger } from '../../../common/logger';
 import { useUpdaterState } from '../../hooks/useUpdaterState';
 import { useStarNudge } from '../../hooks/useStarNudge';
-import { Badge, GlassToggle, Button, Meter, type BadgeTone } from '../Shared';
+import { Badge, GlassToggle, Button, Meter, Card, Eyebrow, SettingRow, type BadgeTone } from '../Shared';
 
 function formatBytes(n: number): string {
   if (!n || n <= 0) return '0 B';
@@ -35,12 +35,6 @@ const STATUS_PILL: Record<UpdaterState['status'], { label: string; tone: BadgeTo
   downloaded:      { label: 'Ready to install',      tone: 'ok'      },
   error:           { label: 'Error',                 tone: 'danger'  },
 };
-
-const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className }) => (
-  <div className={`mb-5 glass-primary p-5 ${className ?? ''}`}>
-    {children}
-  </div>
-);
 
 export const UpdatesTab: React.FC = () => {
   // Live state from main (shared with the Settings panel's tab badge).
@@ -129,7 +123,7 @@ export const UpdatesTab: React.FC = () => {
       <Card>
         <div className='flex items-center justify-between gap-4 mb-3'>
           <div>
-            <p className='text-xs font-semibold uppercase tracking-widest text-faint'>Current version</p>
+            <Eyebrow size='md'>Current version</Eyebrow>
             <p className='text-2xl font-bold text-strong mt-1 font-mono'>{state.currentVersion}</p>
           </div>
           <Badge tone={pill.tone} variant='pill' size='md' weight='semibold' dot>
@@ -168,9 +162,9 @@ export const UpdatesTab: React.FC = () => {
       {/* Available / downloading / ready */}
       {state.info && (state.status === 'available' || state.status === 'downloading' || state.status === 'downloaded') && (
         <Card>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-2'>
+          <Eyebrow size='md' className='mb-2'>
             New version
-          </p>
+          </Eyebrow>
           <div className='flex items-baseline justify-between gap-4 mb-3'>
             <p className='text-xl font-bold text-strong font-mono'>{state.info.version}</p>
             {state.info.releaseDate && (
@@ -236,22 +230,20 @@ export const UpdatesTab: React.FC = () => {
 
       {/* Preferences */}
       <Card>
-        <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>Preferences</p>
-        <div className='flex items-center gap-4'>
-          <div className='flex-1'>
-            <p className='font-semibold text-strong leading-tight'>Check for updates automatically</p>
-            <p className='text-xs text-muted mt-1'>
-              Runs a background check shortly after launch and every six hours after that.
-            </p>
-          </div>
-          <GlassToggle
-            checked={state.autoCheck}
-            onChange={handleAutoCheckToggle}
-            size="lg"
-            label="Toggle automatic update checks"
-            disabled={isDev}
-          />
-        </div>
+        <Eyebrow size='md' className='mb-3'>Preferences</Eyebrow>
+        <SettingRow
+          title='Check for updates automatically'
+          description='Runs a background check shortly after launch and every six hours after that.'
+          control={
+            <GlassToggle
+              checked={state.autoCheck}
+              onChange={handleAutoCheckToggle}
+              size='md'
+              label='Toggle automatic update checks'
+              disabled={isDev}
+            />
+          }
+        />
       </Card>
     </div>
   );

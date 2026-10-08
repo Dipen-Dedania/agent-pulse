@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SchedulerStatus } from '../../../common/types';
 import { estimateCost, formatUsd } from '../../../common/pricing';
-import { Button, GlassToggle, IconButton, Input, Segmented, Tooltip } from '../Shared';
+import { Button, Card, Eyebrow, GlassToggle, IconButton, Input, Segmented, SettingRow, Tooltip } from '../Shared';
 
 // Mirrors SchedulerConfig in src/main/user-config.ts (kept structural so the
 // renderer needn't import main-process modules).
@@ -197,14 +197,7 @@ export const SchedulerSection: React.FC<Props> = ({ provider = 'claude-code', co
   ];
 
   return (
-    <section className='mt-6 glass-primary p-6'>
-      <div className='flex items-start gap-4'>
-        <div className='flex-1 min-w-0'>
-          <h2 className='text-lg font-bold text-strong'>{copy.title}</h2>
-          <p className='text-sm text-muted mt-1'>{copy.blurb}</p>
-        </div>
-      </div>
-
+    <Card title={copy.title} subtitle={copy.blurb}>
       {/* Mode switch */}
       <Segmented
         className='mt-5'
@@ -236,7 +229,7 @@ export const SchedulerSection: React.FC<Props> = ({ provider = 'claude-code', co
       {config.mode === 'fixed' && (
         <div className='mt-5'>
           <div className='flex items-center justify-between mb-3'>
-            <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Slots</p>
+            <Eyebrow size='md'>Slots</Eyebrow>
             <div className='flex gap-2'>
               <Button
                 onClick={applyPreset}
@@ -273,7 +266,7 @@ export const SchedulerSection: React.FC<Props> = ({ provider = 'claude-code', co
       {config.mode === 'adaptive' && (
         <div className='mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4'>
           <label className='flex flex-col gap-1.5'>
-            <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Work start</span>
+            <Eyebrow as='span' size='md'>Work start</Eyebrow>
             <Input
               size='sm'
               type='time'
@@ -282,7 +275,7 @@ export const SchedulerSection: React.FC<Props> = ({ provider = 'claude-code', co
             />
           </label>
           <label className='flex flex-col gap-1.5'>
-            <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Work end</span>
+            <Eyebrow as='span' size='md'>Work end</Eyebrow>
             <Input
               size='sm'
               type='time'
@@ -291,7 +284,7 @@ export const SchedulerSection: React.FC<Props> = ({ provider = 'claude-code', co
             />
           </label>
           <label className='flex flex-col gap-1.5'>
-            <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Max windows/day</span>
+            <Eyebrow as='span' size='md'>Max windows/day</Eyebrow>
             <Input
               className='w-24'
               type='number'
@@ -308,26 +301,29 @@ export const SchedulerSection: React.FC<Props> = ({ provider = 'claude-code', co
       )}
 
       {/* Token nudge */}
-      <div className='mt-5 glass-secondary p-4 flex items-start gap-3'>
-        <div className='flex-1 min-w-0'>
-          <p className='font-medium text-strong text-sm leading-tight'>Token-refresh nudge</p>
-          <p className='text-xs text-muted mt-1'>
+      <SettingRow
+        className='mt-5'
+        title='Token-refresh nudge'
+        description={
+          <>
             Fire a refresh ping ~{Math.round(config.tokenNudge.leadMs / 60000)} min before your login expires, when no
             opener is already coming. {copy.nudgeBlurb}
-          </p>
-        </div>
-        <Toggle
-          small
-          on={config.tokenNudge.enabled}
-          onClick={() => onChange({ tokenNudge: { ...config.tokenNudge, enabled: !config.tokenNudge.enabled } })}
-          label='Toggle token nudge'
-        />
-      </div>
+          </>
+        }
+        control={
+          <Toggle
+            small
+            on={config.tokenNudge.enabled}
+            onClick={() => onChange({ tokenNudge: { ...config.tokenNudge, enabled: !config.tokenNudge.enabled } })}
+            label='Toggle token nudge'
+          />
+        }
+      />
 
       {/* Daily cap + cost + test */}
       <div className='mt-5 flex flex-wrap items-end gap-4'>
         <label className='flex flex-col gap-1.5'>
-          <span className='text-xs uppercase tracking-widest text-faint font-semibold'>Max openers/day</span>
+          <Eyebrow as='span' size='md'>Max openers/day</Eyebrow>
           <Input
             className='w-24'
             type='number'
@@ -351,6 +347,6 @@ export const SchedulerSection: React.FC<Props> = ({ provider = 'claude-code', co
           {copy.costNote ? ` ${copy.costNote}` : ''}
         </p>
       </div>
-    </section>
+    </Card>
   );
 };

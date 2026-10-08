@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { GuardrailConfig, GuardrailEvent, GuardrailRule, GuardrailTier, GuardrailOs } from '../../../common/guardrails';
-import { Badge, Button, GlassToggle, Input, Segmented, Checkbox, Modal, appConfirm, type BadgeTone } from '../Shared';
+import { Badge, Button, Card, Eyebrow, GlassToggle, Input, Segmented, Checkbox, Modal, appConfirm, type BadgeTone } from '../Shared';
 import { Field, RuleRow, TabLoading } from './settingsShared';
 import { logger } from '../../../common/logger';
 
@@ -111,14 +111,7 @@ export const GuardrailsTab: React.FC = () => {
 
   return (
     <div>
-      <div className='flex items-center justify-between mb-5'>
-        <div>
-          <h2 className='text-xl font-bold tracking-tight'>Command Guardrails</h2>
-          <p className='text-sm text-muted mt-1'>
-            Inspect shell commands before tools run them. Some agents (Claude Code, Codex, Grok, Antigravity,
-            OpenCode) can block a risky command outright; others just get a warning.
-          </p>
-        </div>
+      <div className='flex items-center justify-end mb-5'>
         <GlassToggle
           checked={config.enabled}
           onChange={() => update({ enabled: !config.enabled })}
@@ -138,11 +131,12 @@ export const GuardrailsTab: React.FC = () => {
 
       <div className={config.enabled ? '' : 'opacity-60 pointer-events-none'}>
         {/* Rule list */}
-        <div className='glass-primary p-5'>
+        <Card
+          subtitle='Inspect shell commands before tools run them. Some agents (Claude Code, Codex, Grok,
+            Antigravity, OpenCode) can block a risky command outright; others just get a warning.'
+        >
           <div className='flex items-center justify-between mb-4'>
-            <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
-              Rules ({allRules.length})
-            </p>
+            <Eyebrow size='md'>Rules ({allRules.length})</Eyebrow>
             <Button variant='primary' size='sm' onClick={() => setShowAdd(true)}>
               + Add rule
             </Button>
@@ -170,13 +164,13 @@ export const GuardrailsTab: React.FC = () => {
               />
             ))}
           </div>
-        </div>
+        </Card>
 
         {/* Recent events */}
-        <div className='glass-primary p-5 mt-5'>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
+        <div className='glass-primary p-5'>
+          <Eyebrow size='md' className='mb-3'>
             Recent activity {events.length > 0 && `(${events.length})`}
-          </p>
+          </Eyebrow>
           {events.length === 0 ? (
             <p className='text-sm text-faint italic'>No guardrail events yet.</p>
           ) : (

@@ -4,6 +4,7 @@ import { STATE_COLORS } from '../../../common/stateColors';
 import { TOOL_META } from '../../../common/toolMeta';
 import { MASCOT_COMPONENTS, MASCOT_PREVIEW_WIDTH } from '../Bubble/mascotRegistry';
 import { MASCOT_HOME, MASCOT_IDS, MASCOT_LABELS } from '../../../common/mascotGeometry';
+import { ChipGroup, Eyebrow } from '../Shared';
 
 type RingStyle = 'dotted' | 'dashed' | null;
 
@@ -139,28 +140,21 @@ const MascotPickerGroup: React.FC<{
   onPick: (id: MascotEntryId) => void;
 }> = ({ label, mascots, activeId, onPick }) => (
   <div className='flex flex-col gap-1.5'>
-    <p className='text-[10px] font-medium uppercase tracking-wider text-faint'>{label}</p>
-    <div className='flex flex-wrap gap-1.5'>
-      {mascots.map((m) => {
-        const active = m.id === activeId;
+    <Eyebrow size='sm'>{label}</Eyebrow>
+    <ChipGroup
+      ariaLabel={label}
+      size='md'
+      value={activeId}
+      onChange={(v) => onPick(v as MascotEntryId)}
+      options={mascots.map((m) => {
         const tool = m.homeTool ? TOOL_META[m.homeTool] : null;
-        return (
-          <button
-            key={m.id}
-            onClick={() => onPick(m.id)}
-            aria-pressed={active}
-            title={tool ? `${MASCOT_LABELS[m.id]} · ${tool.label}` : MASCOT_LABELS[m.id]}
-            className={`flex items-center cursor-pointer gap-1.5 pl-2.5 pr-3 py-1 rounded-full text-xs font-medium border transition-colors ${active
-                ? 'bg-control-strong border-edge-strong text-primary shadow-sm'
-                : 'bg-glass/40 border-edge/70 text-muted hover:text-primary hover:border-edge-strong'
-              }`}
-          >
-            {tool && <img src={tool.icon} alt='' className='w-3.5 h-3.5' />}
-            {MASCOT_LABELS[m.id]}
-          </button>
-        );
+        return {
+          value: m.id,
+          label: MASCOT_LABELS[m.id],
+          leading: tool ? <img src={tool.icon} alt='' className='w-3.5 h-3.5' /> : undefined,
+        };
       })}
-    </div>
+    />
   </div>
 );
 
@@ -187,9 +181,9 @@ const MascotStates: React.FC = () => {
 
   return (
     <div className='mt-8'>
-      <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
+      <Eyebrow size='md' className='mb-3'>
         Mascot States
-      </p>
+      </Eyebrow>
       <div className='flex flex-wrap gap-x-8 gap-y-3 mb-4'>
         <MascotPickerGroup
           label='Agent mascots'
@@ -218,9 +212,9 @@ const MascotStates: React.FC = () => {
 
 export const StatesReference: React.FC = () => (
   <div className='mt-10'>
-    <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-4'>
+    <Eyebrow size='md' className='mb-4'>
       Agent States
-    </p>
+    </Eyebrow>
     <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3'>
       {CARDS.map((card) => (
         <StateCard key={card.state} {...card} />

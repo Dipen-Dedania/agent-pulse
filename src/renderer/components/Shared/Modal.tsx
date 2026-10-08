@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { gentle } from '../../motion';
+import { fadeQuick, gentle } from '../../motion';
 
 /**
  * Modal — the app's standard glass dialog shell. Handles the chrome and the
@@ -105,7 +105,7 @@ export const Modal: React.FC<ModalProps> = ({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
+      transition={fadeQuick}
       onClick={onClose}
     >
       <motion.div

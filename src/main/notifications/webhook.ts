@@ -14,7 +14,7 @@ import { logger } from '../../common/logger';
 const SEND_TIMEOUT_MS = 5_000;
 
 export interface WebhookMessage {
-  title: string;       // short headline, e.g. "Claude Code needs your input"
+  title: string;       // short headline, e.g. "Claude Code needs you"
   body?: string;       // optional detail line (task summary, idle time)
   accentColor?: number; // Discord embed color (decimal RGB); ignored by Slack
 }

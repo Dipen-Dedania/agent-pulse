@@ -1,4 +1,5 @@
 import React from 'react';
+import { Eyebrow } from '../../Shared';
 import { useBacklogStats } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, SkeletonLine, InfoPill, InfoTooltip, formatCompactNumber, formatDuration, useChartTip } from './shared';
@@ -15,7 +16,7 @@ const Stat: React.FC<{ label: string; value: string; hint?: React.ReactNode; ton
 }) => (
   <div className='flex-1 min-w-[7rem]'>
     <div className='flex items-center gap-1'>
-      <p className='text-[11px] uppercase tracking-wider text-faint'>{label}</p>
+      <Eyebrow size='sm'>{label}</Eyebrow>
       {hint}
     </div>
     <p className={`mt-0.5 text-xl font-semibold tabular-nums ${tone === 'ok' ? 'text-ok' : 'text-strong'}`}>{value}</p>
@@ -83,7 +84,7 @@ const TaskMixDonut: React.FC<{
         </svg>
         <div className='pointer-events-none absolute inset-0 flex flex-col items-center justify-center'>
           <span className='text-base font-semibold tabular-nums text-strong leading-none'>≈{formatUsd(mix.totalCostUsd)}</span>
-          <span className='mt-0.5 text-[9px] uppercase tracking-wider text-faint'>est. cost</span>
+          <Eyebrow size='sm' as='span' className='mt-0.5'>est. cost</Eyebrow>
         </div>
       </div>
       {/* Legend */}

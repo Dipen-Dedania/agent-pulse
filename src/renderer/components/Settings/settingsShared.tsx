@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, GlassToggle, Spinner } from '../Shared';
+import { Button, Eyebrow, GlassToggle, Spinner } from '../Shared';
 
 // Shared building blocks for the Guardrails and Secret Protection sub-tabs.
 // The two surfaces were near-verbatim copies (rule row, add-rule form fields,
@@ -20,7 +20,7 @@ export const TabLoading: React.FC<{ label: string }> = ({ label }) => (
 /** Labeled form field wrapper used inside the add-rule modals. */
 export const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div>
-    <p className='text-xs font-semibold uppercase tracking-wider text-faint mb-1.5'>{label}</p>
+    <Eyebrow size='md' className='mb-1.5'>{label}</Eyebrow>
     {children}
   </div>
 );

@@ -1,6 +1,6 @@
 import React from 'react';
 import { AntigravityUsageStatus, UsageState } from '../../../common/types';
-import { Meter, Tooltip } from '../Shared';
+import { Badge, Eyebrow, Meter, Tooltip } from '../Shared';
 import {
   UsageNotificationUI,
   UsageProviderPanel,
@@ -53,9 +53,9 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
     >
       {config.enabled && models.length > 0 && (
         <div className='mt-5 flex flex-col gap-2'>
-          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>
+          <Eyebrow size='md'>
             Models with active quotas
-          </p>
+          </Eyebrow>
           <div className='glass-secondary divide-y divide-edge/40'>
             {models.map((m) => {
               const remaining = 100 - m.utilization;
@@ -72,9 +72,9 @@ export const AntigravityUsageSection: React.FC<Props> = ({ config, status, onCha
                         </Tooltip>
                       )}
                       {m.recommended && (
-                        <span className='text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/15 text-info border border-blue-500/30 shrink-0'>
+                        <Badge tone='info' variant='tag' uppercase size='xs' className='shrink-0'>
                           Recommended
-                        </span>
+                        </Badge>
                       )}
                     </div>
                     <div className='flex items-center gap-3 mt-1.5'>

@@ -1,22 +1,22 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AgentState, ToolId } from '../../../common/types';
+import { AgentState } from '../../../common/types';
 import type { TabId } from '../Settings/SettingsPanel';
 import { ClawdMascot } from '../Bubble/ClawdMascot';
-import { Button } from '../Shared';
+import { Button, Eyebrow } from '../Shared';
+import { fadeQuick, gentle, pop } from '../../motion';
 
 // ── Backlog planner guided tour ──────────────────────────────────────────────
 // An in-panel spotlight/coachmark walk anchored to the REAL Backlog-tab DOM,
 // hoisted to SettingsPanel level so it survives the tab-swap unmount
-// (SettingsPanel keys <AnimatePresence> on activeTab). It drives both
-// setActiveTab and setUsageSubTab live, so the walk can step out to
-// Usage → Claude Code for issue population and back to the board, awaiting
-// each anchor (tab exit-animation + async config load) before positioning.
-// The scheduler step spotlights the board's ⚙ button rather than opening the
-// modal under the scrim. When an anchor never mounts (e.g. Claude Code usage
-// isn't configured, so the section never renders) the step degrades to a
-// centered, unanchored callout rather than hanging. Reuses the Tooltip positioning approach: fixed position,
+// (SettingsPanel keys <AnimatePresence> on activeTab). Every step lives on the
+// Backlog tab; it drives setActiveTab so a tour launched from elsewhere lands
+// on the board first, then awaits each anchor (tab mount animation + async
+// config load) before positioning. The settings step spotlights the board's
+// ⚙ button rather than opening the modal under the scrim. When an anchor
+// never mounts the step degrades to a centered, unanchored callout rather than
+// hanging. Reuses the Tooltip positioning approach: fixed position,
 // getBoundingClientRect, viewport clamping, placement flip, reposition on
 // scroll/resize. All motion is Framer, so it inherits the app's global
 // <MotionConfig reducedMotion="user">.
@@ -29,7 +29,6 @@ interface TourStep {
   title: string;
   body: string;
   tab: TabId;
-  subTab?: ToolId;      // required sub-tab within the Usage tab
   selector?: string;    // data-tour value; omitted → centered callout
   placement?: Placement;
   demoState?: AgentState;
@@ -64,7 +63,7 @@ const STEPS: TourStep[] = [
     key: 'new-card',
     kicker: 'Step 3',
     title: 'Fill the board',
-    body: 'Write a card by hand, or pull open issues straight from GitLab or Linear — imported issues land in Refinement, ready to shape.',
+    body: 'Write a card by hand, or pull open issues straight from GitLab, Linear, or JIRA — imported issues land in Refinement, ready to shape.',
     tab: 'backlog',
     selector: 'backlog-new-card',
     placement: 'bottom',
@@ -91,27 +90,26 @@ const STEPS: TourStep[] = [
     demoState: 'idle-active',
   },
   {
-    key: 'scheduler',
+    key: 'settings',
     kicker: 'Step 6',
-    title: 'Use the night session',
-    body: 'This ⚙ opens the scheduler: set the windows when queued green cards run themselves (on Claude Code or Codex, per card) — the Nights 23–07 preset is one click. Idle-gated so it won’t fight a late session, budget-capped per card. Wake up to the work done.',
+    title: 'Board settings, one gear',
+    body: 'This ⚙ opens the night session — windows when queued green cards run themselves, on Claude Code or Codex per card, idle-gated and budget-capped; the Nights 23–07 preset is one click — plus the issue-population defaults next to it.',
     tab: 'backlog',
     selector: 'backlog-scheduler',
     placement: 'bottom',
     demoState: 'working',
-    degradeBody: 'The night session lives behind the ⚙ button in the board header. Open it and set your windows to arm overnight autorun.',
+    degradeBody: 'Night session windows and issue-population defaults live behind the ⚙ button in the board header.',
   },
   {
     key: 'population',
     kicker: 'Step 7',
     title: 'Keep the board fed',
-    body: 'Point the board at GitLab or Linear and it self-populates from your open issues — no token to manage, it rides your org connectors.',
-    tab: 'usage',
-    subTab: 'claude-code',
-    selector: 'backlog-population',
-    placement: 'top',
+    body: 'Pick a project chip and link it to GitLab, Linear, or JIRA, then Scan — open issues queue up under Review issues, no token to manage. Defaults live under ⚙ → Issue population.',
+    tab: 'backlog',
+    selector: 'backlog-projects',
+    placement: 'bottom',
     demoState: 'idle-active',
-    degradeBody: 'Issue population lives under Usage → Claude Code → Issue population.',
+    degradeBody: 'Link a project to GitLab, Linear, or JIRA from its chip row, then Scan; defaults live under ⚙ → Issue population.',
   },
   {
     key: 'end',
@@ -163,9 +161,7 @@ interface BacklogTourProps {
   active: boolean;
   projectCount: number;
   activeTab: TabId;
-  usageSubTab: ToolId;
   setActiveTab: (tab: TabId) => void;
-  setUsageSubTab: (tool: ToolId) => void;
   /** Called on finish (completed=true) or skip/Esc (completed=false). */
   onFinish: (completed: boolean) => void;
 }
@@ -174,9 +170,7 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
   active,
   projectCount,
   activeTab,
-  usageSubTab,
   setActiveTab,
-  setUsageSubTab,
   onFinish,
 }) => {
   const steps = projectCount === 0 ? STEPS.slice(0, STEP_COUNT_EMPTY) : STEPS;
@@ -196,8 +190,8 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
     if (active) setIndex(0);
   }, [active]);
 
-  // Resolve the current step: drive the tab/sub-tab, then poll for the anchor
-  // until it mounts or the timeout fires (→ degrade to a centered callout).
+  // Resolve the current step: drive the tab, then poll for the anchor until it
+  // mounts or the timeout fires (→ degrade to a centered callout).
   useEffect(() => {
     if (!active) return;
     const s = steps[Math.min(index, steps.length - 1)];
@@ -207,7 +201,6 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
     setPos(null);
 
     if (activeTab !== s.tab) setActiveTab(s.tab);
-    if (s.subTab && usageSubTab !== s.subTab) setUsageSubTab(s.subTab);
 
     if (!s.selector) { setReady(true); return; } // centered step, no anchor
 
@@ -233,8 +226,8 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-    // activeTab/usageSubTab intentionally excluded: this drives them, and
-    // re-running on their change would restart the poll mid-transition.
+    // activeTab intentionally excluded: this drives it, and re-running on its
+    // change would restart the poll mid-transition.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, index]);
 
@@ -301,7 +294,7 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
           key={step.key}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.2 }}
+          transition={fadeQuick}
           style={{
             position: 'fixed',
             left: rect.left - SPOT_PAD,
@@ -328,7 +321,7 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
           ref={calloutRef}
           initial={{ opacity: 0, y: 8, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+          transition={gentle}
           style={{
             position: 'fixed',
             left: pos?.left ?? 0,
@@ -346,16 +339,16 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
               initial={{ opacity: 0, x: 12 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
+              transition={fadeQuick}
             >
               <div className='flex items-start gap-3'>
                 <div className='shrink-0 -mt-1'>
                   <ClawdMascot state={step.demoState ?? 'idle-active'} width={44} />
                 </div>
                 <div className='min-w-0'>
-                  <p className='text-[10px] font-semibold uppercase tracking-widest text-faint'>
+                  <Eyebrow size='sm'>
                     {step.kicker}
-                  </p>
+                  </Eyebrow>
                   <h2 className='text-[15px] font-bold text-strong leading-snug mt-0.5'>
                     {step.title}
                   </h2>
@@ -376,7 +369,7 @@ export const BacklogTour: React.FC<BacklogTourProps> = ({
                   width: i === index ? 16 : 6,
                   backgroundColor: i === index ? 'rgba(96,165,250,0.95)' : 'rgba(148,163,184,0.35)',
                 }}
-                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                transition={pop}
                 className='h-1.5 rounded-full'
               />
             ))}

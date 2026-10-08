@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { colorsFor } from '../../../common/stateColors';
+import { smooth } from '../../motion';
 
 // Reuse the single source of truth for the `waiting` palette so the glow's blue
 // can never drift from the bubble's. This overlay floats over the live desktop
@@ -35,7 +36,7 @@ export const ScreenEdgeOverlay: React.FC = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
+            transition={smooth}
           >
             <motion.div
               className='absolute inset-0'

@@ -1,7 +1,7 @@
 import React from 'react';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
-import { AnimatedNumber, Meter } from '../../Shared';
+import { AnimatedNumber, Eyebrow, Meter } from '../../Shared';
 import { useWaiting } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, InfoPill, SkeletonLine, formatDuration } from './shared';
@@ -14,7 +14,7 @@ export const WaitingCard: React.FC = () => {
 
   return (
     <Card
-      title='Waiting on you'
+      title='Needs you'
       subtitle='Time agents sat blocked on a permission or prompt.'
       right={<InfoPill>Claude Code today</InfoPill>}
     >
@@ -26,13 +26,13 @@ export const WaitingCard: React.FC = () => {
         <div className='flex flex-col gap-4'>
           <div className='grid grid-cols-2 gap-3'>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Total blocked</p>
+              <Eyebrow size='sm' className='mb-1'>Total blocked</Eyebrow>
               <p className='text-xl font-semibold text-primary font-mono tabular-nums'>
                 <AnimatedNumber value={data.totalWaitMs} format={formatDuration} />
               </p>
             </div>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Prompts answered</p>
+              <Eyebrow size='sm' className='mb-1'>Prompts answered</Eyebrow>
               <p className='text-xl font-semibold text-primary font-mono tabular-nums'>
                 <AnimatedNumber value={data.totalEpisodes} format={(n) => Math.round(n).toLocaleString()} />
               </p>

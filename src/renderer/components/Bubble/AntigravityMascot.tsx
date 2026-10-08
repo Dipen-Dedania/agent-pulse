@@ -237,10 +237,10 @@ export const AntigravityMascot: React.FC<AntigravityMascotProps> = ({ state, wid
           <rect id="flag-pole" x="98" y="-50" width="3.4" height="70" rx="1.7" fill="#5D5B56" />
           <rect id="flag-sign" x="100" y="-52" width="64" height="30" rx="4"
             fill="#FBF7EF" stroke="#D9CFC0" strokeWidth="1" />
-          <text x="132" y="-40" textAnchor="middle"
-            fontFamily="ui-sans-serif, sans-serif" fontSize="7.5" fontWeight="700" fill="#3A3530">
-            <tspan x="132" dy="0">Waiting for</tspan>
-            <tspan x="132" dy="9.5">your input</tspan>
+          <text x="132" y="-41" textAnchor="middle"
+            fontFamily="ui-sans-serif, sans-serif" fontSize="11" fontWeight="700" fill="#3A3530">
+            <tspan x="132" dy="0">Need</tspan>
+            <tspan x="132" dy="13">input</tspan>
           </text>
         </g>
 

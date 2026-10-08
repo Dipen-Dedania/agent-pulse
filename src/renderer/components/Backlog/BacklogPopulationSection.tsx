@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { BacklogPopulationConfig, IssueFilterMode } from '../../../common/backlog-types';
-import { GlassToggle, Input, Select } from '../Shared';
+import { GlassToggle, Input, Select, SettingRow } from '../Shared';
 
-// Settings → Usage → Claude Code: issue population config (Phase 3). Stays under
-// Claude Code because the scouts run on `claude -p`; the agent-neutral Backlog
-// Scheduler moved behind ⚙ on the board. Governs GitLab + Linear population defaults.
-// The per-project link + scan + review live on the board itself; this governs
-// defaults + the optional background refresh. See backlog-phase3-gitlab-population-plan.md.
+// ⚙ → Issue population on the board (BacklogSettingsModal): population
+// defaults for GitLab / Linear / JIRA (Phase 3). Lives beside the night session
+// rather than under a tool's Plans & Limits sub-tab because it feeds this board,
+// whichever agent runs the cards. The per-project link + scan + review live on
+// the board itself; this governs defaults + the optional background refresh.
+// See backlog-phase3-gitlab-population-plan.md.
 
 interface Props {
   config: BacklogPopulationConfig;
@@ -30,19 +31,18 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
   }, [config.scoutModel]);
 
   return (
-    <section className='mt-6 glass-primary p-6' data-tour='backlog-population'>
+    <div>
       <div className='flex items-start gap-4'>
         <div className='flex-1 min-w-0'>
-          <h2 className='text-lg font-bold text-strong'>Issue population</h2>
-          <p className='text-sm text-muted mt-1'>
-            Fill the <span className='text-body'>Backlog</span> board from your open issues in
-            <span className='text-body'> GitLab</span> or <span className='text-body'>Linear</span>. Link a
-            project on the board — GitLab reads the repo’s <span className='font-mono'>origin</span> remote,
-            Linear links to a team you pick — then scan and review &amp; import; imported issues land in
-            Refinement. Uses your org connectors, so there’s no token to manage.
+          <p className='text-sm text-muted'>
+            Fill this board from your open issues in <span className='text-body'>GitLab</span>,
+            <span className='text-body'> Linear</span>, or <span className='text-body'>JIRA</span>. Link a
+            project from its chip on the board — GitLab reads the repo’s <span className='font-mono'>origin</span> remote,
+            Linear links to a team you pick, JIRA to a project — then scan and review &amp; import; imported
+            issues land in Refinement. Uses your org connectors, so there’s no token to manage.
           </p>
         </div>
-        <GlassToggle checked={config.enabled} onChange={(v) => onChange({ enabled: v })} label='Toggle GitLab population' />
+        <GlassToggle checked={config.enabled} onChange={(v) => onChange({ enabled: v })} label='Toggle issue population' />
       </div>
 
       <div className='mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4'>
@@ -65,7 +65,7 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
           <span className='text-xs font-medium text-muted'>Scout model</span>
           <Select
             value={custom ? '__custom' : config.scoutModel}
-            ariaLabel='GitLab scout model'
+            ariaLabel='Issue scout model'
             className='w-full px-3 py-1.5 text-sm'
             options={[...MODEL_PRESETS, { value: '__custom', label: 'Custom…' }]}
             onChange={(v) => {
@@ -89,40 +89,45 @@ export const BacklogPopulationSection: React.FC<Props> = ({ config, onChange }) 
         </label>
       </div>
 
-      <div className='mt-4 glass-secondary px-4 py-3 flex items-center gap-3 flex-wrap'>
-        <GlassToggle
-          checked={config.backgroundRefresh}
-          onChange={(v) => onChange({ backgroundRefresh: v })}
-          size='sm'
-          label='Toggle background refresh'
-        />
-        <div className='flex-1 min-w-0'>
-          <p className='text-sm text-strong'>Background refresh</p>
-          <p className='text-xs text-muted'>
+      <SettingRow
+        className='mt-4'
+        title='Background refresh'
+        description={
+          <>
             Periodically re-scan linked projects to keep the “Review issues” badge fresh. Off by default —
             each scan spends real Claude usage.
-          </p>
-        </div>
-        {config.backgroundRefresh && (
-          <label className='flex items-center gap-2 text-xs text-muted'>
-            every
-            <Input
-              size='xs'
-              className='w-20'
-              type='number'
-              min={15}
-              max={1440}
-              value={config.refreshIntervalMinutes}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                if (Number.isFinite(n)) onChange({ refreshIntervalMinutes: Math.min(1440, Math.max(15, Math.round(n))) });
-              }}
-              aria-label='Background refresh interval (minutes)'
+          </>
+        }
+        control={
+          <div className='flex items-center gap-3'>
+            {config.backgroundRefresh && (
+              <label className='flex items-center gap-2 text-xs text-muted'>
+                every
+                <Input
+                  size='xs'
+                  className='w-20'
+                  type='number'
+                  min={15}
+                  max={1440}
+                  value={config.refreshIntervalMinutes}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (Number.isFinite(n)) onChange({ refreshIntervalMinutes: Math.min(1440, Math.max(15, Math.round(n))) });
+                  }}
+                  aria-label='Background refresh interval (minutes)'
+                />
+                min
+              </label>
+            )}
+            <GlassToggle
+              checked={config.backgroundRefresh}
+              onChange={(v) => onChange({ backgroundRefresh: v })}
+              size='md'
+              label='Toggle background refresh'
             />
-            min
-          </label>
-        )}
-      </div>
-    </section>
+          </div>
+        }
+      />
+    </div>
   );
 };

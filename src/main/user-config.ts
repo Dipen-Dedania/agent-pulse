@@ -149,6 +149,19 @@ export interface StarNudgeConfig {
   milestoneKind: StarMilestoneKind | null; // which copy row the toast uses
 }
 
+// Last completed tool detection, persisted so the Hooks tab can paint from it
+// instantly on the next launch while a fresh (non-blocking) detection runs
+// behind it. `hookInstalled` is deliberately absent: it changes with every
+// install/uninstall and is cheap to compute, so it's always read fresh.
+export interface DetectionCacheEntry {
+  installed: boolean;
+  location?: string;
+}
+export interface DetectionCache {
+  detectedAt: number;
+  tools: Partial<Record<ToolId, DetectionCacheEntry>>;
+}
+
 export interface UserConfig {
   enabledBubbles: Partial<Record<ToolId, boolean>>;
   bubble: BubbleConfig;
@@ -182,6 +195,8 @@ export interface UserConfig {
   codexStatusLine: CodexStatusLineConfig;
   appearance: AppearanceConfig;
   starNudge: StarNudgeConfig;
+  // Null until the first detection has completed on this install.
+  detectionCache: DetectionCache | null;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'agent-pulse-config.json');
@@ -407,6 +422,7 @@ const DEFAULTS: UserConfig = {
     ],
   },
   appearance: { theme: 'auto' },
+  detectionCache: null,
 };
 
 // Map legacy ToolId keys in persisted configs to their current names so a
@@ -757,6 +773,29 @@ export function migrateAppearance(raw: unknown): AppearanceConfig {
   return { theme: THEMES.includes(a.theme as ThemeMode) ? a.theme! : 'auto' };
 }
 
+// Validate a persisted detection cache. Anything malformed collapses to null,
+// which simply means "detect before painting" on the next launch — the cache is
+// an accelerator, never a source of truth. Unknown tool ids are dropped and a
+// cache with no usable entries is treated as absent.
+export function migrateDetectionCache(raw: unknown): DetectionCache | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const c = raw as Partial<DetectionCache>;
+  if (typeof c.detectedAt !== 'number' || !Number.isFinite(c.detectedAt) || c.detectedAt <= 0) return null;
+  if (!c.tools || typeof c.tools !== 'object') return null;
+  const tools: Partial<Record<ToolId, DetectionCacheEntry>> = {};
+  for (const toolId of TOOL_IDS) {
+    const entry = (c.tools as Record<string, unknown>)[toolId];
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Partial<DetectionCacheEntry>;
+    if (typeof e.installed !== 'boolean') continue;
+    tools[toolId] = typeof e.location === 'string' && e.location
+      ? { installed: e.installed, location: e.location }
+      : { installed: e.installed };
+  }
+  if (Object.keys(tools).length === 0) return null;
+  return { detectedAt: Math.floor(c.detectedAt), tools };
+}
+
 // Smallest allowed escalation delay. Below this the feature would fire almost
 // instantly on every `waiting` flip, defeating the "give the user a moment"
 // intent and risking webhook spam.
@@ -991,6 +1030,7 @@ export function loadConfig(): UserConfig {
         statusLine: migrateStatusLine(parsed.statusLine),
         codexStatusLine: migrateCodexStatusLine(parsed.codexStatusLine),
         appearance: migrateAppearance(parsed.appearance),
+        detectionCache: migrateDetectionCache(parsed.detectionCache),
       };
     }
   } catch {
@@ -1043,6 +1083,7 @@ export function loadConfig(): UserConfig {
     statusLine: migrateStatusLine(undefined),
     codexStatusLine: migrateCodexStatusLine(undefined),
     appearance: migrateAppearance(undefined),
+    detectionCache: null,
   };
 }
 

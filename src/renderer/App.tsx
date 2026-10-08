@@ -1,12 +1,27 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Bubble } from './components/Bubble/Bubble';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
-import { TooltipOverlay, Tooltip } from './components/Shared';
+import { TooltipOverlay, Tooltip, AnimatedLogo } from './components/Shared';
 import { TourCard } from './components/Tour/TourCard';
 import { ScreenEdgeOverlay } from './components/ScreenEdge/ScreenEdgeOverlay';
 import { WindowChrome } from './components/Chrome/WindowChrome';
+import { BootGate } from './BootGate';
+import { bootMark, signalFirstPaint } from './boot-marks';
 import { ToolId, TourState } from '../common/types';
-import { motion, MotionConfig } from 'framer-motion';
+import { AnimatePresence, motion, MotionConfig, Transition, Variants } from 'framer-motion';
+import { gentle, listContainer, listItem, tabContent, tabContentTransition } from './motion';
+
+// The hero's feature-card stagger reuses `listContainer`'s cadence but waits
+// for the hero text above to settle first — a local spread, not a new token.
+const heroFeatureGrid: Variants = {
+  initial: listContainer.initial,
+  animate: {
+    transition: {
+      ...(listContainer.animate as { transition: Transition }).transition,
+      delayChildren: 0.3,
+    },
+  },
+};
 
 type Feature = {
   title: string;
@@ -135,14 +150,9 @@ const FEATURES: Feature[] = [
   },
 ];
 
-const FeatureCard: React.FC<{ feature: Feature; index: number }> = ({
-  feature,
-  index,
-}) => (
+const FeatureCard: React.FC<{ feature: Feature }> = ({ feature }) => (
   <motion.div
-    initial={{ opacity: 0, y: 12 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.5, delay: 0.3 + index * 0.06, ease: 'easeOut' }}
+    variants={listItem}
     className='text-left glass-secondary p-3 transition-colors'
   >
     <div className='flex items-center gap-2 mb-1'>
@@ -162,8 +172,10 @@ const FeatureCard: React.FC<{ feature: Feature; index: number }> = ({
 // The splash/landing hero shown when the Settings window loads its bare URL.
 // Doubles as the welcome sheet: on first run the tour is the primary CTA, and
 // it stays re-runnable from here forever (Raycast's "Show Onboarding" pattern).
-const Landing: React.FC = () => {
+const Landing: React.FC<{ onConfigure: () => void }> = ({ onConfigure }) => {
   const [tourState, setTourState] = useState<TourState | null>(null);
+
+  useEffect(() => { bootMark('landing-mounted'); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,12 +198,10 @@ const Landing: React.FC = () => {
   // Tour ended while we're on the splash — hand off to Settings (Hooks tab),
   // where the setup checklist continues the story.
   useEffect(() => {
-    const handler = () => {
-      window.location.href = '?view=settings';
-    };
+    const handler = () => onConfigure();
     window.electron.on('tour:completed', handler);
     return () => window.electron.off('tour:completed', handler);
-  }, []);
+  }, [onConfigure]);
 
   const startTour = () => window.electron.send('tour:start');
   // Until the state loads, assume returning user so the CTA never flashes
@@ -215,13 +225,12 @@ const Landing: React.FC = () => {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: 'easeOut' }}
+        transition={gentle}
         className='z-10 text-center max-w-2xl w-full px-6'
       >
-        <img
-          src='./assets/logo-transparent.png'
-          alt='Agent Pulse'
-          className='w-24 h-24 sm:w-20 sm:h-20 mx-auto mb-4 object-contain drop-shadow-[0_8px_32px_rgba(59,130,246,0.35)]'
+        <AnimatedLogo
+          variant='alive'
+          className='w-24 h-24 sm:w-20 sm:h-20 mx-auto mb-4 drop-shadow-[0_8px_32px_rgba(59,130,246,0.35)]'
         />
         <h1 className='text-6xl font-extrabold tracking-tight pb-5 bg-clip-text text-transparent bg-gradient-to-b from-strong to-muted'>
           Agent Pulse
@@ -238,11 +247,16 @@ const Landing: React.FC = () => {
           Status Bridge Active
         </p>
 
-        <div className='grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-10'>
-          {FEATURES.map((feature, index) => (
-            <FeatureCard key={feature.title} feature={feature} index={index} />
+        <motion.div
+          className='grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-10'
+          variants={heroFeatureGrid}
+          initial='initial'
+          animate='animate'
+        >
+          {FEATURES.map((feature) => (
+            <FeatureCard key={feature.title} feature={feature} />
           ))}
-        </div>
+        </motion.div>
 
         <div className='flex flex-col sm:flex-row gap-4 justify-center items-center'>
           {firstRun ? (
@@ -250,15 +264,15 @@ const Landing: React.FC = () => {
               <button onClick={startTour} className={primaryClass}>
                 Show me how it works
               </button>
-              <a href='?view=settings' className={secondaryClass}>
+              <button onClick={onConfigure} className={secondaryClass}>
                 Configure Tools
-              </a>
+              </button>
             </>
           ) : (
             <>
-              <a href='?view=settings' className={primaryClass}>
+              <button onClick={onConfigure} className={primaryClass}>
                 Configure Tools
-              </a>
+              </button>
               <Tooltip content='Replay the welcome tour'>
                 <button
                   onClick={startTour}
@@ -284,10 +298,44 @@ const Landing: React.FC = () => {
   );
 };
 
+// The two views the framed (Settings) window switches between in place.
+type FramedView = 'landing' | 'settings';
+
 const App: React.FC = () => {
   const params = new URLSearchParams(window.location.search);
   const toolId = (params.get('toolId') as ToolId) || null;
   const view = params.get('view');
+
+  // Landing ↔ Settings is an in-page switch, not a navigation: a reload would
+  // re-parse the whole bundle and replay the splash. The URL is still kept
+  // truthful so a manual reload (and the existing `?view=settings` deep link)
+  // land on the same view.
+  const [framedView, setFramedView] = useState<FramedView>(view === 'settings' ? 'settings' : 'landing');
+  const navigate = useCallback((next: FramedView) => {
+    setFramedView(next);
+    try {
+      window.history.replaceState(null, '', next === 'settings' ? '?view=settings' : window.location.pathname);
+    } catch {
+      // file:// documents may refuse history changes; only the reload target suffers.
+    }
+  }, []);
+
+  // Framed window only: the settings window is created hidden behind the
+  // floating logo splash. Two frames after the first commit the pixels are
+  // really there, so tell main to show the window and close the splash.
+  const isOverlay = view === 'tooltip' || view === 'tour' || view === 'screen-edge';
+  useEffect(() => {
+    if (toolId || isOverlay) return;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => signalFirstPaint());
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Bubbles render outside MotionConfig — their animation is hand-tuned for the
   // always-on-top transparent window and must stay as-is for performance.
@@ -295,29 +343,45 @@ const App: React.FC = () => {
     return <Bubble toolId={toolId} demo={params.get('demo') === '1'} />;
   }
 
-  const content =
-    view === 'settings' ? (
-      <SettingsPanel />
-    ) : view === 'tooltip' ? (
-      <TooltipOverlay />
-    ) : view === 'tour' ? (
-      <TourCard />
-    ) : view === 'screen-edge' ? (
-      <ScreenEdgeOverlay />
-    ) : (
-      <Landing />
-    );
-
-  // Only the Settings window has a real frame, and it loads with no `view`
-  // (Landing) before navigating to `?view=settings` — both get the custom title
-  // bar. Tooltip / tour / screen-edge are transparent overlay windows.
-  const framed = view === 'settings' || view === null;
+  // Tooltip / tour / screen-edge are transparent overlay windows with no frame.
+  const overlay = !isOverlay ? null
+    : view === 'tooltip' ? <TooltipOverlay />
+    : view === 'tour' ? <TourCard />
+    : <ScreenEdgeOverlay />;
 
   // Every non-bubble view honors the OS "reduce motion" setting: transforms and
   // layout animations collapse to instant, cross-fades stay.
+  if (overlay) {
+    return <MotionConfig reducedMotion='user'>{overlay}</MotionConfig>;
+  }
+
+  // Only the Settings window has a real frame. WindowChrome (title bar +
+  // wallpaper) stays mounted across the view switch; the content cross-fades.
+  // The Settings panel waits behind BootGate until the main process reports
+  // that every IPC handler it calls at mount is registered.
   return (
     <MotionConfig reducedMotion='user'>
-      {framed ? <WindowChrome>{content}</WindowChrome> : content}
+      <WindowChrome>
+        <AnimatePresence mode='wait' initial={false}>
+          <motion.div
+            key={framedView}
+            className='h-full'
+            variants={tabContent}
+            initial='initial'
+            animate='animate'
+            exit='exit'
+            transition={tabContentTransition}
+          >
+            {framedView === 'settings' ? (
+              <BootGate>
+                <SettingsPanel onBack={() => navigate('landing')} />
+              </BootGate>
+            ) : (
+              <Landing onConfigure={() => navigate('settings')} />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </WindowChrome>
     </MotionConfig>
   );
 };

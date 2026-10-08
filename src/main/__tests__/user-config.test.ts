@@ -1,5 +1,43 @@
 import { describe, it, expect } from 'vitest';
-import { migrateBacklogPopulation, migrateBubble, migrateCodexStatusLine, migrateMascots, migrateScheduler, SchedulerConfig } from '../user-config';
+import { migrateBacklogPopulation, migrateBubble, migrateCodexStatusLine, migrateDetectionCache, migrateMascots, migrateScheduler, SchedulerConfig } from '../user-config';
+
+describe('migrateDetectionCache', () => {
+  it('returns null for missing, non-object, or structurally broken input', () => {
+    expect(migrateDetectionCache(undefined)).toBeNull();
+    expect(migrateDetectionCache(null)).toBeNull();
+    expect(migrateDetectionCache('nope')).toBeNull();
+    expect(migrateDetectionCache({})).toBeNull();
+    expect(migrateDetectionCache({ detectedAt: 'yesterday', tools: {} })).toBeNull();
+    expect(migrateDetectionCache({ detectedAt: 0, tools: { 'claude-code': { installed: true } } })).toBeNull();
+    expect(migrateDetectionCache({ detectedAt: 123, tools: 'all' })).toBeNull();
+  });
+
+  it('keeps well-formed entries, drops unknown ids and malformed entries, and floors the timestamp', () => {
+    const out = migrateDetectionCache({
+      detectedAt: 1700000000000.7,
+      tools: {
+        'claude-code': { installed: true, location: 'C:/Users/x/.claude' },
+        'cursor': { installed: false },
+        'kiro': { installed: 'yes' },          // not a boolean → dropped
+        'openai-codex': { installed: true, location: 42 }, // bad location → kept without it
+        'not-a-tool': { installed: true },     // unknown id → dropped
+      },
+    });
+    expect(out).toEqual({
+      detectedAt: 1700000000000,
+      tools: {
+        'claude-code': { installed: true, location: 'C:/Users/x/.claude' },
+        'cursor': { installed: false },
+        'openai-codex': { installed: true },
+      },
+    });
+  });
+
+  it('treats a cache with no usable entries as absent', () => {
+    expect(migrateDetectionCache({ detectedAt: 5, tools: { bogus: { installed: true } } })).toBeNull();
+    expect(migrateDetectionCache({ detectedAt: 5, tools: {} })).toBeNull();
+  });
+});
 
 describe('migrateCodexStatusLine', () => {
   const DEFAULT_ITEMS = ['model-with-reasoning', 'current-dir', 'git-branch', 'context-remaining', 'five-hour-limit', 'weekly-limit'];

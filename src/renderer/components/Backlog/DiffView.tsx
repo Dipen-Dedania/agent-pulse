@@ -18,7 +18,7 @@ import python from 'refractor/lang/python';
 import yaml from 'refractor/lang/yaml';
 import 'react-diff-view/style/index.css';
 import { logger } from '../../../common/logger';
-import { IconButton, Tooltip } from '../Shared';
+import { Eyebrow, IconButton, Tooltip } from '../Shared';
 
 for (const lang of [markup, clike, javascript, jsx, typescript, tsx, json, css, markdown, bash, python, yaml]) {
   refractor.register(lang);
@@ -325,7 +325,7 @@ export const DiffView: React.FC<Props> = ({ patch, truncated }) => {
                       </IconButton>
                     </Tooltip>
                   ) : null}
-                  <span className='shrink-0 text-[10px] uppercase tracking-wider text-faint'>{status.label}</span>
+                  <Eyebrow size='sm' as='span' className='shrink-0'>{status.label}</Eyebrow>
                 </div>
                 {file.isBinary || !file.hunks?.length ? (
                   <p className='px-3 py-2 text-xs text-faint italic'>

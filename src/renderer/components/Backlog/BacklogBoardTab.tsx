@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BACKLOG_AGENTS, BacklogAgent, BacklogCard, BacklogCardState, BacklogSchedulerConfig, agentLabel, countUnmetPrereqs, isAwaitingReview } from '../../../common/backlog-types';
+import { BACKLOG_AGENTS, BacklogAgent, BacklogCard, BacklogCardState, BacklogPopulationConfig, BacklogSchedulerConfig, agentLabel, countUnmetPrereqs, isAwaitingReview } from '../../../common/backlog-types';
 import { useBacklogStore } from '../../store/useBacklogStore';
 import { logger } from '../../../common/logger';
 import { BoardColumn } from './BoardColumn';
@@ -9,7 +9,7 @@ import {
   DONE_FILTER_META, DONE_FILTER_ORDER, DONE_FILTER_PREDICATES, DoneFilter,
   passesViewFilters,
 } from './board-filters';
-import { appAlert, appConfirm, Button, IconButton, Segmented, Spinner, Tooltip } from '../Shared';
+import { appAlert, appConfirm, Button, Card, ChipGroup, type ChipGroupOption, Eyebrow, IconButton, Segmented, Spinner, Tooltip } from '../Shared';
 import { CardTile } from './CardTile';
 import { CardEditorModal } from './CardEditorModal';
 import { BacklogSearchPalette } from './BacklogSearchPalette';
@@ -18,9 +18,8 @@ import { IssueSourceHeaderActions, IssueSourceProjectStrip } from './IssueSource
 import { IssueImportModal } from './IssueImportModal';
 import { SOURCE_META } from './source-meta';
 import { SourceIcon } from './SourceIcon';
-import { projectColor } from './project-colors';
 import { BacklogSetupChecklist } from './BacklogSetupChecklist';
-import { BacklogSchedulerModal } from './BacklogSchedulerModal';
+import { BacklogSettingsModal, BacklogSettingsTab } from './BacklogSettingsModal';
 import { listItem } from '../../motion';
 
 // Global Kanban board (backlog.md Phase 1): all projects on one board, every
@@ -88,32 +87,19 @@ const DoneFilterChips: React.FC<{
   counts: Record<DoneFilter, number>;
   onChange: (next: DoneFilter) => void;
 }> = ({ value, counts, onChange }) => (
-  <div className='flex items-center gap-1 flex-wrap'>
-    {DONE_FILTER_ORDER.map((f) => {
+  <Segmented
+    ariaLabel='Done filter'
+    size='xs'
+    value={value}
+    onChange={(v) => onChange(v as DoneFilter)}
+    options={DONE_FILTER_ORDER.map((f) => {
       const meta = DONE_FILTER_META[f];
-      const active = f === value;
-      // An unreviewed diff is the only actionable Done category — keep it
-      // legible even while another chip is selected.
-      const urgent = !active && f === 'needs-review' && counts[f] > 0;
-      return (
-        <Tooltip key={f} content={meta.hint}>
-          <button
-            onClick={() => onChange(f)}
-            className={`px-2 py-0.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors ${
-              active
-                ? 'bg-control text-strong shadow-inner'
-                : urgent
-                  ? 'bg-amber-500/15 text-warn hover:bg-amber-500/25'
-                  : 'text-muted hover:text-strong hover:bg-control/50'
-            }`}
-          >
-            {meta.label}
-            <span className={`ml-1 tabular-nums ${active ? 'text-muted' : 'text-faint'}`}>{counts[f]}</span>
-          </button>
-        </Tooltip>
-      );
+      // An unreviewed diff is the only actionable Done category — flag it with
+      // a dot so it stays noticeable even while another chip is selected.
+      const urgent = f === 'needs-review' && counts[f] > 0;
+      return { value: f, label: `${meta.label} ${counts[f]}`, hint: meta.hint, dot: urgent ? 'bg-amber-500' : undefined };
     })}
-  </div>
+  />
 );
 
 // Sync (hydrate + broadcast subscription) lives in SettingsPanel via
@@ -123,18 +109,23 @@ interface BacklogBoardTabProps {
   /** Launches the in-panel guided tour (owned by SettingsPanel). */
   onStartTour?: () => void;
   /**
-   * Backlog Scheduler config for the ⚙ modal. SettingsPanel owns it (one
-   * config loader + `backlog:scheduler:config-updated` subscription for the
-   * whole panel); the board only threads it through. null until loaded.
+   * Backlog Scheduler + issue population configs for the ⚙ Backlog settings
+   * modal. SettingsPanel owns both (one config loader + the
+   * `backlog:*:config-updated` subscriptions for the whole panel); the board
+   * only threads them through. null until loaded.
    */
   schedulerConfig?: BacklogSchedulerConfig | null;
   onSchedulerConfigChange?: (partial: Partial<BacklogSchedulerConfig>) => void;
+  populationConfig?: BacklogPopulationConfig | null;
+  onPopulationConfigChange?: (partial: Partial<BacklogPopulationConfig>) => void;
 }
 
 export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
   onStartTour,
   schedulerConfig = null,
   onSchedulerConfigChange,
+  populationConfig = null,
+  onPopulationConfigChange,
 }) => {
   const store = useBacklogStore();
 
@@ -154,7 +145,8 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
   const [detailCard, setDetailCard] = useState<BacklogCard | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [schedulerOpen, setSchedulerOpen] = useState(false);
+  // Which ⚙ Backlog settings tab to open with; null = closed.
+  const [settingsOpen, setSettingsOpen] = useState<BacklogSettingsTab | null>(null);
   const [dragCardId, setDragCardId] = useState<string | null>(null);
   // `${projectId}:${agent}` → default model (Claude: the project's
   // .claude/settings.json chain; Codex: ~/.codex/config.toml), so tiles can
@@ -206,10 +198,7 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
 
   if (!store.available) {
     return (
-      <div className='glass-primary p-6'>
-        <h2 className='text-lg font-bold text-strong'>Backlog board unavailable</h2>
-        <p className='text-sm text-muted mt-2'>{store.reason}</p>
-      </div>
+      <Card title='Backlog board unavailable' subtitle={store.reason}>{null}</Card>
     );
   }
 
@@ -436,7 +425,7 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
     }
     return status.enabled
       ? `Queue: ${status.queueReady} ready`
-      : 'Backlog autorun off — run cards with "Run now", or enable windows in Usage → Claude Code';
+      : 'Backlog autorun off — run cards with "Run now", or set windows under ⚙ Backlog settings';
   })();
 
   // `tourAnchor` marks a single tile as the guided tour's card anchor (the first
@@ -564,14 +553,15 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
             </Button>
           </Tooltip>
           <IssueSourceHeaderActions projectFilter={projectFilter} onReview={() => setImportOpen(true)} />
-          {/* Scheduler lives behind ⚙ rather than on a Settings tab: its
-              windows/gates govern this board, and cards run on either agent,
-              so no tool's Plans & Limits sub-tab is the right home. */}
-          <Tooltip content={schedulerConfig ? 'Backlog Scheduler — windows when queued cards run themselves' : 'Scheduler settings are loading…'}>
+          {/* Board settings live behind ⚙ rather than on a Settings tab: the
+              night session's windows/gates and the issue-population defaults
+              govern this board, and cards run on either agent, so no tool's
+              Plans & Limits sub-tab is the right home. */}
+          <Tooltip content={schedulerConfig ? 'Backlog settings — night session windows and issue population' : 'Backlog settings are loading…'}>
             <IconButton
-              onClick={() => setSchedulerOpen(true)}
+              onClick={() => setSettingsOpen('scheduler')}
               disabled={!schedulerConfig || !onSchedulerConfigChange}
-              aria-label='Open the Backlog Scheduler'
+              aria-label='Open Backlog settings'
               data-tour='backlog-scheduler'
             >
               <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={1.75} strokeLinecap='round' strokeLinejoin='round' className='w-3.5 h-3.5' aria-hidden='true'>
@@ -600,46 +590,48 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
         </div>
 
         {store.projects.length > 0 && (
-          <div className='flex items-center gap-1 flex-wrap'>
-            <button
-              onClick={() => setProjectFilter('all')}
-              className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-                projectFilter === 'all' ? 'bg-control text-strong shadow-inner' : 'text-muted hover:text-strong'
-              }`}
-            >
-              All projects
-            </button>
-            {store.projects.map((p) => (
-              <span key={p.id} className='flex items-center'>
-                <Tooltip content={p.source ? `${p.path} · ${SOURCE_META[p.source.kind].label} ${p.source.name}` : p.path}>
-                  <button
-                    onClick={() => setProjectFilter(p.id)}
-                    className={`px-3 py-1 rounded-l-lg text-xs font-medium cursor-pointer transition-colors ${
-                      projectFilter === p.id ? projectColor(p.id).filterActive : projectColor(p.id).filter
-                    }`}
-                  >
-                    {p.name}
-                    {p.source && <SourceIcon kind={p.source.kind} className='ml-1 w-3 h-3' />}
-                  </button>
-                </Tooltip>
-                <Tooltip content={`Remove ${p.name} from the board`}>
-                  <button
-                    onClick={() => void handleRemoveProject(p.id)}
-                    className='px-1.5 py-1 rounded-r-lg text-xs text-faint hover:text-danger hover:bg-red-500/20 cursor-pointer transition-colors'
-                    aria-label={`Remove ${p.name}`}
-                  >
-                    ✕
-                  </button>
-                </Tooltip>
-              </span>
-            ))}
+          <div className='flex items-center gap-1 flex-wrap' data-tour='backlog-projects'>
+            <ChipGroup
+              ariaLabel='Filter by project'
+              value={projectFilter}
+              onChange={(v) => setProjectFilter(v as string)}
+              className='flex flex-wrap gap-1.5'
+              options={[
+                { value: 'all', label: 'All projects' },
+                ...store.projects.map((p): ChipGroupOption => ({
+                  value: p.id,
+                  hue: p.id,
+                  leading: p.source ? <SourceIcon kind={p.source.kind} /> : undefined,
+                  label: (
+                    <Tooltip content={p.source ? `${p.path} · ${SOURCE_META[p.source.kind].label} ${p.source.name}` : p.path}>
+                      <span>{p.name}</span>
+                    </Tooltip>
+                  ),
+                  trailing: (
+                    <Tooltip content={`Remove ${p.name} from the board`}>
+                      <IconButton
+                        size='sm'
+                        shape='circle'
+                        tone='ghost'
+                        aria-label={`Remove ${p.name}`}
+                        onClick={() => void handleRemoveProject(p.id)}
+                      >
+                        <svg viewBox='0 0 20 20' fill='none' stroke='currentColor' strokeWidth={2} strokeLinecap='round' className='w-3 h-3' aria-hidden='true'>
+                          <path d='M5 5l10 10M15 5L5 15' />
+                        </svg>
+                      </IconButton>
+                    </Tooltip>
+                  ),
+                })),
+              ]}
+            />
 
             {/* History window — scopes the board's log-like columns (Done).
                 Work queues ignore it, so the Todo order always matches what the
                 engine will run. */}
             <span className='ml-auto flex items-center gap-2 pl-2'>
               <Tooltip content='How far back the Done column reaches. Work queues (Refinement, Todo, In Progress) and cards needing attention are never hidden by it. Separate from the Analytics tab’s range.'>
-                <span className='text-[11px] uppercase tracking-widest text-muted font-semibold'>History</span>
+                <Eyebrow size='md' tone='muted' as='span'>History</Eyebrow>
               </Tooltip>
               <Segmented
                 options={BOARD_RANGE_OPTIONS}
@@ -666,14 +658,11 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
       )}
 
       {store.projects.length === 0 ? (
-        <div className='glass-primary p-6'>
-          <h2 className='text-lg font-bold text-strong'>Add your first project</h2>
-          <p className='text-sm text-muted mt-2 max-w-xl'>
-            Cards belong to a project (a repo folder — the agent runs there). Register one, queue research
-            cards, and the night session (Claude Code or Codex, per card) works through them during your
-            idle windows — so reports are waiting for you in the morning.
-          </p>
-          <div className='mt-4 flex items-center gap-2 flex-wrap'>
+        <Card
+          title='Add your first project'
+          subtitle='Cards belong to a project (a repo folder — the agent runs there). Register one, queue research cards, and the night session (Claude Code or Codex, per card) works through them during your idle windows — so reports are waiting for you in the morning.'
+        >
+          <div className='flex items-center gap-2 flex-wrap'>
             <Button variant='primary' size='sm' onClick={() => void handleAddProject()}>
               + Add your first project
             </Button>
@@ -683,7 +672,7 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
               </Button>
             )}
           </div>
-        </div>
+        </Card>
       ) : (
         <>
           {/* Main flow — flex-1 + auto-rows-fr stretch the columns to fill the tab.
@@ -758,12 +747,15 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
         {importOpen && <IssueImportModal projectFilter={projectFilter} onClose={() => setImportOpen(false)} />}
       </AnimatePresence>
       <AnimatePresence>
-        {schedulerOpen && schedulerConfig && onSchedulerConfigChange && (
-          <BacklogSchedulerModal
+        {settingsOpen && schedulerConfig && onSchedulerConfigChange && (
+          <BacklogSettingsModal
             config={schedulerConfig}
             status={status}
             onChange={onSchedulerConfigChange}
-            onClose={() => setSchedulerOpen(false)}
+            populationConfig={populationConfig}
+            onPopulationChange={onPopulationConfigChange ?? (() => {})}
+            initialTab={settingsOpen}
+            onClose={() => setSettingsOpen(null)}
           />
         )}
       </AnimatePresence>

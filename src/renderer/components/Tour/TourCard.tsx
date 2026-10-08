@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AgentState } from '../../../common/types';
 import { ClawdMascot } from '../Bubble/ClawdMascot';
 import { useIsDark } from '../../hooks/useTheme';
-import { Button } from '../Shared';
+import { Button, Eyebrow } from '../Shared';
+import { fadeQuick, gentle, pop } from '../../motion';
 
 // ── First-run tour coach card ────────────────────────────────────────────────
 // Rendered in its own transparent always-on-top window beside the demo bubble
@@ -127,7 +128,7 @@ export const TourCard: React.FC = () => {
       <motion.div
         initial={{ opacity: 0, y: 10, scale: 0.96 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 26 }}
+        transition={gentle}
         className='rounded-2xl overflow-hidden shadow-2xl'
         style={{ width: CARD_WIDTH, background: isDark ? TOUR_LIQUID_DARK : TOUR_LIQUID_LIGHT }}
       >
@@ -142,16 +143,16 @@ export const TourCard: React.FC = () => {
               initial={{ opacity: 0, x: 14 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -14 }}
-              transition={{ duration: 0.18, ease: 'easeOut' }}
+              transition={fadeQuick}
             >
               <div className='flex items-start gap-3'>
                 <div className='shrink-0 -mt-1'>
                   <ClawdMascot state={step.demoState} width={44} />
                 </div>
                 <div className='min-w-0'>
-                  <p className='text-[10px] font-semibold uppercase tracking-widest text-faint'>
+                  <Eyebrow size='sm'>
                     {step.kicker}
-                  </p>
+                  </Eyebrow>
                   <h2 className='text-[15px] font-bold text-strong leading-snug mt-0.5'>
                     {step.title}
                   </h2>
@@ -172,7 +173,7 @@ export const TourCard: React.FC = () => {
                   width: i === index ? 16 : 6,
                   backgroundColor: i === index ? 'rgba(96,165,250,0.95)' : 'rgba(148,163,184,0.35)',
                 }}
-                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                transition={pop}
                 className='h-1.5 rounded-full'
               />
             ))}

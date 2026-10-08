@@ -1,17 +1,26 @@
+// Captured before any import so the boot log can split Electron's own
+// bootstrap (process creation → here) from our import cost (here → module
+// evaluated). TS emits CommonJS requires in source order, so this runs first.
+const MAIN_MODULE_START = Date.now();
+
 import { app, ipcMain, shell, BrowserWindow, Menu, dialog, screen, nativeTheme } from 'electron';
 import { BubbleManager } from './windows/bubble-manager';
 import { TooltipManager } from './windows/tooltip-window';
 import { ScreenEdgeManager } from './windows/screen-edge-window';
 import { TourManager } from './windows/tour-manager';
 import { SettingsWindow } from './windows/settings-window';
+import { SplashWindow } from './windows/splash-window';
+import { createRevealGate, RevealGate } from './splash-reveal';
 import { TrayManager } from './windows/tray';
 import { ENABLE_APP_MENU } from './feature-flags';
 import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
-import { ToolDetector } from './installer/detector';
+import { ToolDetector, DetectionResult } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
 import path from 'path';
-import { loadConfig, saveConfig, defaultStatusLineConfig, migrateBacklogScheduler, migrateBacklogPopulation, migrateBacklogTemplates, migrateAppearance, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, CopilotUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig } from './user-config';
+import { loadConfig, saveConfig, defaultStatusLineConfig, migrateBacklogScheduler, migrateBacklogPopulation, migrateBacklogTemplates, migrateAppearance, UserConfig, UsageConfig, CodexUsageConfig, CursorUsageConfig, CopilotUsageConfig, AntigravityUsageConfig, AnalyticsConfig, SchedulerConfig, DetectionCache } from './user-config';
+import { createBootSequence, BootSequence } from './boot-sequence';
+import { TOOL_META } from '../common/toolMeta';
 import { BacklogPopulationConfig, BacklogSchedulerConfig, BacklogTemplate } from '../common/backlog-types';
 import { initBacklogDb, closeBacklogDb } from './backlog/db';
 import { BacklogStore } from './backlog/store';
@@ -41,7 +50,7 @@ import { AntigravityUsagePoller } from './antigravity-usage/poller';
 import { LlmPricingPoller } from './llm-pricing/poller';
 import { Scheduler, ClaudeScheduler, claudeSchedulerDeps } from './scheduler/scheduler';
 import { CodexScheduler, codexSchedulerDeps } from './scheduler/codex-provider';
-import { resolveCodexBin } from './scheduler/codex-opener';
+import { resolveCodexBinAsync } from './scheduler/codex-opener';
 import { defaultCodexStatusLineConfig, migrateCodexStatusLine } from './user-config';
 import { CodexStatusLineConfig, CodexStatusLineDetectInfo } from '../common/types';
 import { AttentionEngine } from './attention/engine';
@@ -64,6 +73,18 @@ const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   app.quit();
 }
+
+// Launch clock: epoch ms of process creation, so `[Boot]` marks from main and
+// from the renderers (which send Date.now()) share one origin. Falls back to
+// "now" if Electron can't report the creation time.
+const BOOT_T0: number = (() => {
+  try {
+    const t = (process as NodeJS.Process & { getCreationTime?: () => number | null }).getCreationTime?.();
+    if (typeof t === 'number' && t > 0) return t;
+  } catch { /* ignore */ }
+  return Date.now();
+})();
+const bootLog = (message: string) => logger.info(`[Boot] ${message} +${Date.now() - BOOT_T0}ms`);
 
 class AgentPulseApp {
   private bubbleManager: BubbleManager;
@@ -90,7 +111,20 @@ class AgentPulseApp {
   private backlogEngine: BacklogEngine | null = null;
   private backlogPopulation: PopulationScheduler | null = null;
   private timeline: TimelineHandle | null = null;
-  private updater!: UpdaterHandle;
+  // Null until the deferred boot stage that creates it has run.
+  private updater: UpdaterHandle | null = null;
+  // Set in before-quit; the boot sequence checks it between chunks so a
+  // pending stage never opens a database after shutdown has closed it.
+  private quitting = false;
+  private boot: BootSequence | null = null;
+  // Floating launch splash + the once-only decision that swaps it for the
+  // (hidden-until-painted) settings window.
+  private splashWindow = new SplashWindow();
+  private revealGate: RevealGate | null = null;
+  // In-flight background re-detection, shared by concurrent `detect-tools` calls.
+  private detectionRefresh: Promise<void> | null = null;
+  /** Every tool id, in TOOL_META order. */
+  private static readonly TOOL_IDS = Object.keys(TOOL_META) as ToolId[];
   // Bridge port + shared secret published for the Claude Code MCP server.
   private mcpConnection: McpConnection | null = null;
 
@@ -182,7 +216,7 @@ class AgentPulseApp {
       };
       saveConfig(this.userConfig);
       this.broadcastTourState();
-      this.settingsWindow.show();
+      this.showSettings();
       // The splash listens for this and navigates itself to the Settings view
       // (Hooks tab), where the setup checklist is waiting.
       for (const win of BrowserWindow.getAllWindows()) {
@@ -245,214 +279,217 @@ class AgentPulseApp {
   }
 
   public init() {
-    app.whenReady().then(() => installFileLogSink());
+    // The file log sink is installed as the first statement of the `ready`
+    // handler below (not via whenReady().then, which would run after it).
     this.bridgeServer.start();
 
     // Second-instance handler: surface settings window so the user sees a
     // response to clicking the shortcut again, instead of nothing happening.
     app.on('second-instance', () => {
       logger.info('[AgentPulseApp] second-instance detected — focusing settings');
-      this.settingsWindow.show();
+      this.showSettings();
     });
 
     app.on('ready', () => {
-      logger.info('[AgentPulseApp] app ready');
-      // Tray-only app on macOS: no Dock icon, no Cmd+Tab entry — the status
-      // bar item is the app's home. Windows (settings, bubbles) still open
-      // and focus normally. Packaged builds also set LSUIElement so the icon
-      // never flashes in the Dock at launch; this covers dev runs.
-      if (process.platform === 'darwin') {
-        app.dock?.hide();
-      }
-      if (!ENABLE_APP_MENU) {
-        Menu.setApplicationMenu(null);
-      }
-      this.setupIpc();
-      this.applyThemeSource();
-      // Refresh an already-installed status line to this app version so script
-      // improvements (e.g. icon rendering) propagate on upgrade without a manual
-      // re-apply. No-ops unless we own the installed status line.
-      this.refreshDeployedStatusLine();
-      // Same staleness treatment for the Claude Code hook set: if the installed
-      // hook is ours but from an app version that registered fewer events,
-      // rewrite it to the full set. Foreign/absent hooks are never touched.
-      try {
-        if (this.writer.claudeCodeHookNeedsUpgrade()) {
-          this.writer.upgradeClaudeCodeHook();
-          logger.info('[AgentPulseApp] upgraded Claude Code hooks to full event set');
-        }
-      } catch (err) {
-        logger.warn('[AgentPulseApp] Claude Code hook upgrade failed', err);
-      }
-      this.bubbleManager.init();
-      this.tooltipManager.init();
-      this.tourManager.init();
-      // Stamp the install's very first hook event — the setup checklist's
-      // "first live status" item flips on this. One save, then unsubscribe.
-      if (!this.userConfig.tour.firstEventAt) {
-        const unsubscribe = this.stateManager.onEvent(() => {
-          if (this.userConfig.tour.firstEventAt) return;
-          this.userConfig.tour = { ...this.userConfig.tour, firstEventAt: Date.now() };
-          saveConfig(this.userConfig);
-          this.broadcastTourState();
-          unsubscribe();
-        });
-      }
-      // Star nudge "week" milestone: check now (the install may already be
-      // past 7 days) and then hourly. unref so the timer never holds quit.
-      this.checkStarMilestone(false);
-      this.starPollTimer = setInterval(() => this.checkStarMilestone(false), STAR_POLL_MS);
-      this.starPollTimer.unref();
-      this.usagePoller.init();
-      this.usagePoller.start();
-      this.codexUsagePoller.init();
-      this.codexUsagePoller.start();
-      this.cursorUsagePoller.init();
-      this.cursorUsagePoller.start();
-      this.copilotUsagePoller.init();
-      this.copilotUsagePoller.start();
-      this.antigravityUsagePoller.init();
-      this.antigravityUsagePoller.start();
-      // Refresh model pricing from LiteLLM (cached daily; bundled fallback).
-      this.llmPricingPoller.init();
-      this.llmPricingPoller.start();
+      // First, so every line logged during boot reaches the daily log file.
+      // (This used to run in a whenReady().then(), i.e. a microtask AFTER the
+      // whole synchronous ready handler — nothing it logged ever hit the file.)
+      installFileLogSink();
+      bootLog('ready');
 
-      // Scheduler starts after the pollers so it can subscribe to live window
-      // state on its first reschedule.
-      this.scheduler.init();
-      this.scheduler.start();
-      this.codexScheduler.init();
-      this.codexScheduler.start();
-
-      // Attention escalation: arms timers off waiting-state transitions.
-      this.attentionEngine.init();
-      this.attentionEngine.start();
-
-      // Screen-edge glow: shows a click-through blue border while any agent is
-      // waiting on the user. No init() — it's purely a state-event consumer.
-      this.screenEdgeManager.start();
-
-      // Boot Pulse Timeline persistence. Subscribers wire up *after* the
-      // pollers are init'd so we don't miss their first emit. If better-
-      // sqlite3 is missing or won't load, this returns null and the rest of
-      // the app keeps running.
-      this.timeline = bootTimeline({
-        stateManager: this.stateManager,
-        usagePoller: this.usagePoller,
-        codexUsagePoller: this.codexUsagePoller,
-        cursorUsagePoller: this.cursorUsagePoller,
-        antigravityUsagePoller: this.antigravityUsagePoller,
-        redactTaskText: this.userConfig.analytics.redactTaskText,
-        idleGapMinutes: this.userConfig.analytics.idleGapMinutes,
-      });
-      this.rehydrateAgentPids();
-
-      // Boot the backlog board + scheduler. Separate SQLite file from the
-      // timeline; if better-sqlite3 won't load, the board tab shows a clean
-      // unavailable state and the rest of the app keeps running.
-      const backlogDb = initBacklogDb();
-      if (backlogDb) {
-        this.backlogStore = new BacklogStore(backlogDb);
-        this.backlogEngine = new BacklogEngine(this.userConfig.backlogScheduler, {
-          store: this.backlogStore,
-          refreshUsage: (agent) => {
-            if (agent === 'codex') this.codexUsagePoller.refreshNow();
-            else this.usagePoller.refreshNow();
+      const seq = createBootSequence({
+        // ── Stage 0: synchronous, only what the window / Landing view needs. ──
+        stage0: [
+          // Tray-only app on macOS: no Dock icon, no Cmd+Tab entry — the status
+          // bar item is the app's home. Must precede window creation: hiding
+          // the Dock after a window is visible deactivates the app and drops
+          // the window behind the frontmost app. Packaged builds also set
+          // LSUIElement so the icon never flashes in the Dock; this covers dev.
+          { name: 'dock', run: () => { if (process.platform === 'darwin') app.dock?.hide(); } },
+          { name: 'menu', run: () => { if (!ENABLE_APP_MENU) Menu.setApplicationMenu(null); } },
+          // The window reads nativeTheme at construction for its background
+          // and title-bar colours, so the theme source must be applied first.
+          { name: 'theme', run: () => this.applyThemeSource() },
+          { name: 'ipc', run: () => this.setupIpc() },
+          // Landing's `get-config` can create bubble windows the moment it
+          // mounts, and their renderers immediately `send(...)` — an
+          // `ipcMain.on` with no listener drops silently, so register first.
+          { name: 'bubble-ipc', run: () => this.bubbleManager.init() },
+          { name: 'tooltip-ipc', run: () => this.tooltipManager.init() },
+          // Landing's primary CTA sends `tour:start`.
+          { name: 'tour-ipc', run: () => this.tourManager.init() },
+          { name: 'first-event-stamp', run: () => this.armFirstEventStamp() },
+          {
+            name: 'boot-ipc',
+            run: () => {
+              // The renderer awaits this before mounting the Settings panel, so
+              // every handler the panel calls is registered by construction.
+              ipcMain.handle('app:wait-boot', () => seq.waitBoot());
+              // The framed renderer sends this two frames after its first
+              // commit: the real UI is on screen, swap the splash for it.
+              ipcMain.on('splash:done', () => this.revealGate?.onFirstPaint());
+              // Renderer-side timing marks, logged on the same clock as ours.
+              ipcMain.on('boot:mark', (_e, mark: { name?: unknown; at?: unknown }) => {
+                if (mark && typeof mark.name === 'string' && typeof mark.at === 'number') {
+                  logger.info(`[Boot] renderer ${mark.name} +${Math.round(mark.at - BOOT_T0)}ms`);
+                }
+              });
+            },
           },
-          artifactsDir: path.join(app.getPath('userData'), 'backlog-artifacts'),
-          worktreesDir: path.join(app.getPath('userData'), 'backlog-worktrees'),
-          // Usage latch, per agent: the engine pauses auto-claims for an
-          // agent's cards while ITS current window (Claude 5-hour / Codex
-          // primary) is exhausted and re-arms at that window's reset time.
-          getUsage: (agent) => {
-            if (agent === 'codex') {
-              const snap = this.codexUsagePoller.getStatus().snapshot;
-              return snap ? { utilization: snap.primary.utilization, resetsAt: snap.primary.resetsAt } : null;
-            }
-            const snap = this.usagePoller.getStatus().snapshot;
-            return snap ? { utilization: snap.fiveHour.utilization, resetsAt: snap.fiveHour.resetsAt } : null;
+          // Close-to-tray makes the tray the ONLY quit path, so it must exist
+          // before anything deferred could throw. Cheap: two icon reads.
+          { name: 'tray', run: () => this.initTray() },
+          // The floating logo goes up first (a static page, paints as soon as
+          // its window exists); the settings window is created hidden right
+          // behind it and revealed, fully drawn, on the renderer's first-paint
+          // signal — or by the gate's fallback / a load failure / the user.
+          {
+            name: 'splash-window',
+            run: () => {
+              const gate = createRevealGate({
+                reveal: () => this.settingsWindow.show(),
+                closeSplash: () => this.splashWindow.fadeOutAndClose(),
+                // Settings never reported → show it anyway.
+                fallbackMs: 4000,
+                // The logo stays up at least this long after it painted. The
+                // whole boot can finish in ~0.6s on a fast machine, which is
+                // less than the splash needs to be noticed at all.
+                minSplashMs: 900,
+                // Splash never painted → don't let it hold the app.
+                splashGraceMs: 1500,
+                log: (message) => bootLog(message.replace(/^\[Boot\] /, '')),
+                now: () => Date.now(),
+              });
+              this.revealGate = gate;
+              this.splashWindow.onLifecycle = (event) => bootLog(`splash ${event}`);
+              this.splashWindow.onPainted = () => gate.onSplashPainted();
+              this.splashWindow.show();
+            },
           },
-          // Star nudge "first backlog card" milestone.
-          onCardDone: () => this.checkStarMilestone(true),
-        });
-        this.backlogEngine.start();
-
-        // GitLab population (Phase 3): self-populate the board from GitLab
-        // issues. Decoupled from the engine, but shares the same usage snapshot
-        // so a scan can't drain the window ahead of execution.
-        this.backlogPopulation = new PopulationScheduler({
-          store: this.backlogStore,
-          getConfig: () => this.userConfig.backlogPopulation,
-          getUsage: () => {
-            const snap = this.usagePoller.getStatus().snapshot;
-            return snap ? { utilization: snap.fiveHour.utilization, resetsAt: snap.fiveHour.resetsAt } : null;
+          {
+            name: 'settings-window',
+            run: () => {
+              this.settingsWindow.onLifecycle = (event) => {
+                bootLog(`settings ${event}`);
+                if (event === 'did-fail-load') this.revealGate?.onLoadFailed();
+                // Backstop for the renderer's first-paint signal, which rides
+                // on requestAnimationFrame inside a not-yet-shown window.
+                // Chromium runs it there on Windows (verified in the log); if
+                // a platform throttles it, Electron's own first-frame event
+                // plus a short grace stands in. Idempotent on the gate side.
+                if (event === 'ready-to-show') {
+                  setTimeout(() => this.revealGate?.onFirstPaint(), 400);
+                }
+              };
+              this.settingsWindow.createHidden();
+              this.revealGate?.arm();
+            },
           },
-          broadcast: () => {
-            for (const win of BrowserWindow.getAllWindows()) {
-              if (!win.isDestroyed()) win.webContents.send('backlog:changed', {});
-            }
+        ],
+        // ── Stage 1: deferred until the page has loaded; everything the
+        //    Settings UI and the bubbles depend on. Ends with boot-ready. ──
+        stage1: [
+          // First, so the bridge's replay buffer drains ASAP (see
+          // StatusStateManager.drainPending).
+          { name: 'timeline', run: () => this.bootTimelineStage() },
+          { name: 'usage-poller:claude', run: () => { this.usagePoller.init(); this.usagePoller.start(); } },
+          { name: 'usage-poller:codex', run: () => { this.codexUsagePoller.init(); this.codexUsagePoller.start(); } },
+          { name: 'usage-poller:cursor', run: () => { this.cursorUsagePoller.init(); this.cursorUsagePoller.start(); } },
+          { name: 'usage-poller:copilot', run: () => { this.copilotUsagePoller.init(); this.copilotUsagePoller.start(); } },
+          { name: 'usage-poller:antigravity', run: () => { this.antigravityUsagePoller.init(); this.antigravityUsagePoller.start(); } },
+          // Refresh model pricing from LiteLLM (cached daily; bundled fallback).
+          { name: 'llm-pricing', run: () => { this.llmPricingPoller.init(); this.llmPricingPoller.start(); } },
+          // Schedulers consume the usage pollers (live 5-hour resetsAt), so
+          // they start after them and subscribe to live window state on their
+          // first reschedule.
+          {
+            name: 'schedulers',
+            run: () => {
+              this.scheduler.init(); this.scheduler.start();
+              this.codexScheduler.init(); this.codexScheduler.start();
+            },
           },
-        });
-        this.backlogPopulation.start();
-      }
-      registerBacklogIpc({
-        store: this.backlogStore,
-        engine: this.backlogEngine,
-        population: this.backlogPopulation,
-        getTemplates: () => this.userConfig.backlogTemplates,
+          // Attention escalation arms timers off waiting-state transitions.
+          // The screen-edge glow is purely a state-event consumer (no init()).
+          {
+            name: 'attention',
+            run: () => {
+              this.attentionEngine.init(); this.attentionEngine.start();
+              this.screenEdgeManager.start();
+            },
+          },
+          { name: 'updater', run: () => this.bootUpdaterStage() },
+          { name: 'backlog-db', run: () => this.bootBacklogDb() },
+          // registerBacklogIpc captures store/engine/population by value, so
+          // it must run after the DB stage.
+          { name: 'backlog-ipc', run: () => this.bootBacklogIpc() },
+          // Restore bubbles from last saved state (seeds from detection on
+          // first run). Awaited so the Hooks tab's one-shot read of
+          // enabledBubbles sees the seeded set.
+          { name: 'restore-bubbles', run: () => this.restoreBubbles() },
+        ],
+        // ── Stage 2: background maintenance nothing in the UI waits on. ──
+        stage2: [
+          // Star nudge "week" milestone: check now (the install may already be
+          // past 7 days) and then hourly. unref so the timer never holds quit.
+          {
+            name: 'star-milestone',
+            run: () => {
+              this.checkStarMilestone(false);
+              this.starPollTimer = setInterval(() => this.checkStarMilestone(false), STAR_POLL_MS);
+              this.starPollTimer.unref();
+            },
+          },
+          // Sync the OS login-item state to whatever we persisted. Cheap and
+          // self-healing if the user toggled it externally.
+          { name: 'auto-launch', run: () => setAutoLaunch(this.userConfig.autoLaunch) },
+          // Refresh an already-installed status line to this app version so
+          // script improvements (e.g. icon rendering) propagate on upgrade
+          // without a manual re-apply. No-ops unless we own the installed line.
+          { name: 'status-line-refresh', run: () => this.refreshDeployedStatusLine() },
+          // Same staleness treatment for the Claude Code hook set: if the
+          // installed hook is ours but from an app version that registered
+          // fewer events, rewrite it to the full set. Foreign/absent hooks are
+          // never touched.
+          {
+            name: 'claude-hook-upgrade',
+            run: () => {
+              if (this.writer.claudeCodeHookNeedsUpgrade()) {
+                this.writer.upgradeClaudeCodeHook();
+                logger.info('[AgentPulseApp] upgraded Claude Code hooks to full event set');
+              }
+            },
+          },
+          // Refresh Layer-1 ignore files for installed tools so a list edited
+          // while the app was closed (or a newly-installed agent) picks up the
+          // current set.
+          { name: 'secret-files', run: () => this.syncSecretFiles() },
+          // Refresh a stale OpenCode plugin: unlike shell hooks, the plugin
+          // carries real behavior (the gated block round-trip), so old installs
+          // must be brought forward or enforcement silently downgrades to
+          // warn-only.
+          {
+            name: 'opencode-plugin',
+            run: () => {
+              if (this.writer.refreshOpencodePlugin()) {
+                logger.info('[AgentPulseApp] refreshed stale OpenCode plugin');
+              }
+            },
+          },
+        ],
+        // Start Stage 1 once the settings page has loaded — so its first paint
+        // and Landing's IPC aren't competing with SQLite opens on this thread —
+        // or after 1.5s if it never does (dev server down, slow disk).
+        trigger: (start) => this.settingsWindow.onceLoaded(start),
+        fallbackMs: 1500,
+        stage2DelayMs: 500,
+        yieldToLoop: () => new Promise((resolve) => setImmediate(resolve)),
+        isQuitting: () => this.quitting,
+        log: (message) => logger.info(message),
+        now: () => Date.now() - BOOT_T0,
       });
-
-      // Sync the OS login-item state to whatever we persisted. Cheap and
-      // self-healing if the user toggled it externally.
-      setAutoLaunch(this.userConfig.autoLaunch);
-
-      // Boot updater before tray so the tray menu's "Check for updates"
-      // entry can invoke updater.checkNow directly.
-      this.updater = bootUpdater({
-        getUserConfig: () => this.userConfig,
-        applyUpdaterConfig: (next) => {
-          this.userConfig.updates = next;
-          saveConfig(this.userConfig);
-        },
-        // Mirror pending-update state onto the tray (dot + tooltip + menu
-        // label) and the macOS dock badge, so the user sees a new version
-        // even with Settings closed or on another tab.
-        onStateChange: (state) => {
-          this.trayManager.setUpdatePending(hasPendingUpdate(state.status), state.info?.version ?? null);
-        },
-      });
-
-      this.trayManager.init({
-        onShowSettings: () => this.settingsWindow.show(),
-        onCheckForUpdates: () => {
-          this.settingsWindow.show();
-          this.updater.checkNow();
-        },
-        onQuit: () => {
-          (app as unknown as { isQuitting: boolean }).isQuitting = true;
-          app.quit();
-        },
-      });
-
-      // Restore bubbles from last saved state (seeds from detection on first run).
-      this.restoreBubbles();
-
-      // Refresh Layer-1 ignore files for installed tools so a list edited while
-      // the app was closed (or a newly-installed agent) picks up the current set.
-      void this.syncSecretFiles();
-
-      // Refresh a stale OpenCode plugin: unlike shell hooks, the plugin carries
-      // real behavior (the gated block round-trip), so old installs must be
-      // brought forward or enforcement silently downgrades to warn-only.
-      try {
-        if (this.writer.refreshOpencodePlugin()) {
-          logger.info('[AgentPulseApp] refreshed stale OpenCode plugin');
-        }
-      } catch (e) {
-        logger.warn(`[AgentPulseApp] OpenCode plugin resync failed: ${e}`);
-      }
-
-      this.settingsWindow.show();
+      this.boot = seq;
+      seq.runStage0();
     });
 
     // Tray keeps the app alive — never auto-quit when windows close.
@@ -463,6 +500,7 @@ class AgentPulseApp {
 
     app.on('before-quit', () => {
       logger.info('[AgentPulseApp] before-quit');
+      this.quitting = true;
       (app as unknown as { isQuitting: boolean }).isQuitting = true;
       this.usagePoller.stop();
       this.codexUsagePoller.stop();
@@ -485,7 +523,8 @@ class AgentPulseApp {
       this.screenEdgeManager.destroy();
       this.tourManager.destroy();
       this.timeline?.shutdown();
-      this.updater.shutdown();
+      this.updater?.shutdown();
+      this.splashWindow.close();
       this.trayManager.destroy();
     });
 
@@ -510,6 +549,9 @@ class AgentPulseApp {
           if (detected[toolId]?.installed) enabled[toolId] = true;
         }
         this.userConfig.enabledBubbles = enabled;
+        // Also seed the detection cache so the very first Hooks-tab open
+        // paints instantly instead of waiting on a second detection.
+        this.persistDetection(detected);
         saveConfig(this.userConfig);
         logger.info('[AgentPulseApp] first-run bubble seed from detection:', JSON.stringify(enabled));
       } catch (e) {
@@ -521,9 +563,205 @@ class AgentPulseApp {
     this.bubbleManager.syncEnabledBubbles(enabled);
   }
 
+  // ── Boot stages (see boot-sequence.ts for the staging rationale) ──────────
+
+  // Stamp the install's very first hook event — the setup checklist's "first
+  // live status" item flips on this. One save, then unsubscribe.
+  private armFirstEventStamp() {
+    if (this.userConfig.tour.firstEventAt) return;
+    const unsubscribe = this.stateManager.onEvent(() => {
+      if (this.userConfig.tour.firstEventAt) return;
+      this.userConfig.tour = { ...this.userConfig.tour, firstEventAt: Date.now() };
+      saveConfig(this.userConfig);
+      this.broadcastTourState();
+      unsubscribe();
+    });
+  }
+
+  // Every user-initiated path to Settings (tray, second launch, bubble menu,
+  // tour completion). During the launch handshake the window may still be
+  // hidden behind the splash; a user asking for it wins over waiting for the
+  // renderer's first-paint signal.
+  private showSettings() {
+    this.revealGate?.onUserRequest();
+    this.settingsWindow.show();
+  }
+
+  private initTray() {
+    this.trayManager.init({
+      onShowSettings: () => this.showSettings(),
+      onCheckForUpdates: () => {
+        this.showSettings();
+        // Null until the deferred updater stage has run; the Updates tab the
+        // click just surfaced offers the same action once it has.
+        this.updater?.checkNow();
+      },
+      onQuit: () => {
+        (app as unknown as { isQuitting: boolean }).isQuitting = true;
+        app.quit();
+      },
+    });
+  }
+
+  // Boot Pulse Timeline persistence. If better-sqlite3 is missing or won't
+  // load, this returns null and the rest of the app keeps running. Runs before
+  // the pollers start; the timeline subscribes to them now and sees their
+  // first emit when they do.
+  private bootTimelineStage() {
+    this.timeline = bootTimeline({
+      stateManager: this.stateManager,
+      usagePoller: this.usagePoller,
+      codexUsagePoller: this.codexUsagePoller,
+      cursorUsagePoller: this.cursorUsagePoller,
+      antigravityUsagePoller: this.antigravityUsagePoller,
+      redactTaskText: this.userConfig.analytics.redactTaskText,
+      idleGapMinutes: this.userConfig.analytics.idleGapMinutes,
+    });
+    this.rehydrateAgentPids();
+  }
+
+  private bootUpdaterStage() {
+    this.updater = bootUpdater({
+      getUserConfig: () => this.userConfig,
+      applyUpdaterConfig: (next) => {
+        this.userConfig.updates = next;
+        saveConfig(this.userConfig);
+      },
+      // Mirror pending-update state onto the tray (dot + tooltip + menu
+      // label) and the macOS dock badge, so the user sees a new version
+      // even with Settings closed or on another tab.
+      onStateChange: (state) => {
+        this.trayManager.setUpdatePending(hasPendingUpdate(state.status), state.info?.version ?? null);
+      },
+    });
+  }
+
+  // Boot the backlog board + scheduler. Separate SQLite file from the
+  // timeline; if better-sqlite3 won't load, the board tab shows a clean
+  // unavailable state and the rest of the app keeps running.
+  private bootBacklogDb() {
+    const backlogDb = initBacklogDb();
+    if (!backlogDb) return;
+    this.backlogStore = new BacklogStore(backlogDb);
+    this.backlogEngine = new BacklogEngine(this.userConfig.backlogScheduler, {
+      store: this.backlogStore,
+      refreshUsage: (agent) => {
+        if (agent === 'codex') this.codexUsagePoller.refreshNow();
+        else this.usagePoller.refreshNow();
+      },
+      artifactsDir: path.join(app.getPath('userData'), 'backlog-artifacts'),
+      worktreesDir: path.join(app.getPath('userData'), 'backlog-worktrees'),
+      // Usage latch, per agent: the engine pauses auto-claims for an
+      // agent's cards while ITS current window (Claude 5-hour / Codex
+      // primary) is exhausted and re-arms at that window's reset time.
+      getUsage: (agent) => {
+        if (agent === 'codex') {
+          const snap = this.codexUsagePoller.getStatus().snapshot;
+          return snap ? { utilization: snap.primary.utilization, resetsAt: snap.primary.resetsAt } : null;
+        }
+        const snap = this.usagePoller.getStatus().snapshot;
+        return snap ? { utilization: snap.fiveHour.utilization, resetsAt: snap.fiveHour.resetsAt } : null;
+      },
+      // Star nudge "first backlog card" milestone.
+      onCardDone: () => this.checkStarMilestone(true),
+    });
+    this.backlogEngine.start();
+  }
+
+  private bootBacklogIpc() {
+    if (this.backlogStore) {
+      // GitLab population (Phase 3): self-populate the board from GitLab
+      // issues. Decoupled from the engine, but shares the same usage snapshot
+      // so a scan can't drain the window ahead of execution.
+      this.backlogPopulation = new PopulationScheduler({
+        store: this.backlogStore,
+        getConfig: () => this.userConfig.backlogPopulation,
+        getUsage: () => {
+          const snap = this.usagePoller.getStatus().snapshot;
+          return snap ? { utilization: snap.fiveHour.utilization, resetsAt: snap.fiveHour.resetsAt } : null;
+        },
+        broadcast: () => this.broadcastToWindows('backlog:changed', {}),
+      });
+      this.backlogPopulation.start();
+    }
+    registerBacklogIpc({
+      store: this.backlogStore,
+      engine: this.backlogEngine,
+      population: this.backlogPopulation,
+      getTemplates: () => this.userConfig.backlogTemplates,
+    });
+  }
+
+  // ── Tool detection: cached + non-blocking ─────────────────────────────────
+
+  private broadcastToWindows(channel: string, payload: unknown) {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(channel, payload);
+    }
+  }
+
+  // Attach the live hook state to a detection (cached or fresh). hookInstalled
+  // is never cached: it flips on every install/uninstall and is a cheap read.
+  // Tool ids missing from a cache written by an older app version read as
+  // "not installed" until the background refresh pushes the real answer.
+  private withHookState(detected: Partial<Record<ToolId, { installed: boolean; location?: string }>>): DetectionResult {
+    const out = {} as DetectionResult;
+    for (const toolId of AgentPulseApp.TOOL_IDS) {
+      const d = detected[toolId] ?? { installed: false };
+      out[toolId] = {
+        installed: d.installed,
+        ...(d.location ? { location: d.location } : {}),
+        hookInstalled: this.writer.isHookInstalled(toolId),
+      };
+    }
+    return out;
+  }
+
+  // Persist a completed detection. Returns true when the installed/location
+  // set differs from what was cached (callers broadcast on change). The write
+  // is skipped when nothing changed so an unchanged Hooks-tab open doesn't
+  // rewrite the config file.
+  private persistDetection(detected: DetectionResult): boolean {
+    const tools: DetectionCache['tools'] = {};
+    for (const toolId of AgentPulseApp.TOOL_IDS) {
+      const d = detected[toolId];
+      if (!d) continue;
+      tools[toolId] = d.location ? { installed: d.installed, location: d.location } : { installed: d.installed };
+    }
+    const prev = this.userConfig.detectionCache?.tools ?? null;
+    const changed = JSON.stringify(prev) !== JSON.stringify(tools);
+    if (changed || !this.userConfig.detectionCache) {
+      this.userConfig.detectionCache = { detectedAt: Date.now(), tools };
+      saveConfig(this.userConfig);
+    }
+    return changed;
+  }
+
+  // Re-run detection off the main thread and push the result to every window
+  // if anything changed. Coalesces concurrent callers (the Hooks tab and the
+  // Guardrails tab mounting together) into one run.
+  private refreshDetection(): Promise<void> {
+    if (this.detectionRefresh) return this.detectionRefresh;
+    this.detectionRefresh = (async () => {
+      try {
+        this.detector.invalidate();
+        const fresh = await this.detector.detectAll();
+        if (this.persistDetection(fresh)) {
+          logger.info('[AgentPulseApp] tool detection changed since last launch; pushing update');
+          this.broadcastToWindows('detect-tools:updated', this.withHookState(fresh));
+        }
+      } catch (e) {
+        logger.warn('[AgentPulseApp] background tool detection failed', e);
+      } finally {
+        this.detectionRefresh = null;
+      }
+    })();
+    return this.detectionRefresh;
+  }
+
   private setupIpc() {
     ipcMain.on('open-settings', () => {
-      this.settingsWindow.show();
+      this.showSettings();
     });
 
     ipcMain.on('toggle-bubble', (_event, { toolId, enabled }: { toolId: ToolId; enabled: boolean }) => {
@@ -626,21 +864,27 @@ class AgentPulseApp {
       this.screenEdgeManager.previewFlash();
     });
 
+    // Serve the last launch's detection instantly (the Hooks tab paints from
+    // it), then re-detect in the background and push `detect-tools:updated`
+    // if anything changed. Only a fresh install, with no cache yet, waits for
+    // the (now non-blocking) detection.
     ipcMain.handle('detect-tools', async () => {
-      const detected = await this.detector.detectAll();
-      for (const toolId of Object.keys(detected) as ToolId[]) {
-        detected[toolId] = {
-          ...detected[toolId],
-          hookInstalled: this.writer.isHookInstalled(toolId),
-        };
+      const cached = this.userConfig.detectionCache;
+      if (cached) {
+        void this.refreshDetection();
+        return this.withHookState(cached.tools);
       }
-      return detected;
+      const detected = await this.detector.detectAll();
+      this.persistDetection(detected);
+      return this.withHookState(detected);
     });
 
     ipcMain.handle('install-hook', async (_event, { toolId, projectPath }) => {
       const result = await this.writer.installHook(toolId, projectPath);
       // A freshly-hooked tool should also receive the current secret-glob list.
       this.writeSecretFilesForToolSafe(toolId, projectPath);
+      // Keep the in-memory detection honest for anyone reading lastResult().
+      this.detector.invalidate();
       return result;
     });
 
@@ -651,6 +895,7 @@ class AgentPulseApp {
       } catch (e) {
         logger.warn(`[AgentPulseApp] removeSecretFiles failed for ${toolId}`, e);
       }
+      this.detector.invalidate();
       return await this.writer.uninstallHook(toolId, projectPath);
     });
 
@@ -787,8 +1032,8 @@ class AgentPulseApp {
     // ── Claude Code status line ───────────────────────────────────────────
     // Detect an available script runtime + the current install state so the
     // Settings UI can show a runtime badge and the right install/remove control.
-    ipcMain.handle('status-line:detect', (): StatusLineDetectInfo => {
-      const runtime = this.detector.detectStatusLineRuntime();
+    ipcMain.handle('status-line:detect', async (): Promise<StatusLineDetectInfo> => {
+      const runtime = await this.detector.detectStatusLineRuntime();
       return {
         runtime: runtime?.runtime ?? null,
         binPath: runtime?.binPath ?? null,
@@ -830,8 +1075,8 @@ class AgentPulseApp {
 
     // Install (or re-install) the status line. Refuses if no runtime is found,
     // and requires an explicit `replace` flag before clobbering a foreign one.
-    ipcMain.handle('status-line:install', (_event, args: { replace?: boolean } = {}) => {
-      const runtime = this.detector.detectStatusLineRuntime();
+    ipcMain.handle('status-line:install', async (_event, args: { replace?: boolean } = {}) => {
+      const runtime = await this.detector.detectStatusLineRuntime();
       if (!runtime) return { success: false, reason: 'no-runtime' as const };
       if (this.writer.statusLineState() === 'foreign' && !args.replace) {
         return { success: false, reason: 'needs-confirm' as const };
@@ -852,10 +1097,10 @@ class AgentPulseApp {
     // this is a config editor: detect what's there, write our item list, and
     // re-write it on every edit while the line is ours (Codex still needs a
     // restart to pick it up — the UI says so).
-    ipcMain.handle('codex-status-line:detect', (): CodexStatusLineDetectInfo => {
+    ipcMain.handle('codex-status-line:detect', async (): Promise<CodexStatusLineDetectInfo> => {
       const cur = this.writer.readCodexStatusLine();
       return {
-        codexBin: resolveCodexBin(),
+        codexBin: await resolveCodexBinAsync(),
         state: this.writer.codexStatusLineState(this.userConfig.codexStatusLine),
         configPath: this.writer.codexConfigTomlPath(),
         installedItems: cur.items,
@@ -1267,21 +1512,17 @@ class AgentPulseApp {
   // tool's ignore/deny artifact (or strip it when protection / ignore-file
   // writing is off). Global scope only in Phase 1. Best-effort and idempotent —
   // safe to call on config change, hook install, and app start.
-  private async syncSecretFiles() {
+  private syncSecretFiles() {
     const cfg = this.userConfig.secretProtection;
     const globs = (cfg.enabled && cfg.writeIgnoreFiles)
       ? effectiveSecretRules(cfg).map((r) => r.glob)
       : [];
-    let detected: Awaited<ReturnType<ToolDetector['detectAll']>>;
-    try {
-      detected = await this.detector.detectAll();
-    } catch (e) {
-      logger.warn('[AgentPulseApp] syncSecretFiles detection failed', e);
-      return;
-    }
     // Only touch tools we've actually hooked — avoids creating ignore files in
-    // home/project dirs for agents the user never installed.
-    const installed = (Object.keys(detected) as ToolId[]).filter((id) => this.writer.isHookInstalled(id));
+    // home/project dirs for agents the user never installed. Hook state is the
+    // real filter: this used to run a full tool detection first but only ever
+    // read its key set (every tool id), at the cost of nine synchronous process
+    // spawns on the main thread at every launch.
+    const installed = AgentPulseApp.TOOL_IDS.filter((id) => this.writer.isHookInstalled(id));
 
     // Project scope (analysis §3): write into each recently-active project
     // directory rather than the home dir. Global scope writes once per tool.
@@ -1357,6 +1598,21 @@ class AgentPulseApp {
 // guard a second instance would still reach `init()` → `bridgeServer.start()` and
 // collide on port 4242 (EADDRINUSE) before quitting.
 if (gotSingleInstanceLock) {
+  // Launch timeline up to this point, all on the process-creation clock:
+  //   launch command → process created   (dev only; the dev launcher stamps
+  //                                        AGENT_PULSE_LAUNCH_T0 — npm, Vite,
+  //                                        wait-on and tsc all live here)
+  //   process created → module start     Electron / Chromium bootstrap
+  //   module start → module evaluated    our imports (electron-updater,
+  //                                        better-sqlite3 bindings, …)
+  //   module evaluated → ready            Electron finishing init
+  logger.info(`[Boot] process created at ${new Date(BOOT_T0).toISOString()}`);
+  const launchT0 = Number(process.env.AGENT_PULSE_LAUNCH_T0);
+  if (Number.isFinite(launchT0) && launchT0 > 0) {
+    logger.info(`[Boot] launch command ran ${BOOT_T0 - launchT0}ms before process creation (dev launcher: compile + spawn)`);
+  }
+  logger.info(`[Boot] main module start +${MAIN_MODULE_START - BOOT_T0}ms (Electron bootstrap before this)`);
+  bootLog('main module evaluated');
   const pulseApp = new AgentPulseApp();
   pulseApp.init();
 }

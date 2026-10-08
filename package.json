@@ -1,6 +1,6 @@
 {
   "name": "agent-pulse",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "",
   "main": "dist/main/index.js",
   "scripts": {
@@ -8,7 +8,7 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
-    "dev:main": "npm run build:main && cross-env NODE_ENV=development electron dist/main/index.js",
+    "dev:main": "node scripts/dev-main.cjs",
     "start": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:main\"",
     "start:info": "cross-env AGENT_PULSE_LOG_LEVEL=info npm start",
     "start:warn": "cross-env AGENT_PULSE_LOG_LEVEL=warn npm start",

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { ContextPressureDayBucket } from '../../../../common/timeline-types';
-import { AnimatedNumber, Meter } from '../../Shared';
+import { AnimatedNumber, Eyebrow, Meter } from '../../Shared';
 import { useContextPressure } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, InfoPill, SkeletonLine, useChartTip } from './shared';
@@ -53,7 +53,7 @@ export const ContextPressureCard: React.FC = () => {
         <div className='flex flex-col gap-4'>
           <div className='grid grid-cols-2 gap-3'>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Avg context used</p>
+              <Eyebrow size='sm' className='mb-1'>Avg context used</Eyebrow>
               <p className='text-xl font-semibold text-primary font-mono tabular-nums'>
                 {data.avgUsedPct === null
                   ? '—'
@@ -62,7 +62,7 @@ export const ContextPressureCard: React.FC = () => {
               <p className='text-[11px] text-muted mt-0.5'>latest per session</p>
             </div>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Near the limit</p>
+              <Eyebrow size='sm' className='mb-1'>Near the limit</Eyebrow>
               <div className='flex items-center gap-2'>
                 <p className={`text-xl font-semibold font-mono tabular-nums ${data.highPressureSessions > 0 ? 'text-warn' : 'text-primary'}`}>
                   <AnimatedNumber value={data.highPressureSessions} format={(n) => Math.round(n).toString()} />

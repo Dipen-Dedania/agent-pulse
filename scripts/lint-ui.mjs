@@ -21,6 +21,21 @@ const SKIP = [
 ];
 const SKIP_SEGMENTS = ['__tests__'];
 
+// Extra skip prefixes for the motion-vocabulary rule only: the vocabulary file
+// itself and the ambient, duration-based loops the plan exempts by path
+// (Bubble orbit/breathe animations, ScreenEdge glow) — see motion.ts's doc
+// comment and ux-consistency-plan.md W5 step 1.
+const MOTION_SKIP = [
+  'src/renderer/motion.ts',
+  'src/renderer/components/Shared/',
+  'src/renderer/components/Bubble/',
+  'src/renderer/components/ScreenEdge/',
+];
+function isMotionSkipped(relPath) {
+  const norm = relPath.split(sep).join('/');
+  return MOTION_SKIP.some((s) => (s.endsWith('/') ? norm.startsWith(s) : norm === s));
+}
+
 // Hard rules block the build (exit 1).
 const HARD_RULES = [
   {
@@ -57,6 +72,47 @@ const HARD_RULES = [
     // Checkbox primitive's own native input never trips this.
     test: (line) => /type=['"]checkbox['"]/.test(line),
     hint: 'Use <Checkbox> from components/Shared instead of a native checkbox.',
+  },
+  {
+    id: 'no-inline-transition',
+    // A hand-written `transition={{ … }}` outside the vocabulary file and
+    // Shared/ is a number that can't drift back into sync with the rest of the
+    // app. `repeat:` is excluded — an infinite/looping transition is
+    // duration-based by nature (ux-consistency-plan.md W5 step 1), as are the
+    // Bubble/ScreenEdge ambient animations excluded by path below.
+    test: (line, rel) => {
+      if (isMotionSkipped(rel)) return false;
+      return /transition=\{\{/.test(line) && !/repeat:/.test(line);
+    },
+    hint: 'Import snappy / smooth / gentle / fadeQuick / pop from src/renderer/motion.ts instead of an inline transition.',
+  },
+  {
+    id: 'no-handrolled-knob',
+    // rounded-full + translate-x- + bg-white together is the exact shape of a
+    // hand-rolled toggle knob (BubbleSection's "Show bubbles" before it moved
+    // to GlassToggle) — see F-02 in docs/UX_AUDIT.md.
+    test: (line) => /rounded-full/.test(line) && /translate-x-/.test(line) && /bg-white/.test(line),
+    hint: 'Use <GlassToggle> from components/Shared.',
+  },
+  {
+    id: 'eyebrow-outside-shared',
+    // `uppercase` + a `tracking-*` class is the section-label/stat-label
+    // eyebrow pattern, drifted into six different size/weight/tracking
+    // combinations outside Shared (F-10 in docs/UX_AUDIT.md).
+    test: (line) => cls('uppercase').test(line) && /tracking-/.test(line),
+    hint: 'Use <Eyebrow> from components/Shared.',
+  },
+  {
+    id: 'no-handrolled-segmented',
+    // A ternary active-state fill (`? 'bg-blue-…`, `? 'bg-control…`,
+    // `? "bg-blue-…`) paired with a pill radius on the same line is a
+    // hand-rolled row of active pills — the pattern behind the project filter,
+    // Done filter, mascot pills, weekday toggles, and the theme switch
+    // (F-16/F-26 in docs/UX_AUDIT.md). Soft for one pass to measure false
+    // positives before promotion (ux-consistency-plan.md W2).
+    test: (line) =>
+      /\?\s*(?:'bg-blue-|'bg-control|"bg-blue-)/.test(line) && /rounded-(?:md|lg|full)/.test(line),
+    hint: 'Use <Segmented>, <ChipGroup>, or <Tabs> from components/Shared instead of a hand-rolled row of active pills.',
   },
 ];
 
@@ -156,6 +212,16 @@ const SOFT_RULES = [
     test: (line) => /layoutId=/.test(line),
     hint: 'Sliding pill/tab indicator — use <Segmented> or <Tabs> from components/Shared.',
   },
+  {
+    id: 'settingrow-candidate',
+    // glass-secondary (the sub-card tier) at one of the three drifted
+    // paddings (F-29) is very often a title+control row. Noisy by design —
+    // it also catches rows that aren't a toggle row — so this one stays a
+    // soft heuristic rather than being promoted (ux-consistency-plan.md W3).
+    test: (line) =>
+      /glass-secondary/.test(line) && (/px-4 py-3/.test(line) || cls('p-3').test(line) || cls('p-4').test(line)),
+    hint: 'If this row holds a title + toggle, use <SettingRow> from components/Shared.',
+  },
 ];
 
 function walk(dir, out = []) {
@@ -193,8 +259,8 @@ for (const file of walk(SCAN_DIR)) {
   if (isSkipped(rel)) continue;
   const lines = stripComments(readFileSync(file, 'utf8')).split(/\r?\n/);
   lines.forEach((line, i) => {
-    for (const rule of HARD_RULES) if (rule.test(line)) hard.push({ rel, ln: i + 1, rule });
-    for (const rule of SOFT_RULES) if (rule.test(line)) soft.push({ rel, ln: i + 1, rule });
+    for (const rule of HARD_RULES) if (rule.test(line, rel)) hard.push({ rel, ln: i + 1, rule });
+    for (const rule of SOFT_RULES) if (rule.test(line, rel)) soft.push({ rel, ln: i + 1, rule });
   });
 }
 

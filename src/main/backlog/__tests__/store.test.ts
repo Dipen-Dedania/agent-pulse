@@ -713,6 +713,13 @@ describe.skipIf(!dbAvailable)('backlog schema migration v8 → v9 (GitLab → so
           sort_order INTEGER NOT NULL DEFAULT 0, source_url TEXT, source_fingerprint TEXT,
           created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
         );
+        -- attempts has existed since v1 and must be part of any legacy fixture:
+        -- SCHEMA_SQL's CREATE TABLE IF NOT EXISTS would otherwise create it in
+        -- its *current* shape and the v11 ALTER TABLE ... ADD COLUMN
+        -- input_tokens would hit a duplicate column and abort the migration.
+        CREATE TABLE attempts (id TEXT PRIMARY KEY, card_id TEXT NOT NULL, started_at INTEGER NOT NULL,
+          ended_at INTEGER, outcome TEXT, reason TEXT, cost_usd REAL, num_turns INTEGER, session_id TEXT,
+          manual INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE gitlab_candidates (
           fingerprint TEXT PRIMARY KEY, project_id TEXT NOT NULL, iid INTEGER NOT NULL,
           title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', web_url TEXT NOT NULL,

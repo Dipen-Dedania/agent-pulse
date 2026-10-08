@@ -2,13 +2,13 @@ import React from 'react';
 import { WindowValueSlice } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { formatUsd } from '../../../../common/pricing';
-import { AnimatedNumber } from '../../Shared';
+import { AnimatedNumber, Eyebrow } from '../../Shared';
 import { useWindowValue } from './useAnalytics';
 import { Card, CostBreakdownContent, EmptyState, InfoPill, InfoTooltip, SkeletonLine, formatCompactNumber } from './shared';
 
 const WindowBlock: React.FC<{ label: string; slice: WindowValueSlice }> = ({ label, slice }) => (
   <div className='flex-1 min-w-0 glass-secondary p-4'>
-    <p className='text-[10px] uppercase tracking-widest text-faint mb-1'>{label}</p>
+    <Eyebrow size='sm' className='mb-1'>{label}</Eyebrow>
     <div className='flex items-center gap-1.5'>
       <p className='text-2xl font-bold text-ok leading-tight font-mono tabular-nums'>
         <AnimatedNumber value={slice.costUsd} format={formatUsd} />

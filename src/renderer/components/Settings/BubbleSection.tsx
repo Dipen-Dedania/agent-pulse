@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { AgentState, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, DisplayInfo, MascotId, ToolId } from '../../../common/types';
 import { BUBBLE_SOUNDS, playBubbleSound } from '../../sound';
 import { TOOL_META } from '../../../common/toolMeta';
 import { MASCOT_HINTS, MASCOT_HOME, MASCOT_IDS, MASCOT_LABELS, mascotFor } from '../../../common/mascotGeometry';
 import { STATE_COLORS } from '../../../common/stateColors';
 import { MercMascot } from '../Bubble/MercMascot';
-import { Button, GlassToggle, Modal, Segmented, Select, SelectOption, Tooltip } from '../Shared';
+import { Button, Card, Eyebrow, GlassToggle, Modal, Segmented, Select, SelectOption, SettingRow, Tooltip } from '../Shared';
 
 // Every agent gets a mascot row, in TOOL_META order. Any mascot can be assigned
 // to any agent; MASCOT_HOME supplies the vendor default the master switch uses.
@@ -87,9 +87,14 @@ const PositionPicker: React.FC<{
       {/* faux taskbar */}
       <div className='absolute bottom-0 left-0 right-0 h-2 bg-control/50' />
       {hasCustomAnchor && (
-        <span className='absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-widest text-muted font-semibold pointer-events-none'>
+        <Eyebrow
+          size='sm'
+          tone='muted'
+          as='span'
+          className='absolute inset-0 flex items-center justify-center pointer-events-none'
+        >
           Custom
-        </span>
+        </Eyebrow>
       )}
       {POSITION_OPTIONS.map((opt) => {
         const active = !hasCustomAnchor && value === opt.id;
@@ -162,9 +167,9 @@ const DisplayPicker: React.FC<{
             >
               <span className='text-sm font-semibold'>{i + 1}</span>
               {d.primary && (
-                <span className='absolute bottom-1 text-[9px] uppercase tracking-wider text-faint'>
+                <Eyebrow size='sm' as='span' className='absolute bottom-1'>
                   Primary
-                </span>
+                </Eyebrow>
               )}
             </button>
           </Tooltip>
@@ -222,72 +227,55 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
   return (
     <>
-    <motion.section
-      whileHover={{ scale: 1.003 }}
-      transition={{ duration: 0.15, ease: 'easeOut' }}
-      className='glass-primary p-6 flex flex-col gap-7'
+    <Card
+      title='Bubble appearance'
+      subtitle='Tune how the status bubbles look and sound. Changes apply instantly and persist across restarts.'
     >
-      <div>
-        <h2 className='text-lg font-bold text-strong'>Bubble appearance</h2>
-        <p className='text-sm text-muted mt-1'>
-          Tune how the status bubbles look and sound. Changes apply instantly and persist across restarts.
-        </p>
-      </div>
-
+    <div className='flex flex-col gap-7'>
       {/* ── Show bubbles (master visibility) ─────────────────────────────── */}
-      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
-        <div className='min-w-0'>
-          <p className='text-sm font-medium text-strong'>Show bubbles</p>
-          <p className='text-xs text-muted mt-0.5'>
-            Hide every bubble from your screen while keeping tracking, usage, and guardrails fully active.
-            The hooks keep running — only the floating bubbles disappear.
-          </p>
-        </div>
-        <button
-          onClick={() => onChange({ hidden: !config.hidden })}
-          aria-pressed={!config.hidden}
-          className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 cursor-pointer ${
-            config.hidden ? 'toggle-glass-off' : 'bg-blue-500'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              config.hidden ? 'translate-x-0' : 'translate-x-5'
-            }`}
+      <SettingRow
+        title='Show bubbles'
+        description='Hide every bubble from your screen while keeping tracking, usage, and guardrails fully active. The hooks keep running — only the floating bubbles disappear.'
+        control={
+          <GlassToggle
+            size='md'
+            checked={!config.hidden}
+            onChange={(visible) => onChange({ hidden: !visible })}
+            label='Show bubbles'
           />
-        </button>
-      </div>
+        }
+      />
 
       {/* ── Mascots (opens modal) ────────────────────────────────────────── */}
-      <div className='glass-secondary flex items-center justify-between gap-4 px-4 py-3'>
-        <div className='min-w-0 flex items-center gap-3'>
-          {/* Overlapped agent logos as a visual anchor. */}
-          <div className='flex shrink-0'>
-            {homeTools.map((t, i) => (
-              <img
-                key={t}
-                src={TOOL_META[t].icon}
-                alt=''
-                aria-hidden
-                className={`w-6 h-6 rounded-full ring-2 ring-black/20 object-contain bg-control/40 ${i > 0 ? '-ml-2' : ''} ${mascotFor(mascots, t) ? '' : 'opacity-40 grayscale'}`}
-              />
-            ))}
-          </div>
-          <div className='min-w-0'>
-            <p className='text-sm font-medium text-strong'>Mascots</p>
-            <p className='text-xs text-muted mt-0.5'>
-              Pick an animated mascot for each agent
-            </p>
-          </div>
-        </div>
-        <Button variant='secondary' size='sm' onClick={() => setMascotModalOpen(true)}>
-          Customize ›
-        </Button>
-      </div>
+      <SettingRow
+        title={
+          <span className='flex items-center gap-3'>
+            {/* Overlapped agent logos as a visual anchor. */}
+            <span className='flex shrink-0'>
+              {homeTools.map((t, i) => (
+                <img
+                  key={t}
+                  src={TOOL_META[t].icon}
+                  alt=''
+                  aria-hidden
+                  className={`w-6 h-6 rounded-full ring-2 ring-black/20 object-contain bg-control/40 ${i > 0 ? '-ml-2' : ''} ${mascotFor(mascots, t) ? '' : 'opacity-40 grayscale'}`}
+                />
+              ))}
+            </span>
+            <span>Mascots</span>
+          </span>
+        }
+        description='Pick an animated mascot for each agent'
+        control={
+          <Button variant='secondary' size='sm' onClick={() => setMascotModalOpen(true)}>
+            Customize ›
+          </Button>
+        }
+      />
 
       {/* ── Size ──────────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Size</p>
+        <Eyebrow>Size</Eyebrow>
         <p className='text-xs text-muted -mt-1'>
           Scales the whole bubble — orb, icon, and the usage bars beneath it (width &amp; thickness).
         </p>
@@ -324,7 +312,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
       {/* ── Fill ─────────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Fill</p>
+        <Eyebrow>Fill</Eyebrow>
         <p className='text-xs text-muted -mt-1'>
           Frosted glass blends with your desktop, but a dark logo (e.g. Cursor) can vanish over a dark
           window. A solid fill paints a consistent backdrop so every logo stays clearly visible.
@@ -411,7 +399,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
       {/* ── Quota display ────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Quota display</p>
+        <Eyebrow>Quota display</Eyebrow>
         <p className='text-xs text-muted -mt-1'>
           How each agent's remaining subscription credit is drawn. Bars stack one thin bar per quota
           window beneath the bubble. The arc rings the bubble instead, which costs no vertical space
@@ -433,12 +421,16 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
       {/* ── Opacity ──────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <div className='flex items-center justify-between'>
-          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Opacity</p>
-          <span className='text-xs font-medium text-body tabular-nums'>
-            {Math.round((config.opacity ?? 1) * 100)}%
-          </span>
-        </div>
+        <Eyebrow
+          right={
+            <span className='text-xs font-medium text-body tabular-nums'>
+              {Math.round((config.opacity ?? 1) * 100)}%
+            </span>
+          }
+          className='w-full justify-between'
+        >
+          Opacity
+        </Eyebrow>
         <p className='text-xs text-muted -mt-1'>
           How see-through the whole bubble is — orb or mascot, usage bars, and badges all dim together.
         </p>
@@ -457,7 +449,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
       {/* ── Monitor ──────────────────────────────────────────────────────── */}
       {displays.length > 1 && (
         <div className='flex flex-col gap-3'>
-          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Monitor</p>
+          <Eyebrow>Monitor</Eyebrow>
           <p className='text-xs text-muted -mt-1'>
             Choose which screen the bubble stack lives on. The layout mirrors your OS display arrangement.
           </p>
@@ -479,28 +471,21 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
       {/* ── Stack position ───────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Default stack position</p>
+        <Eyebrow>Default stack position</Eyebrow>
         <div className='flex flex-col sm:flex-row items-start gap-5'>
           <PositionPicker
             value={config.stackPosition}
             hasCustomAnchor={config.anchor != null}
             onChange={(next) => onChange({ stackPosition: next, anchor: null })}
           />
-          <div className='grid grid-cols-2 gap-2'>
-            {POSITION_OPTIONS.map((opt) => {
-              const active = config.anchor == null && config.stackPosition === opt.id;
-              return (
-                <Button
-                  key={opt.id}
-                  variant={active ? 'primary' : 'secondary'}
-                  size='md'
-                  onClick={() => onChange({ stackPosition: opt.id, anchor: null })}
-                >
-                  {opt.label}
-                </Button>
-              );
-            })}
-          </div>
+          <Segmented
+            size='md'
+            wrap
+            ariaLabel='Bubble stack position'
+            options={POSITION_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
+            value={config.anchor != null ? '' : config.stackPosition}
+            onChange={(next) => onChange({ stackPosition: next as BubbleStackPosition, anchor: null })}
+          />
         </div>
         <p className='text-xs text-faint'>
           {config.anchor != null
@@ -511,7 +496,7 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
 
       {/* ── Inactivity sound ─────────────────────────────────────────────── */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Inactivity notification sound</p>
+        <Eyebrow>Inactivity notification sound</Eyebrow>
         <p className='text-xs text-muted -mt-1'>
           Plays when an agent finishes and flips to “waiting for input.”
         </p>
@@ -561,7 +546,8 @@ export const BubbleSection: React.FC<Props> = ({ config, onChange }) => {
           })}
         </div>
       </div>
-    </motion.section>
+    </div>
+    </Card>
 
     <AnimatePresence>
       {mascotModalOpen && (

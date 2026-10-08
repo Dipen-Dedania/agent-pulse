@@ -12,6 +12,7 @@ import { PruneScheduler } from './prune';
 import { maybeBackfillLimitEvents } from './limit-backfill';
 import { maybeCleanupSyntheticModels } from './synthetic-cleanup';
 import { StatusStateManager } from '../bridge/state-manager';
+import type { NormalizedEvent } from '../../common/types';
 import { StatusLineFeedSnapshot } from '../bridge/statusline';
 import { UsagePoller } from '../usage/poller';
 import { CodexUsagePoller } from '../codex-usage/poller';
@@ -45,6 +46,8 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     registerTimelineIpcUnavailable(
       'better-sqlite3 native module is not loadable. Run `npm run rebuild:native` to rebuild it for the current Electron ABI.',
     );
+    // Nothing will ever persist these — stop the state manager buffering them.
+    opts.stateManager.drainPending();
     logger.info('[Timeline] boot skipped — DB unavailable; IPC handlers stubbed');
     return null;
   }
@@ -89,7 +92,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
   const prune = new PruneScheduler(db);
 
   // ── Wire bridge event stream → events writer + sessions deriver. ─────
-  const unsubEvents = opts.stateManager.onEvent((event) => {
+  const onBridgeEvent = (event: NormalizedEvent) => {
     // Transcript reading runs first so any token delta is staged before the
     // events-writer attaches it to the row being written. Codex is triggered
     // even without a hook-supplied path — the reader resolves its rollout file
@@ -114,7 +117,21 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     }
     sessionsDeriver.onEvent(event, tokenDelta ?? undefined);
     eventsWriter.write(event);
-  });
+  };
+  const unsubEvents = opts.stateManager.onEvent(onBridgeEvent);
+  // The timeline boots in a deferred launch stage while the bridge has been
+  // accepting hook POSTs since before `ready`. Replay whatever arrived in that
+  // gap so the first seconds of a session are never missing from the history.
+  // Subscribe-then-drain is synchronous, so no event can be both buffered and
+  // delivered live.
+  const backlog = opts.stateManager.drainPending();
+  if (backlog.length > 0) {
+    logger.info(`[Timeline] replaying ${backlog.length} event(s) buffered before boot`);
+    for (const event of backlog) {
+      try { onBridgeEvent(event); }
+      catch (e) { logger.warn('[Timeline] replayed event failed:', e); }
+    }
+  }
 
   // ── Wire usage pollers → quota writer. ────────────────────────────────
   const unsubClaude = opts.usagePoller.subscribe((status) => quotaWriter.onClaudeUsage(status));

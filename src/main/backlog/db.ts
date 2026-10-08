@@ -205,8 +205,11 @@ export function openBacklogDb(dbPath: string): Database | null {
     return null;
   }
 
+  // Hoisted so a failed migration can release the handle: an open connection
+  // left behind keeps the file locked on Windows (EBUSY on the next unlink).
+  let db: Database | undefined;
   try {
-    const db = new Database(dbPath);
+    db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
     db.pragma('foreign_keys = ON');
@@ -281,8 +284,9 @@ export function openBacklogDb(dbPath: string): Database | null {
         // ref = the iid, then drop the old tables. Guarded on existence so a
         // board that never created them can't throw. Dismissed tombstones MUST
         // carry over or rejected issues re-surface on the next scan.
+        const conn = db; // narrowed const for the closure below
         const hasTable = (name: string): boolean =>
-          !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(name);
+          !!conn.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(name);
         if (hasTable('gitlab_candidates')) {
           db.exec(
             `INSERT OR IGNORE INTO issue_candidates
@@ -332,6 +336,7 @@ export function openBacklogDb(dbPath: string): Database | null {
     return db;
   } catch (e: any) {
     logger.error('[Backlog] failed to open or migrate DB:', e?.message ?? e);
+    try { db?.close(); } catch { /* already closed or never opened */ }
     return null;
   }
 }

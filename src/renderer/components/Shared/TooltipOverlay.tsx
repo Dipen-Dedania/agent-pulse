@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { BubbleTooltipPayload } from '../../../common/types';
 import { useIsDark } from '../../hooks/useTheme';
+import { fadeQuick } from '../../motion';
 
 // Padding around the glass card so its drop-shadow has room inside the window
 // (anything outside the window bounds is clipped). The card itself is measured
@@ -58,7 +59,7 @@ export const TooltipOverlay: React.FC = () => {
         key={animKey}
         initial={{ opacity: 0, y: 4, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.14, ease: 'easeOut' }}
+        transition={fadeQuick}
         className='rounded-2xl px-3.5 py-2.5'
         style={{
           maxWidth: 240,

@@ -349,16 +349,16 @@ export const CodexMascot: React.FC<CodexMascotProps> = ({ state, width }) => {
                C 17 101, 17 100, 18 98 Z" />
         </g>
 
-        {/* "waiting for your input" sign (pole + placard), raised by the right hand.
+        {/* "need input" sign (pole + placard), raised by the right hand.
             Nudged inward from the demo so it fits the bubble viewBox. */}
         <g id="flag" opacity="0">
           <rect id="flag-pole" x="150" y="20" width="3.5" height="86" rx="1.75" fill="#5D5B56" />
           <rect id="flag-sign" x="148" y="14" width="58" height="30" rx="4"
             fill="#FBF7EF" stroke="#D9CFC0" strokeWidth="1" />
-          <text x="177" y="27" textAnchor="middle"
-            fontFamily="ui-sans-serif, sans-serif" fontSize="8" fontWeight="700" fill="#3A3530">
-            <tspan x="177" dy="0">Waiting for</tspan>
-            <tspan x="177" dy="10">your input</tspan>
+          <text x="177" y="26" textAnchor="middle"
+            fontFamily="ui-sans-serif, sans-serif" fontSize="11" fontWeight="700" fill="#3A3530">
+            <tspan x="177" dy="0">Need</tspan>
+            <tspan x="177" dy="13">input</tspan>
           </text>
         </g>
 

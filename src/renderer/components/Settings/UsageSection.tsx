@@ -1,6 +1,6 @@
 import React from 'react';
 import { ClaudeExtraUsage, UsageStatus } from '../../../common/types';
-import { Badge, GlassToggle, Tooltip } from '../Shared';
+import { Badge, GlassToggle, SettingRow, Tooltip } from '../Shared';
 import {
   UsageNotificationUI,
   UsageProviderPanel,
@@ -157,20 +157,19 @@ export const UsageSection: React.FC<Props> = ({ config, status, onChange, onRefr
       <UsageMessage message={status.message} state={status.state} />
 
       {config.enabled && (
-        <div className='glass-secondary mt-5 p-4 flex items-start gap-3'>
-          <div className='flex-1 min-w-0'>
-            <p className='font-medium text-strong text-sm leading-tight'>Show 7-day bar on bubble</p>
-            <p className='text-xs text-muted mt-1'>
-              Hide to keep the bubble focused on the 5-hour window only. The 7-day window is still tracked.
-            </p>
-          </div>
-          <GlassToggle
-            checked={config.showSevenDayBar}
-            onChange={() => onChange({ showSevenDayBar: !config.showSevenDayBar })}
-            size='md'
-            label='Toggle 7-day bar on bubble'
-          />
-        </div>
+        <SettingRow
+          className='mt-5'
+          title='Show 7-day bar on bubble'
+          description='Hide to keep the bubble focused on the 5-hour window only. The 7-day window is still tracked.'
+          control={
+            <GlassToggle
+              checked={config.showSevenDayBar}
+              onChange={() => onChange({ showSevenDayBar: !config.showSevenDayBar })}
+              size='md'
+              label='Toggle 7-day bar on bubble'
+            />
+          }
+        />
       )}
 
       {config.enabled && (

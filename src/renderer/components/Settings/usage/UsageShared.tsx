@@ -1,7 +1,7 @@
 import React, { useId, useState } from 'react';
 import { motion } from 'framer-motion';
 import { UsageState } from '../../../../common/types';
-import { GlassToggle, Button, Badge, Input, Meter, type BadgeTone } from '../../Shared';
+import { GlassToggle, Button, Badge, Input, Meter, Card, Eyebrow, SettingRow, type BadgeTone } from '../../Shared';
 import { smooth } from '../../../motion';
 
 // ── Shared usage-panel primitives ───────────────────────────────────────────
@@ -115,7 +115,7 @@ export const QuotaBar: React.FC<{
   const showBar = hasValue && !unlimited;
   return (
     <div className='glass-secondary p-4'>
-      <p className='text-xs uppercase tracking-widest text-faint font-semibold'>{label}</p>
+      <Eyebrow size='md'>{label}</Eyebrow>
       <p className='text-2xl font-bold text-strong mt-1'>
         {unlimited ? '∞' : hasValue ? `${Math.round(remaining as number)}%` : '—'}
         <span className='text-xs font-normal text-muted ml-1'>available</span>
@@ -143,40 +143,39 @@ const NotifyRow: React.FC<{
   const op = comparator === 'lte' ? '≤' : '≥';
   const sliderId = useId();
   return (
-    <div className='glass-secondary p-4'>
-      <div className='flex items-start gap-3'>
-        <div className='flex-1 min-w-0'>
-          <p className='font-medium text-strong text-sm leading-tight'>{title}</p>
-          <p className='text-xs text-muted mt-1'>{hint}</p>
+    <SettingRow
+      title={title}
+      description={hint}
+      control={
+        <div className='flex items-center gap-3'>
+          <div className={`flex items-center gap-2 ${value.enabled ? '' : 'opacity-50'}`}>
+            <label htmlFor={sliderId} className='text-xs text-faint font-mono whitespace-nowrap'>
+              remaining {op}
+            </label>
+            <input
+              id={sliderId}
+              type='range'
+              min={1}
+              max={99}
+              value={value.threshold}
+              disabled={!value.enabled}
+              aria-label={`${title} threshold: notify when remaining ${op} ${value.threshold}%`}
+              onChange={(e) => onChange({ ...value, threshold: Number(e.target.value) })}
+              className='w-24'
+            />
+            <span className='text-sm text-strong font-mono w-10 text-right tabular-nums'>
+              {value.threshold}%
+            </span>
+          </div>
+          <GlassToggle
+            checked={value.enabled}
+            onChange={() => onChange({ ...value, enabled: !value.enabled })}
+            size='md'
+            label={`Toggle ${title}`}
+          />
         </div>
-        <GlassToggle
-          checked={value.enabled}
-          onChange={() => onChange({ ...value, enabled: !value.enabled })}
-          size='md'
-          label={`Toggle ${title}`}
-        />
-      </div>
-
-      <div className={`flex items-center gap-3 mt-3 ${value.enabled ? '' : 'opacity-50'}`}>
-        <label htmlFor={sliderId} className='text-xs text-faint font-mono whitespace-nowrap'>
-          remaining {op}
-        </label>
-        <input
-          id={sliderId}
-          type='range'
-          min={1}
-          max={99}
-          value={value.threshold}
-          disabled={!value.enabled}
-          aria-label={`${title} threshold: notify when remaining ${op} ${value.threshold}%`}
-          onChange={(e) => onChange({ ...value, threshold: Number(e.target.value) })}
-          className='flex-1'
-        />
-        <span className='text-sm text-strong font-mono w-10 text-right tabular-nums'>
-          {value.threshold}%
-        </span>
-      </div>
-    </div>
+      }
+    />
   );
 };
 
@@ -190,7 +189,7 @@ export const NotificationsGroup: React.FC<{
   onNudgeChange: (next: UsageNotificationUI) => void;
 }> = ({ capWarning, nudge, capHint, nudgeHint, onCapChange, onNudgeChange }) => (
   <div className='mt-6'>
-    <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-3'>Notifications</p>
+    <Eyebrow size='md' className='mb-3'>Notifications</Eyebrow>
     <div className='grid grid-cols-1 gap-3'>
       <NotifyRow
         title='Cap warning'
@@ -238,9 +237,9 @@ export const PollIntervalInput: React.FC<{
   return (
     <div className='mt-5'>
       <label className='flex flex-col gap-1.5'>
-        <span className='text-xs uppercase tracking-widest text-faint font-semibold'>
+        <Eyebrow as='span' size='md'>
           Poll interval
-        </span>
+        </Eyebrow>
         <div className='flex items-center gap-2'>
           <Input
             type='number'
@@ -289,29 +288,24 @@ export const UsageProviderPanel: React.FC<{
   onRefresh,
   children,
 }) => (
-  <motion.section
-    whileHover={{ scale: 1.003 }}
-    transition={smooth}
-    className='glass-primary mt-6 p-6'
-  >
-    <div className='flex items-start gap-4'>
-      <div className='flex-1 min-w-0'>
-        <div className='flex items-center gap-3'>
-          <h2 className='text-lg font-bold text-strong'>{title}</h2>
+  <motion.div whileHover={{ scale: 1.003 }} transition={smooth}>
+    <Card
+      title={
+        <span className='inline-flex items-center gap-3'>
+          {title}
           <StatePill state={state} labels={stateLabels} />
+        </span>
+      }
+      subtitle={subtitle}
+      right={<GlassToggle checked={enabled} onChange={onToggleEnabled} size='lg' label={toggleLabel} />}
+    >
+      {children}
+
+      {enabled && (
+        <div className='mt-5 flex gap-2'>
+          <Button onClick={onRefresh}>Refresh now</Button>
         </div>
-        <p className='text-sm text-muted mt-1'>{subtitle}</p>
-      </div>
-
-      <GlassToggle checked={enabled} onChange={onToggleEnabled} size='lg' label={toggleLabel} />
-    </div>
-
-    {children}
-
-    {enabled && (
-      <div className='mt-5 flex gap-2'>
-        <Button onClick={onRefresh}>Refresh now</Button>
-      </div>
-    )}
-  </motion.section>
+      )}
+    </Card>
+  </motion.div>
 );

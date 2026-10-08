@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { listContainer } from '../../motion';
-import { Tooltip } from '../Shared';
+import { fadeQuick, listContainer } from '../../motion';
+import { Eyebrow, Tooltip } from '../Shared';
 
 interface Props {
   title: string;
@@ -49,7 +49,7 @@ export const BoardColumn: React.FC<Props> = ({
       layout
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.2 }}
+      transition={fadeQuick}
       onDragOver={droppable ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(true); } : undefined}
       onDragLeave={(e) => {
         // Ignore leave events fired when the pointer moves onto a child.
@@ -60,18 +60,27 @@ export const BoardColumn: React.FC<Props> = ({
         droppable && dragOver ? 'border-blue-400/70 bg-control/60' : ''
       }`}
     >
-      <div className='flex items-center gap-2' data-tour={dataTour}>
-        <p className='text-xs uppercase tracking-widest text-muted font-semibold'>{title}</p>
-        <Tooltip content={filteredOut ? `${count} shown of ${total} in this column` : undefined}>
-          <span className={`text-[11px] px-1.5 py-0.5 rounded-md bg-control/60 ${accent ?? 'text-body'}`}>
-            {filteredOut ? `${count} of ${total}` : count}
-          </span>
-        </Tooltip>
-        {hint && (
-          <Tooltip content={hint}>
-            <span className='text-[11px] text-faint truncate'>{hint}</span>
-          </Tooltip>
-        )}
+      <div data-tour={dataTour}>
+        <Eyebrow
+          size='md'
+          tone='muted'
+          right={
+            <>
+              <Tooltip content={filteredOut ? `${count} shown of ${total} in this column` : undefined}>
+                <span className={`text-[11px] px-1.5 py-0.5 rounded-md bg-control/60 ${accent ?? 'text-body'}`}>
+                  {filteredOut ? `${count} of ${total}` : count}
+                </span>
+              </Tooltip>
+              {hint && (
+                <Tooltip content={hint}>
+                  <span className='text-[11px] text-faint truncate'>{hint}</span>
+                </Tooltip>
+              )}
+            </>
+          }
+        >
+          {title}
+        </Eyebrow>
       </div>
 
       {filters}
@@ -92,7 +101,7 @@ export const BoardColumn: React.FC<Props> = ({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
+              transition={fadeQuick}
               className='text-xs text-faint'
             >
               {/* "Empty" would read as data loss when a filter is what emptied it. */}

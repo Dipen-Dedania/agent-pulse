@@ -10,7 +10,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
-    "ignoreDeprecations": "6.0"
+    "ignoreDeprecations": "6.0",
+    "incremental": true,
+    "tsBuildInfoFile": "dist/.tsbuildinfo-main"
   },
   "include": ["src/main/**/*", "src/common/**/*"],
   "exclude": ["src/renderer/**/*"]

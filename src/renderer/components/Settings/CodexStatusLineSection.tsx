@@ -6,7 +6,7 @@ import {
   CodexStatusLineItem,
 } from '../../../common/types';
 import { CODEX_ITEM_LABEL, CODEX_ITEM_MOCK, CODEX_ITEM_SINCE_0_160, renderCodexStatusLinePreview } from '../../../common/codex-statusline';
-import { Badge, Button, IconButton, Select } from '../Shared';
+import { Badge, Button, Eyebrow, IconButton, Select } from '../Shared';
 
 // Codex draws its own footer from `[tui] status_line = [...]` in config.toml,
 // so this editor is a list of built-in item ids — no segments, colours, or
@@ -83,7 +83,7 @@ export const CodexStatusLineSection: React.FC<Props> = ({ config, detect, onChan
       <div className='mt-5 flex flex-col gap-5'>
         {/* Preview — approximate: Codex owns the real formatting. */}
         <div className='glass-secondary px-4 py-3'>
-          <p className='text-[10px] uppercase tracking-widest text-faint mb-2'>Preview</p>
+          <Eyebrow size='sm' className='mb-2'>Preview</Eyebrow>
           <div className='font-mono text-sm leading-relaxed overflow-x-auto whitespace-pre w-max'>
             {preview || <span className='text-ghost italic'>—</span>}
           </div>
@@ -128,7 +128,7 @@ export const CodexStatusLineSection: React.FC<Props> = ({ config, detect, onChan
 
         {/* Items editor */}
         <div>
-          <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-2'>Items (in order)</p>
+          <Eyebrow className='mb-2'>Items (in order)</Eyebrow>
           {items.length === 0 ? (
             <p className='text-sm text-muted'>No items. Add at least one to install.</p>
           ) : (

@@ -1,6 +1,6 @@
 import React from 'react';
 import { CostBreakdown, formatUsd } from '../../../../common/pricing';
-import { Badge } from '../../Shared';
+import { Badge, Eyebrow } from '../../Shared';
 
 export function formatDuration(ms: number): string {
   if (!ms || ms < 0) return '0m';
@@ -95,11 +95,11 @@ export const CostBreakdownContent: React.FC<{
     <p className='text-[11px] font-semibold text-primary mb-1.5'>How this is estimated</p>
     <table className='w-full border-collapse'>
       <thead>
-        <tr className='text-[9px] uppercase tracking-wider text-faint'>
-          <th className='py-0.5 pr-3 text-left font-medium'>Class</th>
-          <th className='py-0.5 pr-3 text-right font-medium'>Tokens</th>
-          <th className='py-0.5 pr-3 text-right font-medium'>Rate</th>
-          <th className='py-0.5 text-right font-medium'>Cost</th>
+        <tr>
+          <th className='py-0.5 pr-3 text-left'><Eyebrow size='sm' as='span'>Class</Eyebrow></th>
+          <th className='py-0.5 pr-3 text-right'><Eyebrow size='sm' as='span'>Tokens</Eyebrow></th>
+          <th className='py-0.5 pr-3 text-right'><Eyebrow size='sm' as='span'>Rate</Eyebrow></th>
+          <th className='py-0.5 text-right'><Eyebrow size='sm' as='span'>Cost</Eyebrow></th>
         </tr>
       </thead>
       <tbody>

@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { create } from 'zustand';
-import { gentle } from '../../motion';
+import { fadeQuick, gentle } from '../../motion';
 import { Button } from './Button';
 
 // App-styled replacement for native alert()/confirm(): promise-based API over
@@ -111,7 +111,7 @@ export const AppDialogHost: React.FC = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          transition={fadeQuick}
           onClick={() => settle(false)}
         >
           <motion.div

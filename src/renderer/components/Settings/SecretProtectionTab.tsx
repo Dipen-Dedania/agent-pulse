@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { SecretProtectionConfig, SecretRule, SecretAccessEvent } from '../../../common/secretProtection';
-import { Badge, Button, GlassToggle, Input, Segmented, Modal, appConfirm, Tooltip, type BadgeTone } from '../Shared';
+import { Badge, Button, Card, Eyebrow, GlassToggle, Input, Segmented, Modal, appConfirm, Tooltip, type BadgeTone } from '../Shared';
 import { Field, RuleRow, TabLoading } from './settingsShared';
 import { ToolId } from '../../../common/types';
 import { TOOL_META } from '../../../common/toolMeta';
@@ -65,7 +65,14 @@ export const SecretProtectionTab: React.FC = () => {
       setEvents((prev) => [event, ...prev].slice(0, 50));
     };
     window.electron.on('secret-access:event', handler);
-    return () => window.electron.off('secret-access:event', handler);
+    // `detect-tools` serves the last launch's cached result; a background
+    // re-detection that finds a difference pushes the fresh set here.
+    const onDetected = (_e: unknown, tools: Partial<Record<ToolId, DetectInfo>>) => setDetected(tools ?? {});
+    window.electron.on('detect-tools:updated', onDetected);
+    return () => {
+      window.electron.off('secret-access:event', handler);
+      window.electron.off('detect-tools:updated', onDetected);
+    };
   }, []);
 
   const update = async (partial: Partial<SecretProtectionConfig>) => {
@@ -104,14 +111,7 @@ export const SecretProtectionTab: React.FC = () => {
 
   return (
     <div>
-      <div className='flex items-center justify-between mb-5'>
-        <div>
-          <h2 className='text-xl font-bold tracking-tight'>Secret Protection</h2>
-          <p className='text-sm text-muted mt-1'>
-            Stop agents from reading secret files (.env, keys, credentials). Some agents can deny the read
-            outright; others get an ignore-file plus a warning.
-          </p>
-        </div>
+      <div className='flex items-center justify-end mb-5'>
         <GlassToggle
           checked={config.enabled}
           onChange={() => update({ enabled: !config.enabled })}
@@ -132,8 +132,11 @@ export const SecretProtectionTab: React.FC = () => {
 
       <div className={config.enabled ? '' : 'opacity-60'}>
         {/* Supported agents coverage (analysis §2.1) */}
-        <div className='glass-primary p-5 mb-5'>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>Coverage by agent</p>
+        <Card
+          subtitle='Stop agents from reading secret files (.env, keys, credentials). Some agents can deny the
+            read outright; others get an ignore-file plus a warning.'
+        >
+          <Eyebrow size='md' className='mb-3'>Coverage by agent</Eyebrow>
           <div className='flex flex-col gap-2'>
             {(Object.keys(COVERAGE) as ToolId[]).map((toolId) => {
               const cov = COVERAGE[toolId];
@@ -172,7 +175,7 @@ export const SecretProtectionTab: React.FC = () => {
               );
             })}
           </div>
-        </div>
+        </Card>
 
         {/* Layer toggles + scope */}
         <div className='glass-primary p-5 mb-5 flex flex-col gap-3'>
@@ -206,9 +209,7 @@ export const SecretProtectionTab: React.FC = () => {
         {/* Rule list */}
         <div className='glass-primary p-5'>
           <div className='flex items-center justify-between mb-4'>
-            <p className='text-xs font-semibold uppercase tracking-widest text-faint'>
-              Protected globs ({allRules.length})
-            </p>
+            <Eyebrow size='md'>Protected globs ({allRules.length})</Eyebrow>
             <Button onClick={() => setShowAdd(true)} variant='primary' size='sm'>
               + Add glob
             </Button>
@@ -233,9 +234,9 @@ export const SecretProtectionTab: React.FC = () => {
 
         {/* Recent events */}
         <div className='glass-primary p-5 mt-5'>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
+          <Eyebrow size='md' className='mb-3'>
             Recent reads {events.length > 0 && `(${events.length})`}
-          </p>
+          </Eyebrow>
           {events.length === 0 ? (
             <p className='text-sm text-faint italic'>No protected-file reads observed yet.</p>
           ) : (

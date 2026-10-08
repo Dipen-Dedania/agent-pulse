@@ -1,6 +1,12 @@
 export interface FaqItem {
   question: string;
   answer: string;
+  /** Anchor id so other sections can deep-link (and auto-open) this item. */
+  id?: string;
+  /** Optional numbered steps rendered under the answer. */
+  steps?: string[];
+  /** Optional copyable terminal command rendered after the steps. */
+  command?: { intro: string; text: string };
 }
 
 export const faqItems: FaqItem[] = [
@@ -38,5 +44,22 @@ export const faqItems: FaqItem[] = [
     question: 'Windows / macOS / Linux?',
     answer:
       'All three. Windows gets full auto-update; macOS is manual-update for now; Linux ships as an AppImage.',
+  },
+  {
+    id: 'mac-not-opened',
+    question: 'macOS says “Agent Pulse” Not Opened — Apple could not verify it?',
+    answer:
+      "That's Gatekeeper. Agent Pulse is open source but not yet signed with a paid Apple Developer ID, so macOS blocks it on first launch. The app is safe — you just need to allow it once. Don't click “Move to Bin”; click “Done”, then:",
+    steps: [
+      'Make sure Agent Pulse.app is in your Applications folder (drag it out of the .dmg first).',
+      'Open System Settings → Privacy & Security and scroll to the Security section.',
+      'Next to “Agent Pulse” was blocked to protect your Mac, click Open Anyway and confirm with your password or Touch ID.',
+      'Launch Agent Pulse again and click Open. macOS remembers the choice from then on.',
+    ],
+    command: {
+      intro:
+        'Prefer the terminal? This clears the download quarantine flag in one step (repeat after each manual update):',
+      text: 'xattr -dr com.apple.quarantine "/Applications/Agent Pulse.app"',
+    },
   },
 ];

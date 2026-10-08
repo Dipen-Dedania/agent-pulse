@@ -1,6 +1,6 @@
 import React from 'react';
 import { formatUsd } from '../../../../common/pricing';
-import { AnimatedNumber, Tooltip } from '../../Shared';
+import { AnimatedNumber, Eyebrow, Tooltip } from '../../Shared';
 import { useSummary } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { EmptyState, SkeletonLine, formatDuration } from './shared';
@@ -36,7 +36,7 @@ const StatTile: React.FC<{
   sub?: string;
 }> = ({ label, value, rawValue, format: fmt, delta, sub }) => (
   <div className='flex-1 min-w-0 glass-secondary px-4 py-3'>
-    <p className='text-[10px] uppercase tracking-widest text-faint'>{label}</p>
+    <Eyebrow size='sm'>{label}</Eyebrow>
     <Tooltip content={value}>
       <p className='text-xl font-semibold text-strong leading-tight mt-1 truncate'>
         {rawValue !== undefined && fmt !== undefined

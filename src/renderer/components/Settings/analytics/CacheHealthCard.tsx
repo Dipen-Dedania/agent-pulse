@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { CacheHealthDayBucket } from '../../../../common/timeline-types';
-import { AnimatedNumber, Meter } from '../../Shared';
+import { AnimatedNumber, Eyebrow, Meter } from '../../Shared';
 import { useCacheHealth } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, InfoPill, SkeletonLine, useChartTip } from './shared';
@@ -45,7 +45,7 @@ export const CacheHealthCard: React.FC = () => {
         <div className='flex flex-col gap-4'>
           <div className='grid grid-cols-2 gap-3'>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Avg hit ratio</p>
+              <Eyebrow size='sm' className='mb-1'>Avg hit ratio</Eyebrow>
               <p className='text-xl font-semibold text-primary font-mono tabular-nums'>
                 {data.avgHitRatio === null
                   ? '—'
@@ -56,7 +56,7 @@ export const CacheHealthCard: React.FC = () => {
               </p>
             </div>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Cache state</p>
+              <Eyebrow size='sm' className='mb-1'>Cache state</Eyebrow>
               <div className='flex items-center gap-2'>
                 {data.warmPct === null ? (
                   <p className='text-xl font-semibold text-primary font-mono tabular-nums'>—</p>

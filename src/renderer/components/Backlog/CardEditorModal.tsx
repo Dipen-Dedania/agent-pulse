@@ -7,7 +7,7 @@ import {
 import { CodexModelAvailability, CodexUsageStatus } from '../../../common/types';
 import { buildPreviewPrompt, PromptAttachment } from '../../../common/backlog-prompt';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, Button, Checkbox, Input, Modal, Segmented, Select, Textarea, Tooltip } from '../Shared';
+import { appAlert, Button, Checkbox, Eyebrow, Input, Modal, Segmented, Select, Textarea, Tooltip } from '../Shared';
 import { TIER_META } from './CardTile';
 import { TemplateManagerModal } from './TemplateManagerModal';
 import { PromptPreviewModal } from './PromptPreviewModal';
@@ -93,7 +93,6 @@ const AGENT_OPTIONS: { value: BacklogAgent; label: string }[] = [
   { value: 'codex', label: 'Codex' },
 ];
 
-const labelClass = 'text-xs uppercase tracking-widest text-faint font-semibold';
 // Shared by both <Select>s in the form so their triggers line up with the
 // <Input> fields around them (Select brings its own .glass-control material).
 const selectClass = 'w-full px-3 py-1.5 text-sm cursor-pointer';
@@ -393,17 +392,21 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
       {/* Quick tasks — templates pre-fill title + description (create only) */}
       {!card && (
         <div className='flex flex-col gap-1.5'>
-          <div className='flex items-center gap-2'>
-            <span className={labelClass}>Quick tasks</span>
-            <Tooltip content='Add, edit, or remove quick-task templates'>
-              <button
-                onClick={() => setManagingTemplates(true)}
-                className='text-[11px] text-faint hover:text-body cursor-pointer transition-colors'
-              >
-                manage
-              </button>
-            </Tooltip>
-          </div>
+          <Eyebrow
+            size='md'
+            right={
+              <Tooltip content='Add, edit, or remove quick-task templates'>
+                <button
+                  onClick={() => setManagingTemplates(true)}
+                  className='text-[11px] text-faint hover:text-body cursor-pointer transition-colors'
+                >
+                  manage
+                </button>
+              </Tooltip>
+            }
+          >
+            Quick tasks
+          </Eyebrow>
           {templates.length === 0 ? (
             <p className='text-xs text-faint'>No templates yet — "manage" to add some.</p>
           ) : (
@@ -425,12 +428,12 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
       )}
 
       <label className='flex flex-col gap-1.5'>
-        <span className={labelClass}>Title</span>
+        <Eyebrow as='span' size='md'>Title</Eyebrow>
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder='What should the agent research?' />
       </label>
 
       <label className='flex flex-col gap-1.5'>
-        <span className={labelClass}>Description</span>
+        <Eyebrow as='span' size='md'>Description</Eyebrow>
         <Textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -474,18 +477,22 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           can carry context that isn't committed to the repo (an isolated
           worktree only sees committed files). */}
       <div className='flex flex-col gap-1.5'>
-        <div className='flex items-center gap-2'>
-          <span className={labelClass}>Attachments</span>
-          <Button
-            variant='secondary'
-            size='xs'
-            type='button'
-            onClick={() => void handlePickAttachments()}
-            disabled={picking}
-          >
-            {picking ? 'Choosing…' : '+ Attach files'}
-          </Button>
-        </div>
+        <Eyebrow
+          size='md'
+          right={
+            <Button
+              variant='secondary'
+              size='xs'
+              type='button'
+              onClick={() => void handlePickAttachments()}
+              disabled={picking}
+            >
+              {picking ? 'Choosing…' : '+ Attach files'}
+            </Button>
+          }
+        >
+          Attachments
+        </Eyebrow>
         {keptExisting.length === 0 && pendingAttachments.length === 0 ? (
           <p className='text-xs text-faint'>
             Attach text files (specs, plans) to inline them into the prompt — useful for uncommitted files a worktree can’t see.
@@ -526,7 +533,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
 
       <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
         <label className='flex flex-col gap-1.5'>
-          <span className={labelClass}>Project</span>
+          <Eyebrow as='span' size='md'>Project</Eyebrow>
           <Select
             value={projectId}
             onChange={(v) => setProjectId(v)}
@@ -541,7 +548,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         </label>
 
         <div className='flex flex-col gap-1.5'>
-          <span className={labelClass}>Task type</span>
+          <Eyebrow as='span' size='md'>Task type</Eyebrow>
           <Segmented
             options={[
               { value: 'research', label: 'Research', hint: 'Read-only — the agent produces a report.' },
@@ -554,7 +561,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         </div>
 
         <div className='flex flex-col gap-1.5'>
-          <span className={labelClass}>Risk tier</span>
+          <Eyebrow as='span' size='md'>Risk tier</Eyebrow>
           <Segmented
             options={(Object.keys(TIER_META) as RiskTier[]).map((tier) => ({
               value: tier,
@@ -568,10 +575,13 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         </div>
 
         <div className='flex flex-col gap-1.5 sm:col-span-2'>
-          <span className={`${labelClass} inline-flex items-center gap-1.5`}>
+          <Eyebrow
+            as='span'
+            size='md'
+            right={<InfoHint text='Which CLI runs this card headlessly. Claude Code runs `claude -p`; Codex runs `codex exec` in a sandbox. Issue scouting and Refine Now always use Claude Code.' />}
+          >
             Agent
-            <InfoHint text='Which CLI runs this card headlessly. Claude Code runs `claude -p`; Codex runs `codex exec` in a sandbox. Issue scouting and Refine Now always use Claude Code.' />
-          </span>
+          </Eyebrow>
           <Segmented
             options={AGENT_OPTIONS.map((o) => ({
               value: o.value,
@@ -603,7 +613,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         </div>
 
         <label className='flex flex-col gap-1.5 sm:col-span-2'>
-          <span className={labelClass}>Model</span>
+          <Eyebrow as='span' size='md'>Model</Eyebrow>
           <Select
             value={modelChoice}
             onChange={setModelChoice}
@@ -633,10 +643,13 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         </label>
 
         <label className='flex flex-col gap-1.5'>
-          <span className={`${labelClass} inline-flex items-center gap-1.5`}>
+          <Eyebrow
+            as='span'
+            size='md'
+            right={<InfoHint text='Size-fit + hard time budget. The scheduler only claims this card if it fits the time left in the window, and kills the run if it exceeds this many minutes. Default 30, clamped 5–120.' />}
+          >
             Est. minutes
-            <InfoHint text='Size-fit + hard time budget. The scheduler only claims this card if it fits the time left in the window, and kills the run if it exceeds this many minutes. Default 30, clamped 5–120.' />
-          </span>
+          </Eyebrow>
           <Input
             type='number' min={5} max={120} value={estimatedMinutes}
             onChange={(e) => setEstimatedMinutes(e.target.value)}
@@ -645,10 +658,13 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
         </label>
 
         <label className='flex flex-col gap-1.5'>
-          <span className={`${labelClass} inline-flex items-center gap-1.5`}>
+          <Eyebrow
+            as='span'
+            size='md'
+            right={<InfoHint text='Informational only — feeds the "queue will burn ~$X next window" forecast. It never limits or stops a run. Default $0.50.' />}
+          >
             Est. cost ($)
-            <InfoHint text='Informational only — feeds the "queue will burn ~$X next window" forecast. It never limits or stops a run. Default $0.50.' />
-          </span>
+          </Eyebrow>
           <Input
             type='number' min={0} step={0.1} value={estimatedCostUsd}
             onChange={(e) => setEstimatedCostUsd(e.target.value)}
@@ -660,7 +676,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
       {/* Prerequisites — gate autorun until the checked cards are Done */}
       {prereqCandidates.length > 0 && (
         <div className='flex flex-col gap-1.5'>
-          <span className={labelClass}>Prerequisites</span>
+          <Eyebrow as='span' size='md'>Prerequisites</Eyebrow>
           <p className='text-xs text-muted -mt-0.5'>
             Autorun waits until these cards are Done ("Run now" overrides).
           </p>
@@ -696,7 +712,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           </div>
 
           <label className='flex flex-col gap-1.5'>
-            <span className={labelClass}>Acceptance criteria</span>
+            <Eyebrow as='span' size='md'>Acceptance criteria</Eyebrow>
             <Textarea
               value={acceptanceCriteria}
               onChange={(e) => setAcceptanceCriteria(e.target.value)}
@@ -706,7 +722,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           </label>
 
           <label className='flex flex-col gap-1.5'>
-            <span className={labelClass}>QA provider</span>
+            <Eyebrow as='span' size='md'>QA provider</Eyebrow>
             <Select
               value={qaProvider}
               onChange={(v) => setQaProvider(v as QaProvider)}
@@ -724,7 +740,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
 
           {qaProvider === 'custom' && (
             <label className='flex flex-col gap-1.5'>
-              <span className={labelClass}>Custom QA command</span>
+              <Eyebrow as='span' size='md'>Custom QA command</Eyebrow>
               <Input
                 value={qaCommand}
                 onChange={(e) => setQaCommand(e.target.value)}
@@ -749,7 +765,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           </div>
 
           <label className='flex flex-col gap-1.5'>
-            <span className={labelClass}>App URL</span>
+            <Eyebrow as='span' size='md'>App URL</Eyebrow>
             <Input
               value={qaUrl}
               onChange={(e) => setQaUrl(e.target.value)}
@@ -763,7 +779,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           </label>
 
           <label className='flex flex-col gap-1.5'>
-            <span className={labelClass}>Acceptance criteria</span>
+            <Eyebrow as='span' size='md'>Acceptance criteria</Eyebrow>
             <Textarea
               value={acceptanceCriteria}
               onChange={(e) => setAcceptanceCriteria(e.target.value)}

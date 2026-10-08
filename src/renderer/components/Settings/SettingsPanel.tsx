@@ -18,13 +18,12 @@ import { BubbleSection } from './BubbleSection';
 import { AttentionSection } from './AttentionSection';
 import { StatusLineSection } from './StatusLineSection';
 import { CodexStatusLineSection } from './CodexStatusLineSection';
-import { Badge, GlassToggle, IconButton, Tooltip, Button, Spinner, Segmented, Tabs, Modal } from '../Shared';
+import { Badge, GlassToggle, IconButton, Tooltip, Button, Spinner, Tabs, Modal, Eyebrow } from '../Shared';
 import { GuardrailsTab } from './GuardrailsTab';
 import { SecretProtectionTab } from './SecretProtectionTab';
 import { AnalyticsTabContainer } from './AnalyticsTab';
 import { BacklogBoardTab } from '../Backlog/BacklogBoardTab';
 import { BacklogTour } from '../Backlog/BacklogTour';
-import { BacklogPopulationSection } from './BacklogPopulationSection';
 import { BacklogMcpSection } from './BacklogMcpSection';
 import { StarNudgeToast } from './StarNudgeToast';
 import { BacklogSchedulerConfig, BacklogPopulationConfig } from '../../../common/backlog-types';
@@ -32,6 +31,7 @@ import { useBacklogStore, useBacklogSync } from '../../store/useBacklogStore';
 import { AppDialogHost, appAlert } from '../Shared';
 import { UpdatesTab } from './UpdatesTab';
 import { usePricingSync } from '../../pricing-sync';
+import { bootMark } from '../../boot-marks';
 
 interface ToolConfig {
   enabled: boolean;
@@ -107,9 +107,15 @@ const HookInfoModal: React.FC<{
   const [tab, setTab] = useState<'install' | 'troubleshoot'>('install');
   return (
     <Modal eyebrow='Hook Installation' title={label} onClose={onClose}>
-      {/* Tabs */}
-      <Segmented
-        options={[
+      {/* Tabs — switches the modal body below it, so Tabs (not Segmented).
+          shrink-0: the Modal panel is a max-height flex column that scrolls,
+          and this track is overflow-hidden, so without it the row collapses
+          to a sliver once the body outgrows the panel. */}
+      <Tabs
+        tone='blue'
+        className='glass-secondary mb-4 w-fit shrink-0'
+        ariaLabel='Hook info sections'
+        tabs={[
           { value: 'install', label: 'Install' },
           { value: 'troubleshoot', label: 'Troubleshoot' },
         ]}
@@ -117,47 +123,55 @@ const HookInfoModal: React.FC<{
         onChange={(v) => setTab(v as 'install' | 'troubleshoot')}
       />
 
-      {tab === 'install' ? (
-        <>
-          {/* Badges */}
-          <div className='flex flex-wrap gap-2'>
-            <Badge tone='info' variant='pill' size='md' weight='medium' dot>
-              {info.mechanism}
-            </Badge>
-            <Badge tone='neutral' variant='pill' size='md' className='font-mono'>
-              {info.configFile}
-            </Badge>
-          </div>
+      {/* Tab body — the panel's standard cross-fade. */}
+      <AnimatePresence mode='wait'>
+        <motion.div
+          key={tab}
+          variants={tabContent}
+          initial='initial'
+          animate='animate'
+          exit='exit'
+          transition={tabContentTransition}
+        >
+          {tab === 'install' ? (
+            <div className='flex flex-col gap-4'>
+              {/* Badges */}
+              <div className='flex flex-wrap gap-2'>
+                <Badge tone='info' variant='pill' size='md' weight='medium' dot>
+                  {info.mechanism}
+                </Badge>
+                <Badge tone='neutral' variant='pill' size='md' className='font-mono'>
+                  {info.configFile}
+                </Badge>
+              </div>
 
-          {/* Description */}
-          <p className='text-sm text-body leading-relaxed'>
-            {info.description}
-          </p>
+              {/* Description */}
+              <p className='text-sm text-body leading-relaxed'>
+                {info.description}
+              </p>
 
-          {/* Snippet */}
-          <div>
-            <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-2'>
-              Config snippet
-            </p>
-            <pre className='bg-glass/80 border border-edge/60 rounded-xl p-4 text-xs text-ok font-mono overflow-x-auto whitespace-pre leading-relaxed'>
-              {info.snippet}
-            </pre>
-          </div>
-        </>
-      ) : (
-        <div>
-          <p className='text-xs font-semibold uppercase tracking-widest text-faint mb-3'>
-            If status events aren't arriving
-          </p>
-          <ol className='flex flex-col gap-2.5 list-decimal list-inside text-sm text-body leading-relaxed'>
-            {info.troubleshooting.map((step, i) => (
-              <li key={i} className='pl-1'>
-                {step}
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
+              {/* Snippet */}
+              <div>
+                <Eyebrow size='md' className='mb-2'>Config snippet</Eyebrow>
+                <pre className='bg-glass/80 border border-edge/60 rounded-xl p-4 text-xs text-ok font-mono overflow-x-auto whitespace-pre leading-relaxed'>
+                  {info.snippet}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <Eyebrow size='md' className='mb-3'>If status events aren't arriving</Eyebrow>
+              <ol className='flex flex-col gap-2.5 list-decimal list-inside text-sm text-body leading-relaxed'>
+                {info.troubleshooting.map((step, i) => (
+                  <li key={i} className='pl-1'>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </motion.div>
+      </AnimatePresence>
     </Modal>
   );
 };
@@ -180,7 +194,20 @@ const GuardrailsParent: React.FC = () => {
         value={sub}
         onChange={(v) => setSub(v as 'commands' | 'secrets')}
       />
-      {sub === 'commands' ? <GuardrailsTab /> : <SecretProtectionTab />}
+      {/* Standard cross-fade under a Tabs row (CLAUDE.md: never an instant swap). */}
+      <AnimatePresence mode='wait'>
+        <motion.div
+          key={sub}
+          data-testid='guardrails-subtab-body'
+          variants={tabContent}
+          initial='initial'
+          animate='animate'
+          exit='exit'
+          transition={tabContentTransition}
+        >
+          {sub === 'commands' ? <GuardrailsTab /> : <SecretProtectionTab />}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 };
@@ -239,11 +266,13 @@ const TABS: { id: TabId; label: string; Icon: React.FC<IconProps>; description: 
   { id: 'updates',    label: 'Updates',    Icon: UpdatesIcon,    description: 'Check for and install new versions of Agent Pulse.' },
 ];
 
-export const SettingsPanel: React.FC = () => {
+export const SettingsPanel: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [tools, setTools] = useState<Record<ToolId, ToolConfig>>(
     {} as Record<ToolId, ToolConfig>,
   );
-  const [loading, setLoading] = useState(false);
+  // True from the first render: the Hooks tab's cards return null without a
+  // config, so starting at `false` painted an empty tab before the spinner.
+  const [loading, setLoading] = useState(true);
   const [activeInfo, setActiveInfo] = useState<ToolId | null>(null);
   const [usageConfig, setUsageConfig] = useState<UsageConfigUI | null>(null);
   const [usageStatus, setUsageStatus] = useState<UsageStatus>({ state: 'unknown' });
@@ -295,8 +324,8 @@ export const SettingsPanel: React.FC = () => {
   // ── Backlog planner guided tour ───────────────────────────────────────────
   // The controller lives here (SettingsPanel level) so the spotlight overlay is
   // a sibling of the tab <AnimatePresence> and survives tab swaps — it drives
-  // both activeTab and usageSubTab to walk into Usage → Claude Code for the
-  // issue-population step.
+  // activeTab so a tour launched from another tab lands on the board first.
+  // Every step stays on the Backlog tab (issue population moved under ⚙).
   const [backlogTourActive, setBacklogTourActive] = useState(false);
   const [tourState, setTourState] = useState<TourState | null>(null);
   const backlogAutoRanRef = React.useRef(false);
@@ -383,25 +412,45 @@ export const SettingsPanel: React.FC = () => {
         if (config?.bubble) setBubbleConfig(config.bubble);
         if (config?.attention) setAttentionConfig(config.attention);
         if (config?.statusLine) setStatusLineConfig(config.statusLine);
-        const detectStatusLine = await window.electron.invoke('status-line:detect').catch(() => null);
-        if (detectStatusLine) setStatusLineDetect(detectStatusLine);
         if (config?.codexStatusLine) setCodexStatusLineConfig(config.codexStatusLine);
-        const detectCodexStatusLine = await window.electron.invoke('codex-status-line:detect').catch(() => null);
-        if (detectCodexStatusLine) setCodexStatusLineDetect(detectCodexStatusLine);
+        // The Hooks tab has everything it needs — paint it now. The live
+        // snapshots below used to be awaited one after another before anything
+        // rendered; they fill in together as they arrive, and the push
+        // listeners registered at mount keep them fresh afterwards.
+        setLoading(false);
+        bootMark('settings-data-ready');
 
-        const initialUsage = await window.electron.invoke('usage:get-current').catch(() => null);
+        const quiet = <T,>(channel: string): Promise<T | null> =>
+          window.electron.invoke(channel).catch(() => null);
+        const [
+          detectStatusLine,
+          detectCodexStatusLine,
+          initialUsage,
+          initialCodexUsage,
+          initialCursorUsage,
+          initialCopilotUsage,
+          initialAntigravityUsage,
+          initialScheduler,
+          initialCodexScheduler,
+        ] = await Promise.all([
+          quiet<StatusLineDetectInfo>('status-line:detect'),
+          quiet<CodexStatusLineDetectInfo>('codex-status-line:detect'),
+          quiet<UsageStatus>('usage:get-current'),
+          quiet<CodexUsageStatus>('codex-usage:get-current'),
+          quiet<CursorUsageStatus>('cursor-usage:get-current'),
+          quiet<CopilotUsageStatus>('copilot-usage:get-current'),
+          quiet<AntigravityUsageStatus>('antigravity-usage:get-current'),
+          quiet<SchedulerStatus>('scheduler:get-current'),
+          quiet<SchedulerStatus>('codex-scheduler:get-current'),
+        ]);
+        if (detectStatusLine) setStatusLineDetect(detectStatusLine);
+        if (detectCodexStatusLine) setCodexStatusLineDetect(detectCodexStatusLine);
         if (initialUsage) setUsageStatus(initialUsage);
-        const initialCodexUsage = await window.electron.invoke('codex-usage:get-current').catch(() => null);
         if (initialCodexUsage) setCodexUsageStatus(initialCodexUsage);
-        const initialCursorUsage = await window.electron.invoke('cursor-usage:get-current').catch(() => null);
         if (initialCursorUsage) setCursorUsageStatus(initialCursorUsage);
-        const initialCopilotUsage = await window.electron.invoke('copilot-usage:get-current').catch(() => null);
         if (initialCopilotUsage) setCopilotUsageStatus(initialCopilotUsage);
-        const initialAntigravityUsage = await window.electron.invoke('antigravity-usage:get-current').catch(() => null);
         if (initialAntigravityUsage) setAntigravityUsageStatus(initialAntigravityUsage);
-        const initialScheduler = await window.electron.invoke('scheduler:get-current').catch(() => null);
         if (initialScheduler) setSchedulerStatus(initialScheduler);
-        const initialCodexScheduler = await window.electron.invoke('codex-scheduler:get-current').catch(() => null);
         if (initialCodexScheduler) setCodexSchedulerStatus(initialCodexScheduler);
       } catch (error) {
         logger.error('[SettingsPanel] failed to initialize settings', error);
@@ -411,6 +460,33 @@ export const SettingsPanel: React.FC = () => {
     }
     init();
   }, [getBubbleStates]);
+
+  // `detect-tools` answers from the last launch's cached detection and
+  // re-detects in the background; a changed result arrives here. Only the
+  // detection-owned fields move — `enabled` is the user's bubble choice.
+  useEffect(() => {
+    const handler = (
+      _event: unknown,
+      detected: Partial<Record<ToolId, { installed?: boolean; hookInstalled?: boolean; location?: string }>>,
+    ) => {
+      setTools((prev) => {
+        const next = { ...prev } as Record<ToolId, ToolConfig>;
+        for (const id of Object.keys(TOOL_META) as ToolId[]) {
+          const det = detected?.[id];
+          if (!det) continue;
+          next[id] = {
+            enabled: prev[id]?.enabled ?? false,
+            appInstalled: !!det.installed,
+            hookInstalled: !!det.hookInstalled,
+            location: det.location,
+          };
+        }
+        return next;
+      });
+    };
+    window.electron.on('detect-tools:updated', handler);
+    return () => window.electron.off('detect-tools:updated', handler);
+  }, []);
 
   useEffect(() => {
     const handler = (_event: unknown, incoming: UsageStatus) => setUsageStatus(incoming);
@@ -797,6 +873,12 @@ export const SettingsPanel: React.FC = () => {
   };
 
   const handleBack = () => {
+    // In-app view switch when hosted by App (no reload); the navigation
+    // fallbacks remain for any other host.
+    if (onBack) {
+      onBack();
+      return;
+    }
     if (window.history.length > 1) {
       window.history.back();
     } else {
@@ -906,12 +988,9 @@ export const SettingsPanel: React.FC = () => {
                         {meta.label}
                       </p>
                       {meta.badges?.map((badge) => (
-                        <span
-                          key={badge}
-                          className='px-1.5 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-info text-[10px] font-semibold uppercase tracking-wide'
-                        >
+                        <Badge key={badge} tone='info' variant='tag' uppercase size='xs' weight='semibold'>
                           {badge}
-                        </span>
+                        </Badge>
                       ))}
                       <button
                         onClick={() => setActiveInfo(toolId)}
@@ -1061,6 +1140,17 @@ export const SettingsPanel: React.FC = () => {
               onChange={(v) => setUsageSubTab(v as ToolId)}
             />
 
+            {/* Standard cross-fade under a Tabs row (CLAUDE.md: never an instant swap). */}
+            <AnimatePresence mode='wait'>
+            <motion.div
+              key={active}
+              data-testid='plans-subtab-body'
+              variants={tabContent}
+              initial='initial'
+              animate='animate'
+              exit='exit'
+              transition={tabContentTransition}
+            >
             {active === 'claude-code' && (
               <>
                 {usageConfig && (
@@ -1077,12 +1167,6 @@ export const SettingsPanel: React.FC = () => {
                     status={schedulerStatus}
                     onChange={handleSchedulerConfigChange}
                     onTestOpener={handleSchedulerTestOpener}
-                  />
-                )}
-                {backlogPopulationConfig && (
-                  <BacklogPopulationSection
-                    config={backlogPopulationConfig}
-                    onChange={handleBacklogPopulationConfigChange}
                   />
                 )}
                 <BacklogMcpSection />
@@ -1157,6 +1241,8 @@ export const SettingsPanel: React.FC = () => {
                 onRefresh={handleAntigravityUsageRefresh}
               />
             )}
+            </motion.div>
+            </AnimatePresence>
           </div>
         );
       })()}
@@ -1166,6 +1252,8 @@ export const SettingsPanel: React.FC = () => {
           onStartTour={startBacklogTour}
           schedulerConfig={backlogSchedulerConfig}
           onSchedulerConfigChange={handleBacklogSchedulerConfigChange}
+          populationConfig={backlogPopulationConfig}
+          onPopulationConfigChange={handleBacklogPopulationConfigChange}
         />
       )}
 
@@ -1178,14 +1266,12 @@ export const SettingsPanel: React.FC = () => {
       </AnimatePresence>
 
       {/* Backlog planner guided tour — hoisted out of the tab AnimatePresence so
-          the spotlight survives the walk into Usage → Claude Code. */}
+          the spotlight survives the Backlog tab's mount animation. */}
       <BacklogTour
         active={backlogTourActive}
         projectCount={backlogProjectCount}
         activeTab={activeTab}
-        usageSubTab={usageSubTab}
         setActiveTab={setActiveTab}
-        setUsageSubTab={setUsageSubTab}
         onFinish={finishBacklogTour}
       />
 

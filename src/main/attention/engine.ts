@@ -144,7 +144,7 @@ export class AttentionEngine {
 
     if (this.config.intensifyBubble) this.broadcastEscalate(toolId);
 
-    const title = `${label} needs your input`;
+    const title = `${label} needs you`;
     const bodyParts: string[] = [];
     if (entry.task) bodyParts.push(entry.task);
     bodyParts.push(`Idle for ${this.config.escalateAfterSeconds}s`);

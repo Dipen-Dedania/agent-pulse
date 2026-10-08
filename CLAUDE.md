@@ -42,6 +42,18 @@ Glass surfaces use the `.glass-control` (small controls) / `.glass-primary` /
 classes (in `index.css`) — do **not** copy-paste `bg-glass/… backdrop-blur-md …
 rounded-2xl` shells. `npm run lint:ui` enforces these rules and runs as part of `npm test`.
 
+### 🎞 Motion (one vocabulary, `src/renderer/motion.ts`)
+- Never hand-write `transition={{ duration: … }}`; import `snappy` / `smooth` / `gentle`.
+- **Switching the body under a `Tabs` / `Segmented` row** always uses the standard
+  cross-fade: wrap it in `<AnimatePresence mode="wait">` + `<motion.div key={tab}
+  variants={tabContent} initial="initial" animate="animate" exit="exit"
+  transition={tabContentTransition}>` — never an instant swap, never a bespoke fade.
+  `SettingsPanel`'s tab body and `BacklogSettingsModal` are the reference.
+- Inside a `Modal`, give any `overflow-hidden` child (a `Tabs` track on
+  `.glass-secondary`, a `Card`) `shrink-0`: the panel is a max-height flex column
+  that scrolls, and such children are the only ones allowed to shrink, so they
+  collapse to a sliver once the body outgrows the panel.
+
 ## 📂 Project Structure
 - `src/main/bridge/`: HTTP server (port 4242) and status state management.
 - `src/main/installer/`: Tool detection and hook configuration writing logic.
@@ -53,6 +65,11 @@ rounded-2xl` shells. `npm run lint:ui` enforces these rules and runs as part of 
   terminal chat) plus its `~/.claude.json` registration. `server.ts` runs as its own
   process — it must never import Electron or add npm dependencies.
 - `src/main/windows/`: Electron window configurations (Bubbles, Settings).
+- `src/main/boot-sequence.ts`: staged launch. `app.on('ready')` runs only Stage 0 (IPC
+  registration, theme, tray, then `settingsWindow.show()`); pollers, schedulers and the two
+  SQLite databases boot in Stage 1 after the page loads (`app:wait-boot` gates the Settings
+  panel on it); fs maintenance runs in Stage 2. New IPC handlers the Settings UI calls at
+  mount belong in Stage 0 or 1, never Stage 2. `[Boot]` log lines carry per-step timings.
 - `src/renderer/components/Shared/`: Reusable UI primitives (barrel-exported). Import from here; don't hand-roll.
 - `src/renderer/components/Bubble/`: Visual status indicators and animations.
 - `src/renderer/components/Settings/`: Configuration interface and hook management.

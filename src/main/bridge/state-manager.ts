@@ -11,6 +11,13 @@ export class StatusStateManager {
   // normalized payload (Claude Code SubagentStart/Stop). Keyed alongside the
   // sessionId that produced it so a new session never inherits a stale count.
   private agentDepth: Map<ToolId, { sessionId?: string; depth: number }> = new Map();
+  // Replay buffer for the launch gap. The bridge HTTP server listens before the
+  // app is `ready`, but the timeline (the only subscriber that persists events)
+  // boots in a deferred stage so the settings window can paint first. Events
+  // that arrive in between are kept here until `drainPending()` hands them to
+  // the timeline once, after which buffering stops for good.
+  private pending: NormalizedEvent[] | null = [];
+  private static readonly MAX_PENDING = 500;
 
   public updateStatus(toolId: ToolId, state: AgentState, details: any) {
     const current = this.statuses.get(toolId);
@@ -72,11 +79,26 @@ export class StatusStateManager {
       },
     };
     setImmediate(() => {
+      if (this.pending) {
+        this.pending.push(eventPayload);
+        if (this.pending.length > StatusStateManager.MAX_PENDING) this.pending.shift();
+      }
       for (const listener of this.eventListeners) {
         try { listener(eventPayload); }
         catch (e) { logger.warn('[StateManager] event listener threw:', e); }
       }
     });
+  }
+
+  /**
+   * Hand over every event buffered since construction, oldest first, and stop
+   * buffering. Meant to be called exactly once, by the timeline right after it
+   * subscribes; later calls return an empty array.
+   */
+  public drainPending(): NormalizedEvent[] {
+    const out = this.pending ?? [];
+    this.pending = null;
+    return out;
   }
 
   // Seed a last-known agent PID recovered from the timeline DB at startup so

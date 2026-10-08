@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { BacklogArtifact, BacklogArtifactKind, BacklogAttempt, BacklogCard, agentLabel } from '../../../common/backlog-types';
 import { logger } from '../../../common/logger';
 import { useBacklogStore } from '../../store/useBacklogStore';
-import { appAlert, appConfirm, Button, Modal, Select, Tooltip } from '../Shared';
+import { appAlert, appConfirm, Badge, Button, Eyebrow, Modal, Select, Tooltip } from '../Shared';
 import { DiffView } from './DiffView';
 import { Markdown } from '../Shared';
 
@@ -315,7 +315,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
             >
               ← Back
             </Button>
-            <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>Full report</p>
+            <Eyebrow className='flex-1'>Full report</Eyebrow>
             <Button
               variant='secondary'
               size='sm'
@@ -341,7 +341,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
         <>
           {/* Attempt history */}
           <div className='glass-secondary shrink-0 px-4 py-3'>
-            <p className='text-xs uppercase tracking-widest text-faint font-semibold mb-1.5'>Attempts</p>
+            <Eyebrow className='mb-1.5'>Attempts</Eyebrow>
             {attempts.length === 0 ? (
               <p className='text-sm text-muted'>No runs yet.</p>
             ) : (
@@ -362,9 +362,9 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
                           {OUTCOME_LABEL[a.outcome ?? ''] ?? a.outcome ?? 'running…'}
                         </span>
                         {noChanges && a.outcome !== 'no-changes' && (
-                          <span className='px-1.5 py-0.5 rounded bg-amber-500/15 text-warn text-[10px] font-semibold uppercase tracking-wide'>
+                          <Badge tone='warn' variant='tag' uppercase size='xs' weight='semibold'>
                             no file changes
-                          </span>
+                          </Badge>
                         )}
                         {formatDuration(a) && <span className='text-faint'>{formatDuration(a)}</span>}
                         {a.costUsd != null && <span className='text-faint'>${a.costUsd.toFixed(2)}</span>}
@@ -404,9 +404,9 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
           {artifacts.length > 0 && (
             <div className='glass-secondary shrink-0 p-4 flex flex-col gap-3'>
               <div className='flex items-center gap-2 flex-wrap'>
-                <p className='text-xs uppercase tracking-widest text-faint font-semibold flex-1'>
+                <Eyebrow className='flex-1'>
                   {selected ? KIND_LABEL[selected.kind] : 'Report'}
-                </p>
+                </Eyebrow>
                 {qaVerdict && (
                   <span
                     className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
@@ -489,7 +489,7 @@ export const ArtifactViewer: React.FC<Props> = ({ card, onClose }) => {
           {card.taskType === 'execution' && card.worktreePath && !worktreeGone && (
             <div className='glass-secondary shrink-0 px-4 py-3 flex flex-col gap-2'>
               <div className='flex items-baseline gap-2 min-w-0'>
-                <p className='text-xs uppercase tracking-widest text-faint font-semibold shrink-0'>Worktree</p>
+                <Eyebrow className='shrink-0'>Worktree</Eyebrow>
                 <Tooltip content={card.worktreePath}>
                   <span className='text-xs text-body font-mono truncate flex-1 min-w-0'>
                     {card.worktreePath}

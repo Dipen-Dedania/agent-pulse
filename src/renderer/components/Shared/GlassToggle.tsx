@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { knob } from '../../motion';
 
 /**
  * GlassToggle — the single toggle switch used across every Settings surface.
@@ -54,7 +55,7 @@ export const GlassToggle: React.FC<GlassToggleProps> = ({
         style={{ width: s.knob, height: s.knob }}
         animate={{ x: checked ? s.travel : 0 }}
         whileTap={disabled ? undefined : { scaleX: 1.18 }}
-        transition={{ type: 'spring', stiffness: 550, damping: 28, mass: 0.7 }}
+        transition={knob}
       />
     </button>
   );

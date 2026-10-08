@@ -1,7 +1,7 @@
 import React from 'react';
 import { CodexUsageSnapshot, CodexUsageStatus } from '../../../common/types';
 import { codexWindowLabel, codexWindowPhrase } from '../../../common/codexWindows';
-import { Badge, GlassToggle, Tooltip } from '../Shared';
+import { Badge, Eyebrow, GlassToggle, SettingRow, Tooltip } from '../Shared';
 import {
   UsageNotificationUI,
   UsageProviderPanel,
@@ -149,7 +149,7 @@ export const CodexUsageSection: React.FC<Props> = ({ config, status, onChange, o
       {/* Per-model availability (HTTP poll only — rollouts don't carry it) */}
       {config.enabled && models.length > 0 && (
         <div className='mt-5 flex flex-col gap-2'>
-          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Models</p>
+          <Eyebrow size='md'>Models</Eyebrow>
           <div className='glass-secondary divide-y divide-edge/40'>
             {models.map((m) => (
               <div key={m.model} className='flex items-center gap-3 px-3 py-2.5'>
@@ -181,23 +181,24 @@ export const CodexUsageSection: React.FC<Props> = ({ config, status, onChange, o
       <UsageMessage message={status.message} state={status.state} />
 
       {config.enabled && (
-        <div className='glass-secondary mt-5 p-4 flex items-start gap-3'>
-          <div className='flex-1 min-w-0'>
-            <p className='font-medium text-strong text-sm leading-tight'>
-              Show {codexWindowPhrase(snapshot?.secondary?.windowSeconds, 'secondary')} bar on bubble
-            </p>
-            <p className='text-xs text-muted mt-1'>
+        <SettingRow
+          className='mt-5'
+          title={`Show ${codexWindowPhrase(snapshot?.secondary?.windowSeconds, 'secondary')} bar on bubble`}
+          description={
+            <>
               Hide to keep the bubble focused on the {codexWindowPhrase(snapshot?.primary.windowSeconds, 'primary')} window only.
               Both windows are still tracked.
-            </p>
-          </div>
-          <GlassToggle
-            checked={config.showSecondaryBar}
-            onChange={() => onChange({ showSecondaryBar: !config.showSecondaryBar })}
-            size='md'
-            label='Toggle secondary window bar on bubble'
-          />
-        </div>
+            </>
+          }
+          control={
+            <GlassToggle
+              checked={config.showSecondaryBar}
+              onChange={() => onChange({ showSecondaryBar: !config.showSecondaryBar })}
+              size='md'
+              label='Toggle secondary window bar on bubble'
+            />
+          }
+        />
       )}
 
       {config.enabled && (

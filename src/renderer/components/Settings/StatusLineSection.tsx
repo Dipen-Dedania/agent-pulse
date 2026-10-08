@@ -8,7 +8,7 @@ import {
   StatusLineDetectInfo,
 } from '../../../common/types';
 import { renderStatusLine, DEFAULT_SEGMENT_ICON } from '../../../common/statusline-render';
-import { Select, Badge, GlassToggle, IconButton, Input, Tooltip, Button } from '../Shared';
+import { Select, Badge, Eyebrow, GlassToggle, IconButton, Input, Tooltip, Button } from '../Shared';
 
 interface Props {
   config: StatusLineConfig;
@@ -191,7 +191,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
           {/* Live preview — each config line on its own row; long rows scroll
               horizontally so they never break the panel layout. */}
           <div className='glass-secondary px-4 py-3'>
-            <p className='text-[10px] uppercase tracking-widest text-faint mb-2'>Preview</p>
+            <Eyebrow size='sm' className='mb-2'>Preview</Eyebrow>
             <div className='font-mono text-sm leading-relaxed overflow-x-auto'>
               {preview.lines.map((pl, i) => (
                 <div key={i} className='whitespace-pre w-max'>
@@ -264,7 +264,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
           {/* Segment editor */}
           <div>
             <div className='flex items-center justify-between gap-3 mb-2'>
-              <p className='text-[10px] uppercase tracking-widest text-faint'>Segments</p>
+              <Eyebrow size='sm'>Segments</Eyebrow>
               <div className='flex items-center gap-2'>
                 <button
                   onClick={applyDefaultIcons}
@@ -285,7 +285,7 @@ export const StatusLineSection: React.FC<Props> = ({ config, detect, onChange, o
               {lines.map((row, li) => (
                 <div key={li} className='glass-secondary p-3'>
                   <div className='flex items-center justify-between mb-2'>
-                    <span className='text-[10px] uppercase tracking-widest text-faint'>Line {li + 1}</span>
+                    <Eyebrow size='sm' as='span'>Line {li + 1}</Eyebrow>
                     {lines.length > 1 && (
                       <button
                         onClick={() => removeLine(li)}

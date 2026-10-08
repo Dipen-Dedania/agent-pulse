@@ -15,12 +15,58 @@ function getAppIconPath(): string {
   );
 }
 
+export type SettingsWindowLifecycleEvent =
+  | 'created'
+  | 'did-start-loading'
+  | 'dom-ready'
+  | 'did-finish-load'
+  | 'did-fail-load'
+  | 'ready-to-show';
+
 export class SettingsWindow {
   private window: BrowserWindow | null = null;
+  // Optional observer of the first window's load lifecycle (boot timing logs).
+  public onLifecycle: ((event: SettingsWindowLifecycleEvent) => void) | null = null;
+
+  /**
+   * Invoke `cb` once the window's current document has finished (or failed)
+   * loading; immediately if it already has, or if there is no window to wait
+   * for. Used to start the deferred boot stage only after the settings page
+   * has had its first chance to paint.
+   */
+  public onceLoaded(cb: () => void): void {
+    const win = this.window;
+    if (!win || win.isDestroyed()) { cb(); return; }
+    const wc = win.webContents;
+    if (!wc.isLoading()) { cb(); return; }
+    let fired = false;
+    const once = () => {
+      if (fired) return;
+      fired = true;
+      cb();
+    };
+    wc.once('did-finish-load', once);
+    wc.once('did-fail-load', once);
+  }
+
+  /**
+   * Launch path: create the window hidden so it can load and paint behind the
+   * floating splash. `show()` (called by the reveal gate on the renderer's
+   * first-paint signal, or by any user request) then surfaces it fully drawn.
+   */
+  public createHidden(): void {
+    if (this.window) return;
+    this.create(false);
+  }
+
+  public isVisible(): boolean {
+    return !!this.window && !this.window.isDestroyed() && this.window.isVisible();
+  }
 
   public show() {
     if (this.window) {
-      // Window may be hidden (closed-to-tray) — restore before focusing.
+      // Window may be hidden (closed-to-tray, or still pending its launch
+      // reveal) — restore before focusing.
       if (!this.window.isVisible()) this.window.show();
       if (this.window.isMinimized()) this.window.restore();
       this.window.focus();
@@ -30,11 +76,15 @@ export class SettingsWindow {
       if (process.platform === 'darwin') app.focus({ steal: true });
       return;
     }
+    this.create(true);
+  }
 
+  private create(visible: boolean) {
     const isMac = process.platform === 'darwin';
     this.window = new BrowserWindow({
       width: 900,
       height: 680,
+      show: visible,
       title: 'Agent Pulse Settings',
       icon: getAppIconPath(),
       backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f172a' : '#f8fafc',
@@ -57,6 +107,15 @@ export class SettingsWindow {
         devTools: ENABLE_APP_MENU,
       },
     });
+
+    const emit = (event: SettingsWindowLifecycleEvent) => { this.onLifecycle?.(event); };
+    emit('created');
+    const wc = this.window.webContents;
+    wc.once('did-start-loading', () => emit('did-start-loading'));
+    wc.once('dom-ready', () => emit('dom-ready'));
+    wc.once('did-finish-load', () => emit('did-finish-load'));
+    wc.once('did-fail-load', () => emit('did-fail-load'));
+    this.window.once('ready-to-show', () => emit('ready-to-show'));
 
     // app.isPackaged is the canonical Electron signal: false during `electron .`,
     // true once the app is bundled. Avoids the trap where NODE_ENV is unset (or

@@ -1,8 +1,7 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { AttentionConfig, WebhookTarget } from '../../../common/types';
 import { WebhookRow } from './WebhookRow';
-import { GlassToggle, Button, Tooltip } from '../Shared';
+import { GlassToggle, Button, Card, Eyebrow, SettingRow, Tooltip } from '../Shared';
 
 interface Props {
   config: AttentionConfig;
@@ -13,7 +12,7 @@ interface Props {
 const THRESHOLD_MIN = 5;
 const THRESHOLD_MAX = 300;
 
-// A small pill toggle reused for the boolean rows.
+// A titled toggle row (control on the right) reused for the boolean rows.
 const Toggle: React.FC<{
   checked: boolean;
   onChange: (v: boolean) => void;
@@ -21,19 +20,19 @@ const Toggle: React.FC<{
   hint?: string;
   disabled?: boolean;
 }> = ({ checked, onChange, label, hint, disabled }) => (
-  <div className='flex items-center gap-3'>
-    <GlassToggle
-      checked={checked}
-      onChange={onChange}
-      size='sm'
-      label={label}
-      disabled={disabled}
-    />
-    <span>
-      <span className='text-sm font-medium text-primary'>{label}</span>
-      {hint && <span className='text-xs text-faint ml-2'>{hint}</span>}
-    </span>
-  </div>
+  <SettingRow
+    title={label}
+    description={hint}
+    control={
+      <GlassToggle
+        checked={checked}
+        onChange={onChange}
+        size='md'
+        label={label}
+        disabled={disabled}
+      />
+    }
+  />
 );
 
 export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
@@ -56,18 +55,11 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
   const isLinux = window.electron.platform === 'linux';
 
   return (
-    <motion.section
-      whileHover={{ scale: 1.003 }}
-      transition={{ duration: 0.15, ease: 'easeOut' }}
-      className='glass-primary p-6 flex flex-col gap-7'
+    <Card
+      title='“Needs you” escalation'
+      subtitle='When an agent finishes and waits on you, escalate after a set time — intensify the bubble and ping your chat.'
     >
-      <div>
-        <h2 className='text-lg font-bold text-strong'>“Needs you” escalation</h2>
-        <p className='text-sm text-muted mt-1'>
-          When an agent finishes and waits on you, escalate after a set time — intensify the bubble and ping your chat.
-        </p>
-      </div>
-
+    <div className='flex flex-col gap-7'>
       {/* Master switch */}
       <Toggle
         checked={config.enabled}
@@ -82,7 +74,7 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
           main process hard-disables it (ScreenEdgeManager.SUPPORTED) and this
           UI greys out with an explanatory tooltip. */}
       <div className='flex flex-col gap-3'>
-        <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Ambient screen border</p>
+        <Eyebrow>Ambient screen border</Eyebrow>
         <Tooltip
           content={
             isLinux
@@ -115,7 +107,7 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
       <div className={`flex flex-col gap-7 transition-opacity ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
         {/* Threshold */}
         <div className='flex flex-col gap-3'>
-          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Escalate after</p>
+          <Eyebrow>Escalate after</Eyebrow>
           <div className='flex items-center gap-4'>
             <input
               type='range'
@@ -137,7 +129,7 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
 
         {/* Channels */}
         <div className='flex flex-col gap-3'>
-          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>On escalation</p>
+          <Eyebrow>On escalation</Eyebrow>
           <Toggle
             checked={config.intensifyBubble}
             onChange={(v) => onChange({ intensifyBubble: v })}
@@ -154,7 +146,7 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
 
         {/* Webhooks */}
         <div className='flex flex-col gap-3'>
-          <p className='text-xs uppercase tracking-widest text-faint font-semibold'>Discord / Slack webhooks</p>
+          <Eyebrow>Discord / Slack webhooks</Eyebrow>
           <p className='text-xs text-muted -mt-1'>
             POSTed when escalation fires. Create one in Discord (Server Settings → Integrations → Webhooks) or Slack (Incoming Webhooks).
           </p>
@@ -178,6 +170,7 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
           </Button>
         </div>
       </div>
-    </motion.section>
+    </div>
+    </Card>
   );
 };

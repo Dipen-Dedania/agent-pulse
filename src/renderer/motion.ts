@@ -25,6 +25,19 @@ export const gentle: Transition = { type: 'spring', stiffness: 220, damping: 26,
 /** Named bundle, for `transition={spring.smooth}` call sites that prefer it. */
 export const spring = { snappy, smooth, gentle } as const;
 
+/** Quick opacity-only fade — scrims, quick swaps. Not a spring, so it is kept
+ * out of {@link spring} (that bundle is springs only). */
+export const fadeQuick: Transition = { duration: 0.15 };
+
+/** Pop — checkmark / badge / step-dot pop. A touch more overshoot than
+ * {@link snappy}, for a single element announcing itself rather than sliding. */
+export const pop: Transition = { type: 'spring', stiffness: 500, damping: 22 };
+
+/** Toggle knob spring — the exact physics `GlassToggle` slides its knob with,
+ * lifted here so the primitive references the vocabulary instead of owning
+ * its own numbers. */
+export const knob: Transition = { type: 'spring', stiffness: 550, damping: 28, mass: 0.7 };
+
 /** Press "give" — a small scale-down on tap, spring back on release. */
 export const press = {
   whileTap: { scale: 0.97 },

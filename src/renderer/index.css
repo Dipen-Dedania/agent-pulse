@@ -667,3 +667,72 @@ input[type='range']:disabled::-webkit-slider-thumb {
 [data-theme='light'] .ap-diff .token.url {
   color: #64748b;
 }
+
+/* ── Animated logo (components/Shared/AnimatedLogo) ─────────────────────────
+   Part classes mirror public/assets/logo.svg and the floating launch splash
+   public/splash.html (a static page in its own window, so it carries its own
+   copy of these keyframes). `data-variant` selects the set:
+   static · alive (heartbeat comet + beat flash + JS-timed blink) · sleep. */
+.ap-logo {
+  display: block;
+  overflow: visible;
+  --beat: 2.6s;
+}
+.ap-logo .lg-head { transform-origin: 470px 600px; }
+.ap-logo .lg-eye { transition: transform 90ms ease-in-out; }
+.ap-logo .lg-eye-l { transform-origin: 365px 440px; }
+.ap-logo .lg-eye-r { transform-origin: 575px 440px; }
+.ap-logo .lg-pupils.is-blink .lg-eye { transform: scaleY(0.08); }
+.ap-logo .lg-eye-glow { opacity: 0.75; transition: opacity 0.4s; }
+.ap-logo .lg-led-glow { opacity: 0.7; transition: opacity 0.4s; }
+.ap-logo .lg-bar-glow { opacity: 0.75; transition: opacity 0.5s; }
+.ap-logo .lg-outline { transition: stroke-dasharray 0.6s ease, opacity 0.4s; }
+.ap-logo .lg-spike { transform-origin: 474px 748px; transition: transform 0.6s ease, opacity 0.4s; }
+.ap-logo .lg-trace,
+.ap-logo .lg-trace-dot { opacity: 0; }
+.ap-logo .lg-fill-l,
+.ap-logo .lg-fill-r { transition: opacity 0.5s; }
+
+/* alive: the comet runs the whole capsule-and-spike loop; the halo flashes
+   each time the lead dot passes the spike. */
+.ap-logo[data-variant='alive'] .lg-outline,
+.ap-logo[data-variant='alive'] .lg-spike { opacity: 0.55; }
+.ap-logo[data-variant='alive'] .lg-trace {
+  opacity: 1;
+  stroke-dasharray: 26 102;
+  animation: lg-trace var(--beat) linear infinite;
+}
+.ap-logo[data-variant='alive'] .lg-trace-dot {
+  opacity: 1;
+  stroke-dasharray: 0.6 127.4;
+  animation: lg-trace-dot var(--beat) linear infinite;
+}
+.ap-logo[data-variant='alive'] .lg-bar-glow { animation: lg-beat var(--beat) linear infinite; }
+
+/* sleep: slit eyes, the dash gap closes so the bar reads as a flat line, the
+   spike collapses onto it, everything dims, the head breathes slowly. */
+.ap-logo[data-variant='sleep'] .lg-eye { transform: scaleY(0.14); }
+.ap-logo[data-variant='sleep'] .lg-eye-glow { opacity: 0.25; }
+.ap-logo[data-variant='sleep'] .lg-led-glow { opacity: 0.12; }
+.ap-logo[data-variant='sleep'] .lg-outline { stroke-dasharray: 432 0 568; }
+.ap-logo[data-variant='sleep'] .lg-spike { transform: scaleY(0.04); }
+.ap-logo[data-variant='sleep'] .lg-bar-glow { opacity: 0.2; }
+.ap-logo[data-variant='sleep'] .lg-fill-l,
+.ap-logo[data-variant='sleep'] .lg-fill-r { opacity: 0.55; }
+.ap-logo[data-variant='sleep'] .lg-head { animation: lg-breathe 4.4s ease-in-out infinite; }
+
+@keyframes lg-trace { from { stroke-dashoffset: 128; } to { stroke-dashoffset: 0; } }
+@keyframes lg-trace-dot { from { stroke-dashoffset: 102; } to { stroke-dashoffset: -26; } }
+@keyframes lg-beat { 0%, 8% { opacity: 0.45; } 20% { opacity: 1; } 48%, 100% { opacity: 0.45; } }
+@keyframes lg-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(4px) scale(1.012); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ap-logo * { animation: none !important; }
+  .ap-logo[data-variant='alive'] .lg-trace,
+  .ap-logo[data-variant='alive'] .lg-trace-dot { opacity: 0; }
+  .ap-logo[data-variant='alive'] .lg-outline,
+  .ap-logo[data-variant='alive'] .lg-spike { opacity: 1; }
+}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { CopilotUsageStatus } from '../../../common/types';
-import { GlassToggle } from '../Shared';
+import { GlassToggle, SettingRow } from '../Shared';
 import {
   UsageNotificationUI,
   UsageProviderPanel,
@@ -93,23 +93,19 @@ export const CopilotUsageSection: React.FC<Props> = ({ config, status, onChange,
       {config.enabled && (
         <>
           {/* Live-quota opt-in with ToS disclosure. */}
-          <div className='glass-secondary mt-6 p-4'>
-            <div className='flex items-start gap-3'>
-              <div className='flex-1 min-w-0'>
-                <p className='font-medium text-strong text-sm leading-tight'>Live quota</p>
-                <p className='text-xs text-muted mt-1'>
-                  Reads your GitHub token from the OS keychain to call an undocumented GitHub
-                  endpoint (used by the VS Code Copilot client). Off by default.
-                </p>
-              </div>
+          <SettingRow
+            className='mt-6'
+            title='Live quota'
+            description='Reads your GitHub token from the OS keychain to call an undocumented GitHub endpoint (used by the VS Code Copilot client). Off by default.'
+            control={
               <GlassToggle
                 checked={config.liveQuota}
                 onChange={() => onChange({ liveQuota: !config.liveQuota })}
                 size='md'
                 label='Toggle Copilot live quota'
               />
-            </div>
-          </div>
+            }
+          />
 
           {config.liveQuota && (
             <>

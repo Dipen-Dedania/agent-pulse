@@ -1,7 +1,7 @@
 import React from 'react';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
-import { AnimatedNumber, Meter } from '../../Shared';
+import { AnimatedNumber, Eyebrow, Meter } from '../../Shared';
 import { useCadence } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, SkeletonLine, formatShortDuration } from './shared';
@@ -29,14 +29,14 @@ export const CadenceCard: React.FC = () => {
         <div className='flex flex-col gap-4'>
           <div className='grid grid-cols-2 gap-3'>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Median think time</p>
+              <Eyebrow size='sm' className='mb-1'>Median think time</Eyebrow>
               <p className='text-xl font-semibold text-primary font-mono tabular-nums'>
                 <AnimatedNumber value={data.overallMedianThinkMs} format={formatShortDuration} />
               </p>
               <p className='text-[11px] text-muted mt-0.5'>between prompts · capped at 5m</p>
             </div>
             <div className='glass-secondary p-3'>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-1'>Prompts / session</p>
+              <Eyebrow size='sm' className='mb-1'>Prompts / session</Eyebrow>
               <p className='text-xl font-semibold text-primary font-mono tabular-nums'>
                 <AnimatedNumber value={data.overallAvgPromptsPerSession} format={(n) => n.toFixed(1)} />
               </p>
@@ -45,7 +45,7 @@ export const CadenceCard: React.FC = () => {
           </div>
 
           <div>
-            <p className='text-[11px] uppercase tracking-wider text-faint mb-2'>Session depth</p>
+            <Eyebrow size='sm' className='mb-2'>Session depth</Eyebrow>
             <div className='flex flex-col gap-1.5'>
               {data.depth.map((d) => (
                 <div key={d.bucket} className='flex items-center gap-2'>
@@ -65,7 +65,7 @@ export const CadenceCard: React.FC = () => {
 
           {data.rows.length > 1 && (
             <div>
-              <p className='text-[11px] uppercase tracking-wider text-faint mb-2'>By tool</p>
+              <Eyebrow size='sm' className='mb-2'>By tool</Eyebrow>
               <div className='flex flex-col gap-1.5'>
                 {data.rows.map((r) => {
                   const meta = TOOL_META[r.toolId as ToolId];

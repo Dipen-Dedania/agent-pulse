@@ -1,9 +1,8 @@
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFileSync } from 'child_process';
 import { ToolId, StatusLineRuntime } from '../../common/types';
-import { resolveAugmentedPath } from '../shell-path';
+import { whichAsync } from './which';
 import { opencodeConfigDir, opencodeDataDirs } from './opencode-paths';
 import { museConfigDir, museWindowsInstallDir } from './muse-paths';
 
@@ -20,18 +19,67 @@ export interface StatusLineRuntimeDetection {
 
 export type DetectionResult = Record<ToolId, ToolDetection>;
 
+/**
+ * Finds which AI coding tools are installed. Each probe tries cheap filesystem
+ * checks first and only falls back to a `where`/`which` lookup when those miss.
+ *
+ * Detection is fully asynchronous: the PATH lookups run as child processes in
+ * parallel and never block the main thread (they used to run back to back via
+ * execFileSync inside the `ready` handler). Concurrent callers share a single
+ * in-flight run, and the result is kept until `invalidate()` so the launch
+ * path, the Hooks tab and secret-file sync don't each spawn their own set.
+ */
 export class ToolDetector {
-  public async detectAll(): Promise<DetectionResult> {
+  private inflight: Promise<DetectionResult> | null = null;
+  private last: DetectionResult | null = null;
+
+  public detectAll(): Promise<DetectionResult> {
+    if (this.last) return Promise.resolve(this.last);
+    if (this.inflight) return this.inflight;
+    this.inflight = this.runDetectAll()
+      .then((result) => {
+        this.last = result;
+        return result;
+      })
+      .finally(() => {
+        this.inflight = null;
+      });
+    return this.inflight;
+  }
+
+  /** Forget the cached result so the next `detectAll()` probes again. */
+  public invalidate(): void {
+    this.last = null;
+  }
+
+  /** The most recent completed result, if any (never triggers a run). */
+  public lastResult(): DetectionResult | null {
+    return this.last;
+  }
+
+  private async runDetectAll(): Promise<DetectionResult> {
+    const [claudeCode, cursor, vscodeCopilot, openaiCodex, kiro, antigravityCli, grok, opencode, museCode] =
+      await Promise.all([
+        this.detectClaudeCode(),
+        this.detectCursor(),
+        this.detectVSCodeCopilot(),
+        this.detectOpenAICodex(),
+        this.detectKiro(),
+        this.detectAntigravityCli(),
+        this.detectGrok(),
+        this.detectOpencode(),
+        this.detectMuseCode(),
+      ]);
     return {
-      'claude-code': this.detectClaudeCode(),
-      'cursor': this.detectCursor(),
-      'vscode-copilot': this.detectVSCodeCopilot(),
-      'openai-codex': this.detectOpenAICodex(),
-      'kiro': this.detectKiro(),
-      'antigravity-cli': this.detectAntigravityCli(),
-      'grok': this.detectGrok(),
-      'opencode': this.detectOpencode(),
-      'muse-code': this.detectMuseCode(),
+      'claude-code': claudeCode,
+      'cursor': cursor,
+      'vscode-copilot': vscodeCopilot,
+      'openai-codex': openaiCodex,
+      'kiro': kiro,
+      'antigravity-cli': antigravityCli,
+      'grok': grok,
+      'opencode': opencode,
+      'muse-code': museCode,
     };
   }
 
@@ -39,22 +87,12 @@ export class ToolDetector {
     return paths.find((p) => existsSync(p));
   }
 
-  private whichCommand(cmd: string): string | undefined {
-    // execFile (not exec) so `cmd` is never spliced into a shell command line —
-    // keeps us safe if a future caller ever passes user input here. Look up
-    // against the augmented login-shell PATH: a GUI-launched app's PATH omits
-    // ~/.local/bin, Homebrew, nvm, etc. where these CLIs are usually installed.
-    const lookup = process.platform === 'win32' ? 'where' : 'which';
-    const env = { ...process.env, PATH: resolveAugmentedPath() };
-    try {
-      const out = execFileSync(lookup, [cmd], { stdio: ['ignore', 'pipe', 'ignore'], env })
-        .toString()
-        .trim()
-        .split(/\r?\n/)[0];
-      return out || undefined;
-    } catch {
-      return undefined;
-    }
+  // `which`/`where` against the augmented login-shell PATH: a GUI-launched
+  // app's PATH omits ~/.local/bin, Homebrew, nvm, etc. where these CLIs are
+  // usually installed. Async so a miss (which is the common case for tools the
+  // user doesn't have) never stalls the main thread.
+  private whichCommand(cmd: string): Promise<string | undefined> {
+    return whichAsync(cmd);
   }
 
   // Find the best script runtime for the Claude Code status line. Claude Code
@@ -63,33 +101,33 @@ export class ToolDetector {
   // PATH-resolution gap between a GUI-launched app and the terminal. Probe in
   // preference order: node (matches our stack) → python3/python → powershell
   // (Windows-only fallback, always present there).
-  public detectStatusLineRuntime(): StatusLineRuntimeDetection | null {
-    const node = this.whichCommand('node');
+  public async detectStatusLineRuntime(): Promise<StatusLineRuntimeDetection | null> {
+    const node = await this.whichCommand('node');
     if (node) return { runtime: 'node', binPath: node };
 
-    const py3 = this.whichCommand('python3');
+    const py3 = await this.whichCommand('python3');
     if (py3) return { runtime: 'python', binPath: py3 };
-    const py = this.whichCommand('python');
+    const py = await this.whichCommand('python');
     if (py) return { runtime: 'python', binPath: py };
 
     if (process.platform === 'win32') {
-      const pwsh = this.whichCommand('powershell');
+      const pwsh = await this.whichCommand('powershell');
       if (pwsh) return { runtime: 'powershell', binPath: pwsh };
     }
     return null;
   }
 
-  private detectClaudeCode(): ToolDetection {
+  private async detectClaudeCode(): Promise<ToolDetection> {
     const home = os.homedir();
     const configDir = path.join(home, '.claude');
     if (existsSync(configDir)) return { installed: true, location: configDir };
 
-    const cliPath = this.whichCommand('claude');
+    const cliPath = await this.whichCommand('claude');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }
 
-  private detectCursor(): ToolDetection {
+  private async detectCursor(): Promise<ToolDetection> {
     const home = os.homedir();
     const candidates =
       process.platform === 'win32'
@@ -101,7 +139,7 @@ export class ToolDetector {
     const found = this.firstExisting(candidates);
     if (found) return { installed: true, location: found };
 
-    const cliPath = this.whichCommand('cursor');
+    const cliPath = await this.whichCommand('cursor');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }
@@ -126,7 +164,7 @@ export class ToolDetector {
     return installDirs.map((d) => path.join(d, 'Cursor.exe'));
   }
 
-  private detectVSCodeCopilot(): ToolDetection {
+  private async detectVSCodeCopilot(): Promise<ToolDetection> {
     // GitHub Copilot lives in three possible places depending on VS Code version:
     //   1. Legacy: `~/.vscode/extensions/github.copilot*` (older marketplace installs)
     //   2. Built-in: VS Code globalStorage holds `github.copilot-chat` data even when
@@ -134,7 +172,6 @@ export class ToolDetector {
     //   3. CLI-only: `~/.copilot/` from `copilot` CLI installs.
     // Probe all of them so the card doesn't read "Not installed" when the user has it.
     const home = os.homedir();
-    const { readdirSync } = require('fs');
 
     // 1. Legacy marketplace install (VS Code + Insiders)
     const extensionDirs = [
@@ -164,7 +201,7 @@ export class ToolDetector {
     // 3. Copilot CLI
     const cliConfig = path.join(home, '.copilot');
     if (existsSync(cliConfig)) return { installed: true, location: cliConfig };
-    const cliPath = this.whichCommand('copilot');
+    const cliPath = await this.whichCommand('copilot');
     if (cliPath) return { installed: true, location: cliPath };
 
     return { installed: false };
@@ -190,17 +227,17 @@ export class ToolDetector {
     ];
   }
 
-  private detectOpenAICodex(): ToolDetection {
+  private async detectOpenAICodex(): Promise<ToolDetection> {
     const home = os.homedir();
     const configDir = path.join(home, '.codex');
     if (existsSync(configDir)) return { installed: true, location: configDir };
 
-    const cliPath = this.whichCommand('codex');
+    const cliPath = await this.whichCommand('codex');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }
 
-  private detectKiro(): ToolDetection {
+  private async detectKiro(): Promise<ToolDetection> {
     const home = os.homedir();
     const candidates =
       process.platform === 'win32'
@@ -212,24 +249,24 @@ export class ToolDetector {
     const found = this.firstExisting(candidates);
     if (found) return { installed: true, location: found };
 
-    const cliPath = this.whichCommand('kiro');
+    const cliPath = await this.whichCommand('kiro');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }
 
-  private detectGrok(): ToolDetection {
+  private async detectGrok(): Promise<ToolDetection> {
     // Grok stores its config under ~/.grok (overridable via GROK_HOME). Prefer
     // that dir; fall back to a `grok` binary on PATH for CLI-only installs.
     const home = os.homedir();
     const configDir = process.env['GROK_HOME'] || path.join(home, '.grok');
     if (existsSync(configDir)) return { installed: true, location: configDir };
 
-    const cliPath = this.whichCommand('grok');
+    const cliPath = await this.whichCommand('grok');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }
 
-  private detectOpencode(): ToolDetection {
+  private async detectOpencode(): Promise<ToolDetection> {
     // OpenCode keeps CONFIG under ~/.config/opencode and DATA under
     // ~/.local/share/opencode — on every platform including Windows (verified
     // on 1.18.18; it does not use %APPDATA%). OPENCODE_CONFIG may point the
@@ -244,12 +281,12 @@ export class ToolDetector {
     const dataDir = this.firstExisting(opencodeDataDirs());
     if (dataDir) return { installed: true, location: dataDir };
 
-    const cliPath = this.whichCommand('opencode');
+    const cliPath = await this.whichCommand('opencode');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }
 
-  private detectMuseCode(): ToolDetection {
+  private async detectMuseCode(): Promise<ToolDetection> {
     // Muse Code keeps its config under $XDG_CONFIG_HOME/muse or ~/.config/muse
     // on every platform (verified on 1.4.1 — no %APPDATA%). A fresh native
     // Windows install has no config dir until first login, so also probe the
@@ -265,12 +302,12 @@ export class ToolDetector {
       if (existsSync(launcher)) return { installed: true, location: launcher };
     }
 
-    const cliPath = this.whichCommand('muse');
+    const cliPath = await this.whichCommand('muse');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }
 
-  private detectAntigravityCli(): ToolDetection {
+  private async detectAntigravityCli(): Promise<ToolDetection> {
     // Antigravity CLI (agy) nests its config dir inside the legacy `.gemini`
     // directory at `~/.gemini/antigravity-cli/` rather than its own top-level
     // dot dir. Probe that first, then fall back to PATH lookup for the binary.
@@ -278,7 +315,7 @@ export class ToolDetector {
     const configDir = path.join(home, '.gemini', 'antigravity-cli');
     if (existsSync(configDir)) return { installed: true, location: configDir };
 
-    const cliPath = this.whichCommand('agy');
+    const cliPath = await this.whichCommand('agy');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }

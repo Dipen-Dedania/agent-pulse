@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Tooltip } from '../Shared';
+import { Segmented, SegmentedOption } from '../Shared';
 import { AppearanceConfig, ThemeMode } from '../../../common/types';
 
 const SunIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -20,10 +20,12 @@ const MonitorIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
-const THEME_OPTIONS: { value: ThemeMode; Icon: React.FC<{ className?: string }>; label: string }[] = [
-  { value: 'light', Icon: SunIcon, label: 'Light' },
-  { value: 'dark', Icon: MoonIcon, label: 'Dark' },
-  { value: 'auto', Icon: MonitorIcon, label: 'Auto' },
+// Icon-only options — `hint` is both the hover tooltip and the accessible name
+// (the Windows UI tree and tests key off these exact strings).
+const THEME_OPTIONS: SegmentedOption[] = [
+  { value: 'light', icon: <SunIcon />, hint: 'Light theme' },
+  { value: 'dark', icon: <MoonIcon />, hint: 'Dark theme' },
+  { value: 'auto', icon: <MonitorIcon />, hint: 'Auto theme' },
 ];
 
 /**
@@ -56,23 +58,13 @@ export const ThemeIconToggle: React.FC = () => {
   };
 
   return (
-    <div className='glass-secondary inline-flex gap-0.5 p-0.5 shrink-0'>
-      {THEME_OPTIONS.map(({ value, Icon, label }) => (
-        <Tooltip key={value} content={label}>
-          <button
-            onClick={() => handleTheme(value)}
-            aria-label={`${label} theme`}
-            aria-pressed={theme === value}
-            className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
-              theme === value
-                ? 'bg-blue-600 text-white shadow'
-                : 'text-muted hover:text-strong hover:bg-control/40'
-            }`}
-          >
-            <Icon className='w-4 h-4' />
-          </button>
-        </Tooltip>
-      ))}
-    </div>
+    <Segmented
+      size='sm'
+      ariaLabel='Theme'
+      className='shrink-0'
+      options={THEME_OPTIONS}
+      value={theme}
+      onChange={(v) => handleTheme(v as ThemeMode)}
+    />
   );
 };

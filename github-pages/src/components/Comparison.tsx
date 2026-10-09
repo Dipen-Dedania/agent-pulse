@@ -6,7 +6,7 @@
  */
 import { comparisonRows, competitors, type Cell } from '../data/comparison';
 
-function CellValue({ value, emphasis }: { value: Cell; emphasis?: boolean }) {
+export function CellValue({ value, emphasis }: { value: Cell; emphasis?: boolean }) {
   if (value === true) {
     return (
       <span

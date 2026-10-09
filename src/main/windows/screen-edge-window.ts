@@ -1,11 +1,60 @@
-import { BrowserWindow, screen, app, ipcMain, Display } from 'electron';
+import { BrowserWindow, screen, app, ipcMain, powerMonitor, Display } from 'electron';
 import path from 'path';
 import { logger } from '../../common/logger';
 import { AgentState, AttentionConfig, NormalizedEvent, ToolId } from '../../common/types';
+import { EdgeCorner, EdgeGeometry, EdgeNotch, ScreenEdgePayload, previewMs } from '../../common/screenEdge';
 import { StatusStateManager } from '../bridge/state-manager';
 
 export interface ScreenEdgeDeps {
   stateManager: StatusStateManager;
+}
+
+type DisplayShape = Pick<Display, 'bounds' | 'workArea' | 'internal'>;
+
+// Menu bar height (DIP) above which a built-in Mac display is assumed to have a
+// camera notch: notched MacBooks reserve ~37pt, every other Mac ~24pt. Electron
+// exposes no notch API (NSScreen.safeAreaInsets isn't surfaced), so this is a
+// heuristic. An auto-hidden menu bar reads as 0 and falls back to the capsule.
+const NOTCH_MENU_BAR_MIN = 32;
+// Notch width relative to its height. The physical cut-out is about 5x as wide
+// as it is tall across the 14"/16" models; tune on hardware if it drifts.
+const NOTCH_ASPECT = 5.2;
+
+/**
+ * The camera notch on this display, or null. Only the built-in screen of a
+ * notched MacBook qualifies — external monitors, Windows and older Macs get
+ * the top-centre capsule instead.
+ */
+export function detectNotch(d: DisplayShape, platform: NodeJS.Platform = process.platform): EdgeNotch | null {
+  if (platform !== 'darwin' || !d.internal) return null;
+  const menuBar = d.workArea.y - d.bounds.y;
+  if (menuBar < NOTCH_MENU_BAR_MIN) return null;
+  return { width: Math.round(menuBar * NOTCH_ASPECT), height: menuBar };
+}
+
+/**
+ * The overlay corner nearest the tray, where a comet without a notch lands.
+ * macOS: top-right, under the menu bar status icons. Windows: the tray sits at
+ * the far end of the taskbar, so a bottom or right taskbar lands bottom-right,
+ * a top taskbar top-right, a left taskbar bottom-left. The taskbar side is
+ * whichever edge `workArea` gives up against `bounds`; an auto-hidden taskbar
+ * reserves nothing and falls back to the default bottom-right.
+ */
+export function trayCorner(d: DisplayShape, platform: NodeJS.Platform = process.platform): EdgeCorner {
+  if (platform === 'darwin') return 'tr';
+  const { bounds: b, workArea: w } = d;
+  const bottom = b.y + b.height - (w.y + w.height);
+  const top = w.y - b.y;
+  const right = b.x + b.width - (w.x + w.width);
+  const left = w.x - b.x;
+  const most = Math.max(bottom, top, right, left);
+  if (most <= 0 || most === bottom || most === right) return 'br';
+  return most === top ? 'tr' : 'bl';
+}
+
+/** Rounded screen corners: built-in Mac panels have them, everything else is square. */
+export function displayCornerRadius(d: DisplayShape, platform: NodeJS.Platform = process.platform): number {
+  return platform === 'darwin' && d.internal ? 10 : 0;
 }
 
 /**
@@ -35,23 +84,29 @@ export class ScreenEdgeManager {
   private readonly stateManager: StatusStateManager;
   private config: AttentionConfig;
   private windows: BrowserWindow[] = [];
+  // What each overlay window draws around — its notch (if any) and corners.
+  private readonly geometry = new Map<BrowserWindow, EdgeGeometry>();
+  // Screen locked / system asleep: nobody can see the border, so the comet
+  // stops animating (the lit state itself is kept).
+  private paused = false;
   private readonly waiting = new Set<ToolId>();
   private readonly lastState = new Map<ToolId, AgentState>();
   private unsubscribe: (() => void) | null = null;
   private hideTimer: ReturnType<typeof setTimeout> | null = null;
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
+  // A Preview that had to create its windows: its timer starts on the first
+  // renderer `ready`, so the page load doesn't eat into the comet's lap.
+  private previewAwaitingReady = false;
   private preview = false;
   private active = false;
   private stopped = true;
-
-  // How long a manual "Preview" flash stays lit (from Settings). Long enough to
-  // catch a full breath of the pulse.
-  private static readonly PREVIEW_MS = 4000;
 
   // Keep the windows shown briefly after deactivation so the renderer's
   // fade-out can play, then hide (not destroy — reuse on the next episode).
   // Must exceed the renderer's exit-fade duration.
   private static readonly FADE_OUT_MS = 600;
+  // Longest a cold-start Preview waits for its page before timing out anyway.
+  private static readonly PREVIEW_LOAD_CAP_MS = 3000;
 
   constructor(config: AttentionConfig, deps: ScreenEdgeDeps) {
     this.config = config;
@@ -65,11 +120,15 @@ export class ScreenEdgeManager {
     screen.on('display-added', this.onDisplaysChanged);
     screen.on('display-removed', this.onDisplaysChanged);
     screen.on('display-metrics-changed', this.onDisplaysChanged);
-    // Each overlay renderer pings this once its `screen-edge:active` listener is
+    // Each overlay renderer pings this once its `screen-edge:state` listener is
     // mounted, and we reply with the current lit-state. This closes the race
     // where a broadcast right after window creation lands before React has
     // subscribed (which made the very first Preview click do nothing).
     ipcMain.on('screen-edge:ready', this.onRendererReady);
+    powerMonitor.on('lock-screen', this.onSleep);
+    powerMonitor.on('suspend', this.onSleep);
+    powerMonitor.on('unlock-screen', this.onWake);
+    powerMonitor.on('resume', this.onWake);
     logger.info(
       `[ScreenEdge] started, enabled=${this.config.screenEdgeGlow}, supported=${ScreenEdgeManager.SUPPORTED}`,
     );
@@ -83,6 +142,11 @@ export class ScreenEdgeManager {
     screen.removeListener('display-removed', this.onDisplaysChanged);
     screen.removeListener('display-metrics-changed', this.onDisplaysChanged);
     ipcMain.removeListener('screen-edge:ready', this.onRendererReady);
+    powerMonitor.removeListener('lock-screen', this.onSleep);
+    powerMonitor.removeListener('suspend', this.onSleep);
+    powerMonitor.removeListener('unlock-screen', this.onWake);
+    powerMonitor.removeListener('resume', this.onWake);
+    this.paused = false;
     this.clearHideTimer();
     this.clearPreviewTimer();
     this.preview = false;
@@ -93,8 +157,14 @@ export class ScreenEdgeManager {
   }
 
   public applyConfig(config: AttentionConfig) {
+    const styleChanged = config.screenEdgeStyle !== this.config.screenEdgeStyle;
     this.config = config;
+    // The comet on a notched Mac needs a window over the menu bar, the glow
+    // keeps hugging the work area — so a style switch rebuilds the windows.
+    if (styleChanged && !this.stopped) this.onDisplaysChanged();
     this.refresh();
+    // Colour / speed / style changes reach an already-lit border immediately.
+    if (this.active) this.broadcast();
   }
 
   // Manually flash the frame for a few seconds — the Settings "Preview" button.
@@ -103,13 +173,28 @@ export class ScreenEdgeManager {
   public previewFlash() {
     if (this.stopped || !ScreenEdgeManager.SUPPORTED) return;
     this.clearPreviewTimer();
+    const coldStart = this.windows.length === 0;
     this.preview = true;
     this.refresh();
+    const ms = previewMs(this.config.screenEdgeStyle, this.config.screenEdgeSpeed);
+    if (coldStart) {
+      // Fresh windows still have to load the page before the lap can start.
+      // Cap the wait in case no renderer ever reports ready.
+      this.previewAwaitingReady = true;
+      this.armPreviewTimer(ms + ScreenEdgeManager.PREVIEW_LOAD_CAP_MS);
+    } else {
+      this.armPreviewTimer(ms);
+    }
+  }
+
+  private armPreviewTimer(ms: number) {
+    if (this.previewTimer) clearTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => {
       this.previewTimer = null;
+      this.previewAwaitingReady = false;
       this.preview = false;
       this.refresh();
-    }, ScreenEdgeManager.PREVIEW_MS);
+    }, ms);
     this.previewTimer.unref?.();
   }
 
@@ -148,10 +233,10 @@ export class ScreenEdgeManager {
       this.clearHideTimer();
       this.ensureWindows();
       this.showWindows();
-      this.broadcast(true);
+      this.broadcast();
     } else {
       // Fade out in the renderer, then hide (keep the windows for reuse).
-      this.broadcast(false);
+      this.broadcast();
       this.clearHideTimer();
       this.hideTimer = setTimeout(() => {
         this.hideTimer = null;
@@ -181,13 +266,36 @@ export class ScreenEdgeManager {
   // An overlay renderer just mounted its listener — hand it the current state.
   private onRendererReady = (event: Electron.IpcMainEvent) => {
     if (event.sender.isDestroyed()) return;
-    event.sender.send('screen-edge:active', this.active);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    event.sender.send('screen-edge:state', this.payloadFor(win));
+    // The first overlay is up and starting its lap: time the Preview from now.
+    if (this.previewAwaitingReady && this.preview) {
+      this.previewAwaitingReady = false;
+      this.armPreviewTimer(previewMs(this.config.screenEdgeStyle, this.config.screenEdgeSpeed));
+    }
   };
+
+  private onSleep = () => { this.paused = true; if (this.active) this.broadcast(); };
+  private onWake = () => { this.paused = false; if (this.active) this.broadcast(); };
+
+  private payloadFor(win: BrowserWindow | null): ScreenEdgePayload {
+    return {
+      active: this.active,
+      paused: this.paused,
+      style: this.config.screenEdgeStyle,
+      color: this.config.screenEdgeColor,
+      speed: this.config.screenEdgeSpeed,
+      geometry: (win && this.geometry.get(win)) ?? { notch: null, cornerRadius: 0, trayCorner: 'br' },
+    };
+  }
 
   private createWindow(display: Display): BrowserWindow {
     // `workArea` (not `bounds`) so the border hugs the *usable* screen — its
     // bottom edge sits above the taskbar instead of being hidden behind it.
-    const area = display.workArea;
+    // Exception: the comet on a notched Mac covers the whole display so it can
+    // trace the notch, which sits inside the menu bar strip workArea excludes.
+    const notch = this.config.screenEdgeStyle === 'comet' ? detectNotch(display) : null;
+    const area = notch ? display.bounds : display.workArea;
 
     const win = new BrowserWindow({
       x: area.x, y: area.y, width: area.width, height: area.height,
@@ -203,6 +311,8 @@ export class ScreenEdgeManager {
       fullscreenable: false,
       focusable: false,
       hasShadow: false,
+      // Let macOS place the window over the menu bar instead of clamping it below.
+      enableLargerThanScreen: Boolean(notch),
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -212,6 +322,9 @@ export class ScreenEdgeManager {
 
     // Pure visual frame — never intercept the mouse, even over the border.
     win.setIgnoreMouseEvents(true);
+    // Above the menu bar, so the notch outline isn't drawn underneath it.
+    if (notch) win.setAlwaysOnTop(true, 'screen-saver');
+    this.geometry.set(win, { notch, cornerRadius: displayCornerRadius(display), trayCorner: trayCorner(display) });
 
     // Re-apply the bounds once the window is realised on its target display.
     // On Windows a window created for a monitor with a different DPI scale
@@ -223,6 +336,7 @@ export class ScreenEdgeManager {
 
     win.on('closed', () => {
       this.windows = this.windows.filter((w) => w !== win);
+      this.geometry.delete(win);
     });
 
     if (!app.isPackaged) {
@@ -256,9 +370,9 @@ export class ScreenEdgeManager {
     this.windows = [];
   }
 
-  private broadcast(active: boolean) {
+  private broadcast() {
     for (const w of this.windows) {
-      if (!w.isDestroyed()) w.webContents.send('screen-edge:active', active);
+      if (!w.isDestroyed()) w.webContents.send('screen-edge:state', this.payloadFor(w));
     }
   }
 
@@ -268,5 +382,6 @@ export class ScreenEdgeManager {
 
   private clearPreviewTimer() {
     if (this.previewTimer) { clearTimeout(this.previewTimer); this.previewTimer = null; }
+    this.previewAwaitingReady = false;
   }
 }

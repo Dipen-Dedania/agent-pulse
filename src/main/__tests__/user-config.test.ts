@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { migrateBacklogPopulation, migrateBubble, migrateCodexStatusLine, migrateDetectionCache, migrateMascots, migrateScheduler, SchedulerConfig } from '../user-config';
+import { migrateAttention, migrateBacklogPopulation, migrateBubble, migrateCodexStatusLine, migrateDetectionCache, migrateMascots, migrateScheduler, SchedulerConfig } from '../user-config';
 
 describe('migrateDetectionCache', () => {
   it('returns null for missing, non-object, or structurally broken input', () => {
@@ -204,5 +204,22 @@ describe('migrateMascots', () => {
     const out = migrateBubble({ mascotClaudeCode: true }) as unknown as Record<string, unknown>;
     expect(out.mascotClaudeCode).toBeUndefined();
     expect(out.mascots).toEqual({ 'claude-code': 'clawd' });
+  });
+});
+
+describe('migrateAttention — ambient screen border', () => {
+  it('defaults a pre-style config to the original blue glow', () => {
+    const out = migrateAttention({ enabled: true, screenEdgeGlow: true });
+    expect(out.screenEdgeGlow).toBe(true);
+    expect(out.screenEdgeStyle).toBe('glow');
+    expect(out.screenEdgeColor).toBe('blue');
+    expect(out.screenEdgeSpeed).toBe('normal');
+  });
+
+  it('keeps valid choices and drops unknown ones', () => {
+    const ok = migrateAttention({ screenEdgeStyle: 'comet', screenEdgeColor: 'pink', screenEdgeSpeed: 'fast' });
+    expect([ok.screenEdgeStyle, ok.screenEdgeColor, ok.screenEdgeSpeed]).toEqual(['comet', 'pink', 'fast']);
+    const bad = migrateAttention({ screenEdgeStyle: 'rainbow', screenEdgeColor: 42, screenEdgeSpeed: null });
+    expect([bad.screenEdgeStyle, bad.screenEdgeColor, bad.screenEdgeSpeed]).toEqual(['glow', 'blue', 'normal']);
   });
 });

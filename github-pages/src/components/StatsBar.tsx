@@ -23,7 +23,7 @@ export default function StatsBar() {
 
   const stats: Stat[] = [
     { number: starNumber, label: 'stars on GitHub — join us', href: `${REPO_URL}/stargazers` },
-    { number: '6 tools', label: 'one unified status bridge' },
+    { number: '9 tools', label: 'one unified status bridge' },
     { number: '0 bytes', label: 'sent to any server — fully local' },
     { number: '1 click', label: 'to install or remove every hook' },
   ];

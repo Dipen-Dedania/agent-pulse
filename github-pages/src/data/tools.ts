@@ -7,7 +7,7 @@ export interface Tool {
   blurb: string;
 }
 
-const asset = (file: string) => `${import.meta.env.BASE_URL}assets/${file}`;
+export const asset = (file: string) => `${import.meta.env.BASE_URL}assets/${file}`;
 
 export const LOGO_URL = asset('logo-transparent.png');
 
@@ -47,5 +47,23 @@ export const tools: Tool[] = [
     logo: asset('antigravity.png'),
     id: 'antigravity',
     blurb: 'CLI + IDE state with per-model quota meters.',
+  },
+  {
+    name: 'Grok',
+    logo: asset('grok.png'),
+    id: 'grok',
+    blurb: 'CLI/TUI state via a command hook, plus per-turn token usage from its session log.',
+  },
+  {
+    name: 'OpenCode',
+    logo: asset('opencode.png'),
+    id: 'opencode',
+    blurb: 'An in-process plugin reports state and real token counts; guardrails can abort denied tool calls.',
+  },
+  {
+    name: 'Muse Code',
+    logo: asset('muse.svg'),
+    id: 'muse-code',
+    blurb: 'Settings-merged command hooks drive state; guardrail denies abort the tool call.',
   },
 ];

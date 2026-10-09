@@ -1,116 +1,44 @@
+import { useEffect, useState } from 'react';
 import { tools } from '../data/tools';
+import LiveCharacter, { FallbackOrb } from './LiveDemo/LiveCharacter';
+import {
+  STATE_META,
+  prefersReducedMotion,
+  type AgentState,
+  type Character,
+} from './LiveDemo/stateMeta';
 
-// tools[0] = Claude Code, tools[1] = Cursor, tools[3] = OpenAI Codex
-
-interface BubbleRowProps {
+interface Row {
   tool: { name: string; logo: string };
-  state: 'working' | 'waiting' | 'idle-active';
+  /** The tool's home mascot in the app (see MASCOT_HOME); omit for the plain logo bubble. */
+  character?: Character;
+  /** States this row cycles through, offset per row so they never sync up. */
+  states: AgentState[];
 }
 
-/**
- * Status dot, label, and bubble fill per state — mirrors the light-mode
- * palette in src/common/stateColors.ts (the app renders the bubble as a
- * radial gradient of the state color).
- */
-const STATE_META = {
-  working: {
-    label: 'Working',
-    dotColor: '#16a34a',
-    fill: 'radial-gradient(circle, rgba(22,163,74,0.45) 0%, rgba(128,128,128,0.06) 100%)',
-  },
-  waiting: {
-    label: 'Waiting',
-    dotColor: '#2563eb',
-    fill: 'radial-gradient(circle, rgba(37,99,235,0.45) 0%, rgba(128,128,128,0.06) 100%)',
-  },
-  'idle-active': {
-    label: 'Idle (active)',
-    dotColor: '#d97706',
-    fill: 'radial-gradient(circle, rgba(217,119,6,0.4) 0%, rgba(128,128,128,0.06) 100%)',
-  },
-} as const;
+// tools[0] = Claude Code, tools[1] = Cursor, tools[3] = OpenAI Codex
+const ROWS: Row[] = [
+  { tool: tools[0], character: 'clawd', states: ['working', 'waiting', 'working', 'idle-active'] },
+  { tool: tools[1], character: 'knight', states: ['waiting', 'working', 'idle-active', 'working'] },
+  { tool: tools[3], states: ['idle-active', 'idle', 'working', 'waiting'] },
+];
+
+const STEP_MS = 3600;
 
 /** Single bubble row inside the mockup card */
-function BubbleRow({ tool, state }: BubbleRowProps) {
-  const { label, dotColor, fill } = STATE_META[state];
+function BubbleRow({ row, tick }: { row: Row; tick: number }) {
+  const state = row.states[tick % row.states.length];
+  const { label, dot } = STATE_META[state];
 
   return (
     <div className="flex items-center gap-4">
-      {/* Circular frosted-glass bubble */}
-      <div
-        className="relative shrink-0"
-        style={{ width: 64, height: 64 }}
-        aria-hidden
-      >
-        {/* Bubble shell */}
-        <div
-          className={[
-            'absolute inset-0 rounded-full',
-            'border border-mist-border',
-            'flex items-center justify-center',
-            // State-specific animation
-            state === 'working'     ? 'animate-pulse-glow' : '',
-            state === 'idle-active' ? 'animate-breathe'    : '',
-          ].join(' ')}
-          style={{ backdropFilter: 'blur(12px)', background: fill }}
-        >
-          <img
-            src={tool.logo}
-            alt=""
-            width={32}
-            height={32}
-            className="object-contain select-none"
-            draggable={false}
-          />
+      {row.character ? (
+        <LiveCharacter character={row.character} state={state} size={72} />
+      ) : (
+        <div className="flex items-center justify-center shrink-0" style={{ width: 72, height: 72 }}>
+          <FallbackOrb state={state} size={72} logo={row.tool.logo} />
         </div>
-
-        {/* Orange notification badge for Waiting state */}
-        {state === 'waiting' && (
-          <span
-            className="absolute -top-0.5 -right-0.5 flex items-center justify-center
-                       w-5 h-5 rounded-full text-paper font-bold"
-            style={{
-              fontSize: 10,
-              lineHeight: 1,
-              background: '#ea580c',
-              boxShadow: '0 1px 4px rgba(234,88,12,0.5)',
-            }}
-            aria-label="Waiting for input"
-          >
-            1
-          </span>
-        )}
-
-        {/* Orbiting particles for Working state — 3 dots at staggered delays */}
-        {state === 'working' && (
-          <>
-            {[0, 1.1, 2.3].map((delay, i) => (
-              <span
-                key={i}
-                className="pointer-events-none absolute inset-0 flex items-center justify-center animate-orbit"
-                style={{
-                  animationDelay: `${delay}s`,
-                  animationDuration: i === 0 ? '3.5s' : i === 1 ? '4.2s' : '2.9s',
-                }}
-                aria-hidden
-              >
-                <span
-                  className="block rounded-full bg-state-working"
-                  style={{
-                    width: i === 1 ? 5 : 4,
-                    height: i === 1 ? 5 : 4,
-                    opacity: 0.65 - i * 0.1,
-                    // translateX is applied by the orbit keyframe; shift the orbit radius
-                    // slightly per particle via a CSS variable override approach isn't
-                    // available without extra keyframes, so we rely on the default 26px
-                    // from theme.css — subtle stagger via delay/duration is enough.
-                  }}
-                />
-              </span>
-            ))}
-          </>
-        )}
-      </div>
+      )}
 
       {/* Label + status dot */}
       <div className="min-w-0">
@@ -118,18 +46,15 @@ function BubbleRow({ tool, state }: BubbleRowProps) {
           className="text-midnight-navy font-semibold truncate"
           style={{ fontSize: 14, lineHeight: 1.4 }}
         >
-          {tool.name}
+          {row.tool.name}
         </p>
         <span className="flex items-center gap-1.5 mt-0.5">
           <span
-            className="inline-block rounded-full shrink-0"
-            style={{ width: 7, height: 7, background: dotColor }}
+            className="inline-block rounded-full shrink-0 transition-colors duration-300"
+            style={{ width: 7, height: 7, background: dot }}
             aria-hidden
           />
-          <span
-            className="text-slate-blue"
-            style={{ fontSize: 12, lineHeight: 1.5 }}
-          >
+          <span className="text-slate-blue" style={{ fontSize: 12, lineHeight: 1.5 }}>
             {label}
           </span>
         </span>
@@ -139,20 +64,29 @@ function BubbleRow({ tool, state }: BubbleRowProps) {
 }
 
 /**
- * Hero-section product card: vertical stack of 3 CSS-animated glass bubbles.
+ * Hero-section product card: three agents, each shown as its real in-app
+ * mascot acting out a state that changes every few seconds.
  * The entire card gently floats on `animate-float`.
  * Decorative — marked aria-hidden at the top level.
  */
 export default function BubbleMockup() {
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (prefersReducedMotion()) return;
+    const id = window.setInterval(() => setTick((t) => t + 1), STEP_MS);
+    return () => window.clearInterval(id);
+  }, []);
+
   return (
     <div
-      className="animate-float"
+      className="animate-float motion-reduce:animate-none"
       aria-hidden="true"
       // Keep the float transform layer isolated so it doesn't affect layout
       style={{ willChange: 'transform' }}
     >
       <div
-        className="bg-paper rounded-mockup flex flex-col gap-5 p-6"
+        className="bg-paper rounded-mockup flex flex-col gap-3 p-6"
         style={{ boxShadow: 'var(--shadow-sm-2)', minWidth: 280 }}
       >
         {/* Subtle card header */}
@@ -163,9 +97,9 @@ export default function BubbleMockup() {
           Agent Status
         </p>
 
-        <BubbleRow tool={tools[0]} state="working" />
-        <BubbleRow tool={tools[1]} state="waiting" />
-        <BubbleRow tool={tools[3]} state="idle-active" />
+        {ROWS.map((row) => (
+          <BubbleRow key={row.tool.name} row={row} tick={tick} />
+        ))}
 
         {/* Thin divider + footer hint */}
         <div className="border-t border-mist-border pt-3">

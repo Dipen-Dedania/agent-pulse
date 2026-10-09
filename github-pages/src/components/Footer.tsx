@@ -7,6 +7,7 @@
  */
 import { LOGO_URL } from '../data/tools';
 import { REPO_URL, RELEASES_URL, ISSUES_URL, LICENSE_URL } from '../hooks/useLatestRelease';
+import { GROUP_LABELS, homeAnchor, pageLinks, pageUrl, type PageGroup } from '../pages/links';
 
 interface LinkItem {
   label: string;
@@ -23,10 +24,10 @@ const columns: LinkColumn[] = [
   {
     heading: 'Product',
     links: [
-      { label: 'Features', href: '#features' },
-      { label: 'Compare', href: '#comparison' },
-      { label: 'Download', href: '#download' },
-      { label: "What's new", href: '#changelog' },
+      { label: 'Features', href: homeAnchor('features') },
+      { label: 'Compare', href: homeAnchor('comparison') },
+      { label: 'Download', href: homeAnchor('download') },
+      { label: "What's new", href: homeAnchor('changelog') },
       { label: 'Releases ↗', href: RELEASES_URL, external: true },
     ],
   },
@@ -34,11 +35,20 @@ const columns: LinkColumn[] = [
     heading: 'Project',
     links: [
       { label: 'GitHub ↗', href: REPO_URL, external: true },
-      { label: 'Community & press', href: '#community' },
+      { label: 'Community & press', href: homeAnchor('community') },
       { label: 'Issues ↗', href: ISSUES_URL, external: true },
       { label: 'License ↗', href: LICENSE_URL, external: true },
     ],
   },
+  // One column per standalone-page group (Use cases / Compare / Guides).
+  ...(['use-case', 'compare', 'guide'] as PageGroup[])
+    .map((group) => ({
+      heading: GROUP_LABELS[group],
+      links: pageLinks
+        .filter((l) => l.group === group)
+        .map((l) => ({ label: l.label, href: pageUrl(l.slug) })),
+    }))
+    .filter((col) => col.links.length > 0),
   {
     heading: 'Contact',
     links: [

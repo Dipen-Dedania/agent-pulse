@@ -598,11 +598,12 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
     return { attachments };
   });
 
-  // ── Claude Code MCP capture ────────────────────────────────────────────────
-  // Registering the stdio server in ~/.claude.json is what lets a terminal chat
-  // say "add that to my backlog". Status is read fresh each time: the user can
-  // also add/remove the server with `claude mcp`, and an app update moves the
-  // script path out from under a previously written entry.
+  // ── Claude Code / Codex MCP capture ────────────────────────────────────────
+  // Registering the stdio server in ~/.claude.json (and ~/.codex/config.toml
+  // when Codex is installed) is what lets a terminal chat say "add that to my
+  // backlog". Status is read fresh each time: the user can also add/remove the
+  // server with `claude mcp` / `codex mcp`, and an app update moves the script
+  // path out from under a previously written entry.
 
   ipcMain.handle('backlog:mcp-status', (): McpInstallStatus => getMcpInstallStatus());
 

@@ -1,6 +1,6 @@
 # Agent Pulse
 
-> Agent Pulse is a free, open-source (AGPLv3) desktop app for Windows, macOS, and Linux that gives you ambient, glanceable awareness of your AI coding agents. It floats always-on-top frosted-glass status bubbles for Claude Code, Cursor, GitHub Copilot (VS Code), OpenAI Codex, Kiro, and Antigravity — plus subscription usage meters, local analytics, and command guardrails. 100% local: events flow from local hooks to a local bridge (localhost:4242) to a local SQLite database. No telemetry.
+> Agent Pulse is a free, open-source (AGPLv3) desktop app for Windows, macOS, and Linux that gives you ambient, glanceable awareness of your AI coding agents. It floats always-on-top frosted-glass status bubbles for Claude Code, Cursor, GitHub Copilot (VS Code), OpenAI Codex, Kiro, Antigravity, Grok, OpenCode, and Muse Code — plus subscription usage meters, local analytics, and command guardrails. 100% local: events flow from local hooks to a local bridge (localhost:4242) to a local SQLite database. No telemetry.
 
 Key facts:
 
@@ -10,16 +10,17 @@ Key facts:
 - License: AGPLv3 (commercial licensing available — dipen27891@gmail.com)
 - Price: free
 - Platforms: Windows (full auto-update), macOS (manual update), Linux (AppImage)
-- Supported tools: Claude Code, Cursor, GitHub Copilot (VS Code), OpenAI Codex, Kiro, Antigravity (CLI + IDE)
+- Supported tools: Claude Code, Cursor, GitHub Copilot (VS Code), OpenAI Codex, Kiro, Antigravity (CLI + IDE), Grok, OpenCode, Muse Code
 
 ## Features
 
 - **Status bubbles**: each agent gets a draggable, always-on-top glass bubble. Green pulsing glow = working, blue ring + badge = waiting on you (permission or response), calm breathing = idle, red shake = error/dead. Layout survives restarts.
-- **Usage meters**: live meters for Claude Code's 5-hour and 7-day windows, Codex, Cursor's billing cycle, and Antigravity's per-model quotas, with warnings before you hit a cap and nudges when a window is about to reset unused.
+- **Usage meters**: live meters for Claude Code's 5-hour and 7-day windows, Codex, Cursor's billing cycle, GitHub Copilot's monthly quotas, and Antigravity's per-model quotas, with warnings before you hit a cap and nudges when a window is about to reset unused.
 - **Analytics timeline**: a local SQLite timeline with daily digest, GitHub-style activity heatmap, hour-of-day rhythm, tool mix, model usage, and per-project breakdowns. Cost cards show estimated API list prices (clearly labeled estimates, never your real bill).
 - **Guardrails**: block or warn on risky shell commands before they reach an agent (e.g. `rm -rf /`, force-pushes to protected branches, or custom regex rules). Every trigger is logged.
 - **Claude Code status line**: model, context bar, git branch, and session cost at the bottom of every turn; one-click install with backup of existing config.
-- **Discord & Slack alerts**: get pinged when an agent waits past your threshold.
+- **"Needs you" alerts**: a sound and a screen-edge glow when an agent waits on you; after a threshold, an OS notification and Discord/Slack pings.
+- **Backlog**: a Kanban board of tasks Claude Code or Codex run headlessly inside your scheduler windows, with a usage gate that stops new work before the 5-hour window runs dry. Cards can come from GitLab, Jira or Linear issues, or from a Claude Code chat via the bundled MCP server.
 - **Cowork scheduler**: keeps Claude's 5-hour window warm with scheduled micro-pings.
 - **Quiet auto-updates, tray app**: background update checks (never silent installs), single instance, optional launch on startup, closes to tray.
 
@@ -30,6 +31,13 @@ Each supported tool exposes lifecycle hooks. Agent Pulse writes a small hook con
 ## Privacy
 
 All data stays on your machine. The only network calls are the vendors' own usage APIs (using your existing credentials) and the update check. A privacy toggle redacts task summaries in the timeline.
+
+## Guides and comparisons
+
+- [Claude Code usage tracker for Windows](https://dipen-dedania.github.io/agent-pulse/claude-code-usage-tracker-windows/): 5-hour and weekly limit meters on Windows, macOS and Linux
+- [Get notified when Claude Code needs you](https://dipen-dedania.github.io/agent-pulse/claude-code-notification-when-done/): status bubbles, sounds and alerts for permission prompts and finished turns
+- [When does the Claude Code 5-hour limit reset?](https://dipen-dedania.github.io/agent-pulse/claude-code-5-hour-limit-reset/): how the 5-hour and weekly limits work
+- [Agent Pulse vs Tokens 4 Breakfast](https://dipen-dedania.github.io/agent-pulse/tokens-4-breakfast-alternative/): side-by-side comparison
 
 ## Links
 

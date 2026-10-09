@@ -1,7 +1,7 @@
 import React from 'react';
-import { AttentionConfig, WebhookTarget } from '../../../common/types';
+import { AttentionConfig, ScreenEdgeColor, ScreenEdgeSpeed, ScreenEdgeStyle, WebhookTarget } from '../../../common/types';
 import { WebhookRow } from './WebhookRow';
-import { GlassToggle, Button, Card, Eyebrow, SettingRow, Tooltip } from '../Shared';
+import { GlassToggle, Button, Card, Eyebrow, Segmented, SegmentedOption, SettingRow, Tooltip } from '../Shared';
 
 interface Props {
   config: AttentionConfig;
@@ -11,6 +11,26 @@ interface Props {
 // Threshold presets (seconds) offered as quick picks; the slider covers the rest.
 const THRESHOLD_MIN = 5;
 const THRESHOLD_MAX = 300;
+
+// Ambient border options. Dot classes are literal so Tailwind keeps them; they
+// mirror EDGE_PALETTES[*].brand in common/screenEdge.ts.
+const EDGE_STYLE_OPTIONS: SegmentedOption[] = [
+  { value: 'glow', label: 'Glow', hint: 'A soft glow breathes in from every edge.' },
+  { value: 'comet', label: 'Comet', hint: 'A comet laps the screen edge and lands next to the tray (or on the notch of a notched MacBook).' },
+];
+const EDGE_COLOR_OPTIONS: SegmentedOption[] = [
+  { value: 'blue', label: 'Blue', dot: 'bg-[#3b82f6]', hint: 'Status colour for “waiting”' },
+  { value: 'green', label: 'Green', dot: 'bg-[#22c55e]' },
+  { value: 'purple', label: 'Purple', dot: 'bg-[#9b5cf6]' },
+  { value: 'orange', label: 'Orange', dot: 'bg-[#f59e0b]' },
+  { value: 'pink', label: 'Pink', dot: 'bg-[#ec4899]' },
+  { value: 'silver', label: 'Silver', dot: 'bg-[#cbd5e1]' },
+];
+const EDGE_SPEED_OPTIONS: SegmentedOption[] = [
+  { value: 'slow', label: 'Slow' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'fast', label: 'Fast' },
+];
 
 // A titled toggle row (control on the right) reused for the boolean rows.
 const Toggle: React.FC<{
@@ -86,9 +106,46 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
             <Toggle
               checked={!isLinux && config.screenEdgeGlow}
               onChange={(v) => onChange({ screenEdgeGlow: v })}
-              label='Glow the screen edges while waiting'
+              label='Light the screen edges while waiting'
               hint={isLinux ? 'Not available on Linux' : 'Instant · all displays'}
               disabled={isLinux}
+            />
+            <SettingRow
+              title='Style'
+              control={
+                <Segmented
+                  ariaLabel='Border style'
+                  options={EDGE_STYLE_OPTIONS}
+                  value={config.screenEdgeStyle}
+                  onChange={(v) => onChange({ screenEdgeStyle: v as ScreenEdgeStyle })}
+                />
+              }
+            />
+            <SettingRow
+              title='Color'
+              control={
+                <Segmented
+                  ariaLabel='Border color'
+                  size='xs'
+                  wrap
+                  className='justify-end'
+                  options={EDGE_COLOR_OPTIONS}
+                  value={config.screenEdgeColor}
+                  onChange={(v) => onChange({ screenEdgeColor: v as ScreenEdgeColor })}
+                />
+              }
+            />
+            <SettingRow
+              title='Speed'
+              description={config.screenEdgeStyle === 'comet' ? 'How fast the comet laps the screen' : 'How fast the glow breathes'}
+              control={
+                <Segmented
+                  ariaLabel='Border speed'
+                  options={EDGE_SPEED_OPTIONS}
+                  value={config.screenEdgeSpeed}
+                  onChange={(v) => onChange({ screenEdgeSpeed: v as ScreenEdgeSpeed })}
+                />
+              }
             />
             <div className='flex items-center gap-3'>
               <Button
@@ -98,7 +155,11 @@ export const AttentionSection: React.FC<Props> = ({ config, onChange }) => {
               >
                 Preview
               </Button>
-              <span className='text-xs text-faint'>Flashes the blue border for a few seconds.</span>
+              <span className='text-xs text-faint'>
+                {config.screenEdgeStyle === 'comet'
+                  ? 'Plays one lap of the comet on every display.'
+                  : 'Flashes the border for a few seconds.'}
+              </span>
             </div>
           </div>
         </Tooltip>

@@ -23,7 +23,7 @@ export const faqItems: FaqItem[] = [
   {
     question: 'Which tools does it support?',
     answer:
-      'Claude Code, Cursor, GitHub Copilot (VS Code), OpenAI Codex, Kiro, and Antigravity (CLI + IDE). Hooks install and uninstall with one click each.',
+      'Claude Code, Cursor, GitHub Copilot (VS Code), OpenAI Codex, Kiro, Antigravity (CLI + IDE), Grok, OpenCode, and Muse Code. Hooks install and uninstall with one click each.',
   },
   {
     question: 'How does it know what my agents are doing?',

@@ -146,12 +146,73 @@ const ICONS: Record<GridIcon, ReactElement> = {
       <line x1="14" y1="7" x2="10" y2="17" />
     </svg>
   ),
+  // mcp — chat bubble with a plus (add to backlog from chat)
+  mcp: (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={24}
+      height={24}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
+      <line x1="13" y1="9" x2="13" y2="15" />
+      <line x1="10" y1="12" x2="16" y2="12" />
+    </svg>
+  ),
+
+  // theme — half-filled circle (light & dark)
+  theme: (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={24}
+      height={24}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" />
+    </svg>
+  ),
+
+  // setup — checklist with ticks
+  setup: (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={24}
+      height={24}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polyline points="3 6 5 8 8 5" />
+      <polyline points="3 13 5 15 8 12" />
+      <line x1="11" y1="6.5" x2="21" y2="6.5" />
+      <line x1="11" y1="13.5" x2="21" y2="13.5" />
+      <line x1="11" y1="19.5" x2="18" y2="19.5" />
+      <circle cx="5.5" cy="19.5" r="1.5" />
+    </svg>
+  ),
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 /**
  * §4.9 — Feature grid: "Small features that earn their keep".
- * 6 white cards in a 3-col grid (→1-col on mobile), each with a 24px blue
+ * 9 white cards in a 3-col grid (→1-col on mobile), each with a 24px blue
  * stroke icon, 18px 600 navy title, and 14px slate-blue body.
  * No props — reads directly from the gridCards data array.
  */

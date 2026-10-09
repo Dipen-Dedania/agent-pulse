@@ -136,3 +136,102 @@ body {
     scroll-behavior: auto;
   }
 }
+
+/* ── Live demo stage ─────────────────────────────────────────────────────────
+   Every keyframe animates FROM a hidden state to the element's natural style,
+   so the reduced-motion rule above (animation: none) leaves content visible. */
+.demo-typed {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+  width: calc(var(--n) * 1ch);
+  max-width: 100%;
+  animation: demo-type 0.9s steps(var(--n)) both;
+}
+@keyframes demo-type {
+  from {
+    width: 0;
+  }
+}
+
+.demo-pop {
+  animation: demo-pop 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+@keyframes demo-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+
+.demo-toast {
+  animation: demo-toast 0.45s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+@keyframes demo-toast {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+/* Waiting escalation: the app's blue edge halo, breathing. On the laptop's
+   blue-violet wallpaper a plain blue inset vanishes, so the edges are first
+   darkened (.demo-edge-dim) and the halo carries a bright blue-200 rim. */
+.demo-edge-glow {
+  box-shadow:
+    inset 0 0 0 3px rgba(191, 219, 254, 0.95),
+    inset 0 0 0 7px rgba(59, 130, 246, 0.6),
+    inset 0 0 72px 14px rgba(96, 165, 250, 0.85);
+  animation: demo-breathe 1.8s ease-in-out infinite;
+}
+@keyframes demo-breathe {
+  50% {
+    opacity: 0.6;
+  }
+}
+.demo-edge-dim {
+  background: radial-gradient(ellipse at center, transparent 42%, rgba(8, 12, 40, 0.5) 100%);
+}
+
+/* Second field of a form typing in after the first one. */
+.demo-typed-late {
+  animation-delay: 0.9s;
+}
+
+.demo-caret {
+  animation: demo-blink 1s steps(1) infinite;
+}
+@keyframes demo-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Laptop stage: a soft macOS-style wallpaper in the brand colours. */
+.demo-wallpaper {
+  background:
+    radial-gradient(70% 65% at 12% 18%, rgba(229, 92, 255, 0.55), transparent 62%),
+    radial-gradient(65% 75% at 88% 88%, rgba(0, 153, 255, 0.6), transparent 60%),
+    radial-gradient(55% 55% at 72% 12%, rgba(130, 71, 245, 0.65), transparent 65%),
+    linear-gradient(135deg, #3a2a8c 0%, #5a3fd4 45%, #2b6fd6 100%);
+}
+
+/* The lid swings open the first time the stage scrolls into view. The closed
+   pose is only ever applied from JS when motion is allowed, so the open lid
+   is the resting style (and the reduced-motion rule above leaves it there). */
+.demo-lid {
+  transform-origin: 50% 100%;
+  transform: perspective(3000px) rotateX(0deg);
+  transition: transform 1.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.demo-lid[data-closed] {
+  transform: perspective(3000px) rotateX(-82deg);
+}
+.demo-lid .demo-screen {
+  transition: opacity 0.7s ease 0.6s;
+}
+.demo-lid[data-closed] .demo-screen {
+  opacity: 0;
+  transition: none;
+}

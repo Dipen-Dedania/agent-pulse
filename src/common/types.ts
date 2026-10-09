@@ -121,8 +121,17 @@ export interface AttentionConfig {
   // `waiting`, independent of the escalation threshold above. Purely visual,
   // click-through, on every display. Clears when nothing is waiting.
   screenEdgeGlow: boolean;
+  // How the border looks while lit: a breathing inner glow, or a comet that
+  // laps the screen edge and lands on the notch (or a top-centre capsule).
+  screenEdgeStyle: ScreenEdgeStyle;
+  screenEdgeColor: ScreenEdgeColor;
+  screenEdgeSpeed: ScreenEdgeSpeed;
   webhooks: WebhookTarget[];
 }
+
+export type ScreenEdgeStyle = 'glow' | 'comet';
+export type ScreenEdgeColor = 'blue' | 'green' | 'purple' | 'orange' | 'pink' | 'silver';
+export type ScreenEdgeSpeed = 'slow' | 'normal' | 'fast';
 
 // Content for the rich hover tooltip rendered in a dedicated overlay window
 // (the bubble window is too small to host it). Sent from the bubble renderer

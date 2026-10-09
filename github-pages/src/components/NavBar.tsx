@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { LOGO_URL } from '../data/tools';
 import { REPO_URL, useLatestRelease } from '../hooks/useLatestRelease';
+import { HOME_URL, homeAnchor } from '../pages/links';
 
+// Base-prefixed so the same bar works on the standalone pages, not just home.
 const NAV_LINKS = [
-  { label: 'Demo', href: '#demo' },
-  { label: 'Features', href: '#features' },
-  { label: 'How it works', href: '#how-it-works' },
-  { label: 'Compare', href: '#comparison' },
-  { label: 'Privacy', href: '#privacy' },
-  { label: "What's new", href: '#changelog' },
-  { label: 'FAQ', href: '#faq' },
+  { label: 'Demo', href: homeAnchor('demo') },
+  { label: 'Features', href: homeAnchor('features') },
+  { label: 'How it works', href: homeAnchor('how-it-works') },
+  { label: 'Compare', href: homeAnchor('comparison') },
+  { label: 'Privacy', href: homeAnchor('privacy') },
+  { label: "What's new", href: homeAnchor('changelog') },
+  { label: 'FAQ', href: homeAnchor('faq') },
 ] as const;
 
 /**
@@ -29,7 +31,7 @@ export default function NavBar() {
       <div className="mx-auto max-w-[1200px] px-6 flex items-center h-full gap-8">
         {/* Left: logo + wordmark */}
         <a
-          href="/"
+          href={HOME_URL}
           className="flex items-center gap-2 shrink-0 no-underline"
           aria-label="Agent Pulse home"
         >
@@ -74,7 +76,7 @@ export default function NavBar() {
           </a>
 
           <a
-            href="#download"
+            href={homeAnchor('download')}
             className="inline-flex items-center text-caption font-semibold text-paper bg-signal-blue hover:bg-[#0055d4] transition-colors duration-150 no-underline px-4 py-2"
             style={{ borderRadius: 'var(--radius-buttons)', boxShadow: 'var(--shadow-sm-3)' }}
           >

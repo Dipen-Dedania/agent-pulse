@@ -46,6 +46,9 @@ function cfg(partial: Partial<AttentionConfig> = {}): AttentionConfig {
     intensifyBubble: true,
     osNotification: false,
     screenEdgeGlow: true,
+    screenEdgeStyle: 'glow',
+    screenEdgeColor: 'blue',
+    screenEdgeSpeed: 'normal',
     webhooks: [],
     ...partial,
   };

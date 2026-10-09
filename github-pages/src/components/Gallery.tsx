@@ -14,6 +14,8 @@ interface Shot {
   src: string;
   alt: string;
   caption: string;
+  /** Span both grid columns with a letterbox crop (wide screenshots). */
+  wide?: boolean;
 }
 
 const shots: Shot[] = [
@@ -37,6 +39,13 @@ const shots: Shot[] = [
     alt: 'Command guardrails with a triggered rule',
     caption: 'Command guardrails',
   },
+  // Odd one out in a 2-col grid, and a wide shot — so it spans the last row.
+  {
+    src: screenshot('backlog.webp'),
+    alt: 'Backlog board of agent tasks across Refinement, Todo, In progress, Blocked and Done',
+    caption: 'Backlog board',
+    wide: true,
+  },
 ];
 
 function Thumb({ shot, onOpen }: { shot: Shot; onOpen: () => void }) {
@@ -45,7 +54,7 @@ function Thumb({ shot, onOpen }: { shot: Shot; onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className="group relative block overflow-hidden rounded-cards border border-mist-border bg-fog shadow-sm transition-transform duration-200 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue"
+      className={`${shot.wide ? 'sm:col-span-2 ' : ''}group relative block overflow-hidden rounded-cards border border-mist-border bg-fog shadow-sm transition-transform duration-200 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-blue`}
       aria-label={`View larger: ${shot.caption}`}
     >
       {errored ? (
@@ -57,7 +66,7 @@ function Thumb({ shot, onOpen }: { shot: Shot; onOpen: () => void }) {
           src={shot.src}
           alt={shot.alt}
           loading="lazy"
-          className="aspect-video w-full object-cover"
+          className={`aspect-video w-full object-cover ${shot.wide ? 'sm:aspect-[21/9] object-top' : ''}`}
           onError={() => setErrored(true)}
         />
       )}

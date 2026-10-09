@@ -15,6 +15,8 @@ export interface FeatureSectionData {
   screenshot: string;
   screenshotAlt: string;
   caption?: string;
+  /** Optional in-page call to action under the body. */
+  link?: { label: string; href: string };
   imageSide: 'left' | 'right';
   blobColors: [string, string];
 }
@@ -63,7 +65,8 @@ export const featureSections: FeatureSectionData[] = [
     id: 'usage-meters',
     eyebrow: 'SUBSCRIPTION USAGE',
     title: 'Know your limits before you hit them',
-    body: "Live meters for Claude Code's 5-hour and 7-day windows, Codex, Cursor's billing cycle, and Antigravity's per-model quotas. Get a warning when you're about to hit a cap — and a nudge when a window is about to reset unused.",
+    body: "Live meters for Claude Code's 5-hour and 7-day windows, Codex, Cursor's billing cycle, GitHub Copilot's monthly quotas, and Antigravity's per-model quotas. Get a warning when you're about to hit a cap — and a nudge when a window is about to reset unused.",
+    link: { label: 'Watch the quota ring drain', href: '#demo-usage' },
     screenshot: screenshot('usage.png'),
     screenshotAlt: 'Agent Pulse usage meters for subscription limits',
     imageSide: 'left',
@@ -81,13 +84,26 @@ export const featureSections: FeatureSectionData[] = [
     blobColors: ['#8247f5', '#0099ff'],
   },
   {
+    id: 'backlog',
+    eyebrow: 'BACKLOG',
+    title: 'Queue it tonight, review it in the morning',
+    body: 'A Kanban board of tasks your agents run themselves — Claude Code or Codex, headless, inside the scheduler windows you set. Only low-risk cards autorun, a usage gate stops claiming work before your 5-hour window runs dry, and a forecast shows what the queue will cost. Finished cards land in review and ping Discord or Slack.',
+    link: { label: 'See a night shift play out', href: '#demo-night-shift' },
+    screenshot: screenshot('backlog.webp'),
+    screenshotAlt: 'Agent Pulse backlog board with Refinement, Todo, In progress, Blocked and Done columns',
+    caption: 'Add cards by hand, from GitLab, Jira or Linear issues, or from a Claude Code chat via MCP.',
+    imageSide: 'left',
+    blobColors: ['#0099ff', '#e55cff'],
+  },
+  {
     id: 'guardrails',
     eyebrow: 'GUARDRAILS',
     title: 'A seatbelt for autonomous agents',
-    body: 'Block or warn on risky shell commands before they reach an agent — `rm -rf /`, force-pushes to protected branches, or anything you define with your own validated regex rules. Every trigger is logged.',
+    body: 'Block or warn on risky shell commands before they reach an agent — `rm -rf /`, force-pushes to protected branches, or anything you define with your own validated regex rules. Secret-file protection keeps agents away from `.env` files, keys and credentials. Every trigger is logged.',
+    link: { label: 'See a guardrail catch a command', href: '#demo-guardrails' },
     screenshot: screenshot('guardrails.png'),
     screenshotAlt: 'Agent Pulse command guardrails with a triggered rule',
-    imageSide: 'left',
+    imageSide: 'right',
     blobColors: ['#e55cff', '#ffa600'],
   },
 ];
@@ -95,7 +111,10 @@ export const featureSections: FeatureSectionData[] = [
 export type GridIcon =
   | 'statusline'
   | 'alerts'
+  | 'mcp'
   | 'scheduler'
+  | 'theme'
+  | 'setup'
   | 'updates'
   | 'tray'
   | 'opensource';
@@ -109,13 +128,18 @@ export interface GridCard {
 export const gridCards: GridCard[] = [
   {
     icon: 'statusline',
-    title: 'Claude Code status line',
+    title: 'Status lines for Claude & Codex',
     body: 'Model, context bar, git branch, session cost and more at the bottom of every turn. One-click install; backs up what’s already there.',
   },
   {
     icon: 'alerts',
-    title: 'Discord & Slack alerts',
-    body: 'When an agent waits past your threshold, get pinged where you actually are.',
+    title: '“Needs you” escalation',
+    body: 'When an agent waits past your threshold, the screen edge glows, an OS notification fires, and Discord or Slack gets pinged.',
+  },
+  {
+    icon: 'mcp',
+    title: 'Backlog from your chat',
+    body: 'The bundled MCP server lets Claude Code drop work on your board — just say “add that to my backlog”.',
   },
   {
     icon: 'scheduler',
@@ -123,9 +147,19 @@ export const gridCards: GridCard[] = [
     body: "Keeps Claude's 5-hour window warm with scheduled micro-pings, so a fresh window is ready when you sit down.",
   },
   {
+    icon: 'theme',
+    title: 'Light & dark',
+    body: 'Bubbles and Settings follow your OS theme live — or pin light or dark yourself.',
+  },
+  {
+    icon: 'setup',
+    title: 'Guided setup',
+    body: 'A first-run tour and a checklist that ticks off from real state: hooks installed, bubbles live, first event received.',
+  },
+  {
     icon: 'updates',
-    title: 'Quiet auto-updates',
-    body: 'Checks in the background; you choose when to download and restart. Never silent installs.',
+    title: 'Quiet updates',
+    body: 'Checks in the background; you choose when to download and restart. Never silent installs. macOS shows a download banner for now.',
   },
   {
     icon: 'tray',

@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'github-pages/**'
+      # The live demo imports the app's mascots (see github-pages/vite.config.ts).
+      - 'src/renderer/components/Bubble/**'
+      - 'src/common/**'
       - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
 

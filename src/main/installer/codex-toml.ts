@@ -99,7 +99,11 @@ function bracketBalance(line: string): number {
 /** Locate `key = …` inside the table body (comment lines skipped). */
 export function findKeyInTable(lines: string[], table: string, key: string): TomlKeySpan | null {
   const tbl = findTable(lines, table);
-  if (!tbl) return null;
+  return tbl ? findKeyInSpan(lines, tbl, key) : null;
+}
+
+/** `findKeyInTable` for a table span the caller already located. */
+export function findKeyInSpan(lines: string[], tbl: TomlTableSpan, key: string): TomlKeySpan | null {
   const keyRe = new RegExp(`^\\s*${escapeRe(key)}\\s*=`);
   for (let i = tbl.header + 1; i <= tbl.end; i++) {
     const line = lines[i];
@@ -174,6 +178,167 @@ export function removeKeyFromTable(content: string, table: string, key: string):
     }
   }
   return joinLines(bom, eol, out);
+}
+
+// ── Whole-table editing ──────────────────────────────────────────────────────
+// For tables we own (`[mcp_servers.agent-pulse]`): the table is matched by key
+// path, so `[mcp_servers."agent-pulse"]` and spacing variants are the same
+// table. An upsert rewrites only the keys we write; keys the user added (say
+// `enabled = false`) stay. A sub-table named after one of our keys
+// (`[mcp_servers.agent-pulse.env]`) is dropped — next to our inline `env = {…}`
+// it would be a duplicate key Codex refuses to load. Removal takes the table
+// and every sub-table.
+
+const BARE_KEY = /^[A-Za-z0-9_-]+$/;
+
+/** TOML basic string. JSON's escapes are a subset of TOML's, so this is valid as-is. */
+export function tomlString(s: string): string {
+  return JSON.stringify(s);
+}
+
+function formatKey(k: string): string {
+  return BARE_KEY.test(k) ? k : tomlString(k);
+}
+
+/** Parse a single TOML string literal (basic or literal); null for anything else. */
+export function parseTomlString(text: string): string | null {
+  const t = text.trim();
+  if (t.length >= 2 && t.startsWith("'") && t.endsWith("'")) return t.slice(1, -1);
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+    try { return JSON.parse(t); } catch { return null; }
+  }
+  return null;
+}
+
+/** Strings of a one-dimensional string array (single- or multi-line); null when not an array. */
+export function parseTomlStringArray(text: string): string[] | null {
+  const t = text.trim();
+  if (!t.startsWith('[') || !t.endsWith(']')) return null;
+  const out: string[] = [];
+  for (const m of t.slice(1, -1).matchAll(/"(?:[^"\\]|\\.)*"|'[^']*'/g)) {
+    const s = parseTomlString(m[0]);
+    if (s === null) return null;
+    out.push(s);
+  }
+  return out;
+}
+
+/** Key path of a `[a . "b" . 'c']` header; null for non-headers and `[[array]]` headers. */
+export function parseTableHeader(line: string): string[] | null {
+  const t = stripComment(line).trim();
+  if (!t.startsWith('[') || t.startsWith('[[') || !t.endsWith(']')) return null;
+  const inner = t.slice(1, -1);
+  const keys: string[] = [];
+  let i = 0;
+  for (;;) {
+    while (inner[i] === ' ' || inner[i] === '\t') i++;
+    let key: string | null = null;
+    if (inner[i] === '"') {
+      const m = /^"(?:[^"\\]|\\.)*"/.exec(inner.slice(i));
+      if (m) { key = parseTomlString(m[0]); i += m[0].length; }
+    } else if (inner[i] === "'") {
+      const end = inner.indexOf("'", i + 1);
+      if (end > i) { key = inner.slice(i + 1, end); i = end + 1; }
+    } else {
+      const m = /^[A-Za-z0-9_-]+/.exec(inner.slice(i));
+      if (m) { key = m[0]; i += m[0].length; }
+    }
+    if (key === null) return null;
+    keys.push(key);
+    while (inner[i] === ' ' || inner[i] === '\t') i++;
+    if (i >= inner.length) return keys;
+    if (inner[i] !== '.') return null;
+    i++;
+  }
+}
+
+const isPrefix = (prefix: string[], keys: string[]) =>
+  keys.length >= prefix.length && prefix.every((k, i) => k === keys[i]);
+
+/** The table at `keyPath` plus all of its sub-tables, in file order. */
+export function findTablesUnder(lines: string[], keyPath: string[]): Array<TomlTableSpan & { exact: boolean }> {
+  const spans: Array<TomlTableSpan & { exact: boolean }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const keys = parseTableHeader(lines[i]);
+    if (!keys || !isPrefix(keyPath, keys)) continue;
+    let end = lines.length - 1;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (ANY_HEADER.test(lines[j])) { end = j - 1; break; }
+    }
+    spans.push({ header: i, end, exact: keys.length === keyPath.length });
+  }
+  return spans;
+}
+
+/**
+ * Last line of the span holding a key or value. Trailing blanks and comments
+ * stay put: they usually introduce the NEXT table, not this one.
+ */
+function lastContentLine(lines: string[], span: TomlTableSpan): number {
+  for (let i = span.end; i > span.header; i--) {
+    if (lines[i].trim() !== '' && !/^\s*#/.test(lines[i])) return i;
+  }
+  return span.header;
+}
+
+function cutSpans(lines: string[], spans: TomlTableSpan[]): string[] {
+  // Ranges come from the untouched input and are cut bottom-up, so earlier
+  // cuts never shift a range still to be cut.
+  const ranges = spans
+    .map((s) => ({ at: s.header, last: lastContentLine(lines, s) }))
+    .sort((a, b) => b.at - a.at);
+  const out = [...lines];
+  for (const { at, last } of ranges) {
+    out.splice(at, last - at + 1);
+    // Collapse the blank separator we added above the header on creation.
+    if (at > 0 && out[at - 1].trim() === '' && (at === out.length || out[at].trim() === '')) {
+      out.splice(at - 1, 1);
+    }
+  }
+  return out;
+}
+
+/**
+ * Write `body` (one `key = value` per line) into `[keyPath]`. An existing table
+ * has those keys replaced and placed first under the header, and any other
+ * keys left alone; sub-tables named after a body key are removed. Without a
+ * table, one is appended at EOF.
+ */
+export function upsertTable(content: string, keyPath: string[], body: string[]): string {
+  const { bom, eol, lines } = splitLines(content);
+  const keys = body.map((l) => l.slice(0, l.indexOf('=')).trim());
+  const clashes = findTablesUnder(lines, keyPath).filter((s) => {
+    if (s.exact) return false;
+    const child = parseTableHeader(lines[s.header])?.[keyPath.length];
+    return child !== undefined && keys.includes(child);
+  });
+  let out = cutSpans(lines, clashes);
+  const exact = findTablesUnder(out, keyPath).find((s) => s.exact);
+  if (exact) {
+    // Drop our keys' current lines bottom-up so earlier spans stay valid,
+    // then put the fresh ones right under the header.
+    const spans = keys
+      .map((k) => findKeyInSpan(out, exact, k))
+      .filter((s): s is TomlKeySpan => s !== null)
+      .sort((a, b) => b.start - a.start);
+    for (const s of spans) out.splice(s.start, s.end - s.start + 1);
+    out.splice(exact.header + 1, 0, ...body);
+  } else {
+    const block = [`[${keyPath.map(formatKey).join('.')}]`, ...body];
+    while (out.length > 0 && out[out.length - 1] === '') out.pop();
+    if (out.length > 0) out.push('');
+    out = [...out, ...block];
+  }
+  const next = joinLines(bom, eol, out);
+  return next === content ? content : next;
+}
+
+/** Remove `[keyPath]` and its sub-tables; every other line survives byte for byte. */
+export function removeTable(content: string, keyPath: string[]): string {
+  const { bom, eol, lines } = splitLines(content);
+  const spans = findTablesUnder(lines, keyPath);
+  if (spans.length === 0) return content;
+  return joinLines(bom, eol, cutSpans(lines, spans));
 }
 
 /**

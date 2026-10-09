@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Agent Pulse placeholder mark for Muse Code: an original take on its fluffy cream plush. -->
+  <defs>
+    <radialGradient id="g" cx="42%" cy="30%" r="75%">
+      <stop offset="0" stop-color="#F6EDDA"/>
+      <stop offset="0.65" stop-color="#EBDCC0"/>
+      <stop offset="1" stop-color="#D4C09A"/>
+    </radialGradient>
+    <filter id="fur" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="1.6" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <path d="M12 30 C12 14 21 4 32 4 C43 4 52 14 52 30 C52 40 54 50 50 56 C47 60 40 62 32 62 C24 62 17 60 14 56 C10 50 12 40 12 30 Z" fill="url(#g)" filter="url(#fur)"/>
+  <ellipse cx="32" cy="27" rx="15" ry="13" fill="#F8F1E3"/>
+  <circle cx="24" cy="30" r="2.6" fill="#F2A8B0" opacity="0.75"/>
+  <circle cx="40" cy="30" r="2.6" fill="#F2A8B0" opacity="0.75"/>
+  <circle cx="27.5" cy="25.5" r="1.7" fill="#1B1B1B"/>
+  <circle cx="36.5" cy="25.5" r="1.7" fill="#1B1B1B"/>
+  <path d="M29.5 30 Q32 32.6 34.5 30" fill="none" stroke="#1B1B1B" stroke-width="1.3" stroke-linecap="round"/>
+  <path d="M27 44 L29 38 L31.5 43 L34 38 L36 44" fill="none" stroke="#2F6BFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

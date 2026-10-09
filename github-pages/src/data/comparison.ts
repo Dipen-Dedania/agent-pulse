@@ -2,7 +2,7 @@
  * Feature comparison matrix for the Comparison section.
  *
  * Kept intentionally verifiable and consistent with the rest of the site
- * (six supported agents — see data/tools.ts). Add competitor columns by
+ * (nine supported agents — see data/tools.ts). Add competitor columns by
  * extending `competitors` and adding a matching key to each row's `cells`.
  *
  * NOTE (revisit): the internal comparison doc lists two capabilities where the
@@ -34,7 +34,7 @@ export const competitors: Competitor[] = [{ key: 'claudePulse', label: 'Claude P
 export const comparisonRows: ComparisonRow[] = [
   {
     feature: 'AI agents monitored',
-    agentPulse: '6',
+    agentPulse: '9',
     cells: { claudePulse: '2' },
   },
   {

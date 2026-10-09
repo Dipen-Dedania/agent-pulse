@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { ToolId, BubbleConfig, BubbleSize, BubbleStackPosition, BubbleAnchor, BubbleSoundId, BubbleFillMode, BubbleQuotaStyle, MascotId, AttentionConfig, WebhookTarget, WebhookKind, StatusLineConfig, StatusLineSegment, StatusLineSegmentType, StatusLineColor, StatusLineThreshold, AppearanceConfig, ThemeMode } from '../common/types';
+import { SCREEN_EDGE_COLORS, SCREEN_EDGE_SPEEDS, SCREEN_EDGE_STYLES } from '../common/screenEdge';
 import { CodexStatusLineConfig, CodexStatusLineItem } from '../common/types';
 import { isCodexStatusLineItem } from '../common/codex-statusline';
 import { MASCOT_HOME, MASCOT_IDS } from '../common/mascotGeometry';
@@ -228,6 +229,9 @@ const DEFAULTS: UserConfig = {
     intensifyBubble: true,
     osNotification: false,
     screenEdgeGlow: true,
+    screenEdgeStyle: 'glow',
+    screenEdgeColor: 'blue',
+    screenEdgeSpeed: 'normal',
     webhooks: [],
   },
   usage: {
@@ -801,10 +805,15 @@ export function migrateDetectionCache(raw: unknown): DetectionCache | null {
 // intent and risking webhook spam.
 const MIN_ESCALATE_SECONDS = 5;
 
+// A whitelisted string enum, or the fallback for anything off-list.
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
 // Validate a persisted attention block. Clamps the threshold to a sane floor
 // and filters the webhook list to well-formed rows so a hand-edited or stale
 // config can't strand the engine or POST to a garbage URL.
-function migrateAttention(raw: unknown): AttentionConfig {
+export function migrateAttention(raw: unknown): AttentionConfig {
   const d = DEFAULTS.attention;
   const a = (raw && typeof raw === 'object' ? raw : {}) as Partial<AttentionConfig>;
   const KINDS: WebhookKind[] = ['discord', 'slack'];
@@ -833,6 +842,9 @@ function migrateAttention(raw: unknown): AttentionConfig {
     intensifyBubble: typeof a.intensifyBubble === 'boolean' ? a.intensifyBubble : d.intensifyBubble,
     osNotification: typeof a.osNotification === 'boolean' ? a.osNotification : d.osNotification,
     screenEdgeGlow: typeof a.screenEdgeGlow === 'boolean' ? a.screenEdgeGlow : d.screenEdgeGlow,
+    screenEdgeStyle: oneOf(a.screenEdgeStyle, SCREEN_EDGE_STYLES, d.screenEdgeStyle),
+    screenEdgeColor: oneOf(a.screenEdgeColor, SCREEN_EDGE_COLORS, d.screenEdgeColor),
+    screenEdgeSpeed: oneOf(a.screenEdgeSpeed, SCREEN_EDGE_SPEEDS, d.screenEdgeSpeed),
     webhooks,
   };
 }

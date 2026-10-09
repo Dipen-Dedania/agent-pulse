@@ -2,7 +2,7 @@ import { tools } from '../data/tools';
 
 /**
  * §4.3 — Supported-tools logo strip.
- * Centered caption + wrapping row of 6 tool logos (32px, grayscale by default,
+ * Centered caption + wrapping row of tool logos (32px, grayscale by default,
  * full-color on hover). No props — reads directly from the tools data array.
  */
 export default function ToolsStrip() {

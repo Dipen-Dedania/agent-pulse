@@ -124,6 +124,15 @@ export default function FeatureSection({ feature }: FeatureSectionProps) {
               {feature.body}
             </p>
 
+            {feature.link && (
+              <a
+                href={feature.link.href}
+                className="self-start text-body-sm font-semibold text-signal-blue underline-offset-4 hover:underline"
+              >
+                {feature.link.label} ›
+              </a>
+            )}
+
             {/* Optional feature-list bullets */}
             {feature.bullets && feature.bullets.length > 0 && (
               <ul role="list" className="flex flex-col gap-6 mt-2">

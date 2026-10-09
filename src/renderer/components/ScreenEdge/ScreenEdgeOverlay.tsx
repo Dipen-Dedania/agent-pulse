@@ -1,54 +1,72 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { colorsFor } from '../../../common/stateColors';
+import { EDGE_PALETTES, EDGE_TIMINGS, ScreenEdgePayload } from '../../../common/screenEdge';
 import { smooth } from '../../motion';
+import { CometBorder } from './CometBorder';
 
-// Reuse the single source of truth for the `waiting` palette so the glow's blue
-// can never drift from the bubble's. This overlay floats over the live desktop
-// (no theme context), so the dark-variant blue is the visible one.
-const WAITING = colorsFor('waiting', true);
-const GLOW = WAITING.glow ?? 'rgba(59,130,246,0.5)';
+// Until main's first `screen-edge:state` arrives, render nothing.
+const INITIAL: ScreenEdgePayload = {
+  active: false,
+  paused: false,
+  style: 'glow',
+  color: 'blue',
+  speed: 'normal',
+  geometry: { notch: null, cornerRadius: 0, trayCorner: 'br' },
+};
 
-// Breathing edge-glow: a soft inner gradient that swells in from the screen
-// edges and settles — no hard border line, just the halo. The whole overlay is
-// `pointer-events-none` (and the host window is click-through), so it never
-// interferes with whatever you're doing underneath.
+// The ambient border, in the style the user picked:
+//  - glow:  a soft inner gradient that breathes in from the screen edges — no
+//           hard border line, just the halo. The `blue` palette is the waiting
+//           colour (stateColors `waiting.glow.dark`), so the default is unchanged.
+//  - comet: see CometBorder — laps the edge and lands on the notch / tray corner,
+//           looping while anything is waiting.
+// The whole overlay is `pointer-events-none` (and the host window is
+// click-through), so it never interferes with whatever you're doing underneath.
 export const ScreenEdgeOverlay: React.FC = () => {
-  const [active, setActive] = useState(false);
+  const [state, setState] = useState<ScreenEdgePayload>(INITIAL);
 
   useEffect(() => {
-    const handler = (_e: unknown, next: boolean) => setActive(Boolean(next));
-    window.electron.on('screen-edge:active', handler);
+    const handler = (_e: unknown, next: ScreenEdgePayload) => {
+      if (next && typeof next === 'object') setState(next);
+    };
+    window.electron.on('screen-edge:state', handler);
     // Subscribe first, THEN ask main for the current state — this ordering
     // closes the race where main broadcasts right after creating the window,
     // before this listener exists (which made the first Preview show nothing).
     window.electron.send('screen-edge:ready');
-    return () => window.electron.off('screen-edge:active', handler);
+    return () => window.electron.off('screen-edge:state', handler);
   }, []);
+
+  const glow = EDGE_PALETTES[state.color].glow;
+  const breath = EDGE_TIMINGS[state.speed].glowBreath;
 
   return (
     <div className='fixed inset-0 pointer-events-none overflow-hidden'>
       <AnimatePresence>
-        {active && (
+        {state.active && (
           <motion.div
-            key='screen-edge-frame'
+            key={`screen-edge-${state.style}`}
             className='absolute inset-0'
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={smooth}
           >
-            <motion.div
-              className='absolute inset-0'
-              animate={{
-                boxShadow: [
-                  `inset 0 0 60px 6px ${GLOW}`,
-                  `inset 0 0 120px 26px ${GLOW}`,
-                  `inset 0 0 60px 6px ${GLOW}`,
-                ],
-              }}
-              transition={{ duration: 2.6, ease: 'easeInOut', repeat: Infinity }}
-            />
+            {state.style === 'comet' ? (
+              <CometBorder color={state.color} speed={state.speed} geometry={state.geometry} paused={state.paused} />
+            ) : (
+              <motion.div
+                className='absolute inset-0'
+                animate={{
+                  boxShadow: [
+                    `inset 0 0 60px 6px ${glow}`,
+                    `inset 0 0 120px 26px ${glow}`,
+                    `inset 0 0 60px 6px ${glow}`,
+                  ],
+                }}
+                transition={{ duration: breath, ease: 'easeInOut', repeat: Infinity }}
+              />
+            )}
           </motion.div>
         )}
       </AnimatePresence>

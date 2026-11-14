@@ -80,6 +80,7 @@ export class ToolDetector {
       'grok': grok,
       'opencode': opencode,
       'muse-code': museCode,
+      hermes: { installed: !!(await this.whichCommand('hermes')) || existsSync(process.env.HERMES_HOME || path.join(os.homedir(), '.hermes')) },
     };
   }
 

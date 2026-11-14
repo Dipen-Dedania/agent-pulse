@@ -73,6 +73,7 @@ export interface GuardrailConfig {
 // ping only), Copilot and Kiro have no confirmed synchronous deny path, so they
 // stay warn-only.
 export const BLOCKABLE_TOOLS: Record<ToolId, boolean> = {
+  hermes: false,
   'claude-code': true,
   'antigravity-cli': true,
   'openai-codex': true,

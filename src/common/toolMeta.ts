@@ -24,6 +24,15 @@ const COMMON_TROUBLESHOOTING = [
 ];
 
 export const TOOL_META: Record<ToolId, ToolMeta> = {
+  hermes: {
+    label: 'Hermes', icon: './assets/hermes.svg', badges: ['Experimental', 'Observation only'],
+    hookInfo: {
+      mechanism: 'Filtered shell hooks · manual setup', configFile: '$HERMES_HOME/config.yaml',
+      description: 'Live status only for Hermes v0.23.1. Install with the Hermes Python interpreter using the repository helper below, then approve only its commands in Hermes. Setup does not grant consent. No blocking, transcripts, usage accounting or session analytics. Quiet sessions expire after five minutes; this does not imply process death.',
+      snippet: 'python public/hermes/agent_pulse.py --install --home /absolute/path/to/hermes-profile\nhermes hooks doctor',
+      troubleshooting: ['See docs/hermes.md in the Agent Pulse repository for installation and removal.', 'Use Hermes v0.23.1 and its Python interpreter. Restart Hermes and approve each new Agent Pulse command individually.', 'Do not enable global hook auto-accept. Synthetic hooks test is not proof of runtime consent.', 'Multiple profiles require separate installations. Start Agent Pulse before testing.'],
+    },
+  },
   'claude-code': {
     label: 'Claude Code',
     icon: './assets/claude.png',

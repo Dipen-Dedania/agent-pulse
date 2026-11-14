@@ -43,7 +43,7 @@ export class StatusStateManager {
       toolId,
       state: resolvedState,
       lastUpdated: timestamp,
-      activeAgents: details.activeAgents || (depthAgents !== undefined ? depthAgents : (current?.activeAgents || 0)),
+      activeAgents: details.activeAgents ?? (depthAgents !== undefined ? depthAgents : (current?.activeAgents || 0)),
       currentTask: details.taskSummary,
       // Latch the most recent agentPid + chain; preserve the previous ones
       // if this event didn't carry them (e.g. Notification events lack
@@ -120,6 +120,14 @@ export class StatusStateManager {
   public onEvent(listener: EventStreamListener): () => void {
     this.eventListeners.add(listener);
     return () => { this.eventListeners.delete(listener); };
+  }
+
+  // Hermes live projection is intentionally separate from per-session events.
+  // The existing timeline groups by tool/project, so Hermes does not feed it.
+  public updateHermesProjection(state: AgentState, activeAgents: number) {
+    const status: ToolStatus = { toolId: 'hermes', state, activeAgents, lastUpdated: Date.now() };
+    this.statuses.set('hermes', status);
+    this.broadcastStatus(status);
   }
 
   public getStatus(toolId: ToolId) {

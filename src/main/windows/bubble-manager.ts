@@ -50,6 +50,7 @@ const ARC_DIMENSIONS: Record<BubbleSize, { width: number; height: number; toolti
 // CLI on Linux is headless, so launching it by name would just spawn a stray
 // background process.
 const TOOL_APP_NAME: Record<ToolId, { mac: string | null; linux: string | null }> = {
+  hermes: { mac: null, linux: null },
   'cursor':         { mac: 'Cursor',             linux: 'cursor' },
   'vscode-copilot': { mac: 'Visual Studio Code', linux: 'code' },
   'claude-code':    { mac: null,                  linux: null },
@@ -71,6 +72,7 @@ const TOOL_APP_NAME: Record<ToolId, { mac: string | null; linux: string | null }
 // land the user somewhere meaningful than to do nothing or open an empty
 // terminal.
 const TOOL_WEB_URLS: Record<ToolId, string> = {
+  hermes: 'https://github.com/NousResearch/hermes-agent',
   'claude-code':     'https://claude.ai',
   'cursor':          'https://cursor.com',
   'vscode-copilot':  'https://code.visualstudio.com',

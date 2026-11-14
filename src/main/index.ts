@@ -15,6 +15,7 @@ import { TrayManager } from './windows/tray';
 import { ENABLE_APP_MENU } from './feature-flags';
 import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
+import { writeHermesConnection } from './bridge/hermes-connection';
 import { ToolDetector, DetectionResult } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
 import path from 'path';
@@ -159,6 +160,7 @@ class AgentPulseApp {
     // written — the /backlog routes then reject everything, which is the safe
     // direction, and Settings reports MCP capture as unavailable.
     this.mcpConnection = writeConnectionFile(BRIDGE_PORT);
+    const hermesToken = writeHermesConnection(BRIDGE_PORT);
     this.bridgeServer = new StatusBridgeServer(this.stateManager, {
       getGuardrailConfig: () => this.userConfig.guardrails,
       onGuardrailEvent: (event) => this.handleGuardrailEvent(event),
@@ -166,6 +168,7 @@ class AgentPulseApp {
       onSecretAccessEvent: (event) => this.handleSecretAccessEvent(event),
       onListenError: (err, port) => this.handleBridgeListenError(err, port),
       getMcpToken: () => this.mcpConnection?.token ?? null,
+      getHermesToken: () => hermesToken,
       // Resolved per call: the backlog store boots long after the bridge.
       getBacklogMcpApi: () => this.backlogMcpApi(),
       // Claude Code statusline feed: quota goes to the usage pipeline (which

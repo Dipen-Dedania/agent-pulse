@@ -47,7 +47,12 @@ export class HermesSessions {
       const prior = s.requests.get(e.request);
       if (e.at <= s.ended || (prior && (prior.resolved || e.at <= prior.at))) return true;
       if (!prior && s.requests.size >= 128) return false;
-      if (e.at > s.at) s.state = 'working';
+      if (e.at > s.at) {
+        // Human activity also advances the session watermark: an older turn
+        // completion must not idle work resumed after a resolved request.
+        s.at = e.at;
+        s.state = 'working';
+      }
       s.requests.set(e.request, { at: e.at, resolved: e.event === 'on_human_input_resolved' });
     } else {
       if (e.at <= s.at) return true;

@@ -41,6 +41,30 @@ describe('Hermes correlations and bounded aggregation', () => {
     s.accept(event('on_human_input_request', 119, a, q), 122);
     expect(s.snapshot().state).toBe('idle-active');
   });
+  it('ignores delayed turn completion after newer human-input activity per session', () => {
+    const s = new HermesSessions();
+    s.accept(event('pre_llm_call', 100, a), 100);
+    s.accept(event('pre_llm_call', 100, b), 100);
+    s.accept(event('on_human_input_request', 200, a, r), 200);
+    s.accept(event('on_human_input_resolved', 300, a, r), 300);
+    s.accept(event('on_session_end', 150, a), 301);
+    // A's watermark must not suppress B's independent completion.
+    s.accept(event('on_session_end', 150, b), 302);
+    expect(s.snapshot()).toEqual({ state: 'working', activeAgents: 1,
+      sessions: [{ session: a, state: 'working' }, { session: b, state: 'idle-active' }] });
+    s.accept(event('on_session_end', 400, a), 400);
+    expect(s.snapshot()).toMatchObject({ state: 'idle-active', activeAgents: 0 });
+  });
+  it('still correlates older human requests delivered after newer tool activity', () => {
+    const s = new HermesSessions();
+    s.accept(event('pre_llm_call', 100), 100);
+    s.accept(event('post_tool_call', 300), 300);
+    s.accept(event('on_human_input_request', 200, a, r), 301);
+    expect(s.snapshot().state).toBe('waiting');
+    s.accept(event('on_human_input_resolved', 250, a, r), 302);
+    s.accept(event('on_session_end', 275), 303);
+    expect(s.snapshot()).toMatchObject({ state: 'working', activeAgents: 1 });
+  });
   it('expires quiet sessions without inventing a death or refreshing from duplicates', () => {
     const s = new HermesSessions();
     s.accept(event('pre_llm_call', 100), 100);

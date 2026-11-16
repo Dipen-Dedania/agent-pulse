@@ -1,13 +1,17 @@
 import type { AgentState } from '../../common/types';
 
 export const HERMES_TTL_MS = 300_000;
+// A tool started (pre_tool_call) with no newer activity is a long build/test
+// run, not a dead session, so it gets a longer silence allowance.
+export const HERMES_TOOL_TTL_MS = 1_800_000;
 const EVENTS = ['pre_llm_call', 'pre_tool_call', 'post_tool_call', 'on_session_end', 'on_human_input_request', 'on_human_input_resolved'] as const;
 type EventName = typeof EVENTS[number];
 export interface HermesEvent { v: 1; event: EventName; session: string; at: number; request?: string; }
 interface Session {
-  at: number; seen: number; ended: number; state: AgentState;
+  at: number; seen: number; ended: number; state: AgentState; inTool: boolean;
   requests: Map<string, { at: number; resolved: boolean }>;
 }
+const waiting = (s: Session) => [...s.requests.values()].some(r => !r.resolved);
 const hex = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 export function parseHermesEvent(value: unknown, now = Date.now()): HermesEvent | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -25,8 +29,13 @@ export class HermesSessions {
   private sessions = new Map<string, Session>();
   expire(now = Date.now()): boolean {
     let changed = false;
-    for (const [key, s] of this.sessions) if (now - s.seen >= HERMES_TTL_MS) {
-      this.sessions.delete(key); changed = true;
+    for (const [key, s] of this.sessions) {
+      // A pending human request never expires: it ends on its resolution, a
+      // newer turn completion, or a Pulse restart. Waits are what matter most.
+      if (waiting(s)) continue;
+      if (now - s.seen >= (s.inTool ? HERMES_TOOL_TTL_MS : HERMES_TTL_MS)) {
+        this.sessions.delete(key); changed = true;
+      }
     }
     return changed;
   }
@@ -35,7 +44,7 @@ export class HermesSessions {
     let s = this.sessions.get(e.session);
     if (!s) {
       if (this.sessions.size >= 256) return false;
-      s = { at: 0, seen: now, ended: 0, state: 'working', requests: new Map() };
+      s = { at: 0, seen: now, ended: 0, state: 'working', inTool: false, requests: new Map() };
       this.sessions.set(e.session, s);
     }
     // Resolved tombstones only need to outlive the endpoint's 30s acceptance
@@ -57,6 +66,7 @@ export class HermesSessions {
     } else {
       if (e.at <= s.at) return true;
       s.at = e.at;
+      s.inTool = e.event === 'pre_tool_call';
       if (e.event === 'on_session_end') {
         s.ended = e.at; s.state = 'idle-active';
         for (const r of s.requests.values()) if (r.at <= e.at) r.resolved = true;
@@ -67,7 +77,7 @@ export class HermesSessions {
   }
   snapshot() {
     const sessions = [...this.sessions].map(([session, s]) => ({
-      session, state: ([...s.requests.values()].some(r => !r.resolved) ? 'waiting' : s.state) as AgentState,
+      session, state: (waiting(s) ? 'waiting' : s.state) as AgentState,
     }));
     const state: AgentState = sessions.some(s => s.state === 'waiting') ? 'waiting'
       : sessions.some(s => s.state === 'working') ? 'working'

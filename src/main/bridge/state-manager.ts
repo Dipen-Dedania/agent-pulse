@@ -122,12 +122,22 @@ export class StatusStateManager {
     return () => { this.eventListeners.delete(listener); };
   }
 
-  // Hermes live projection is intentionally separate from per-session events.
-  // The existing timeline groups by tool/project, so Hermes does not feed it.
+  // Hermes live projection is an aggregate over sessions, not a per-session
+  // event. Listeners still get it so "needs you" escalation and the screen-edge
+  // glow see `waiting`; the timeline drops toolId 'hermes' itself (it groups by
+  // tool/project and would misattribute sessions). Never buffered for replay.
   public updateHermesProjection(state: AgentState, activeAgents: number) {
-    const status: ToolStatus = { toolId: 'hermes', state, activeAgents, lastUpdated: Date.now() };
+    const timestamp = Date.now();
+    const status: ToolStatus = { toolId: 'hermes', state, activeAgents, lastUpdated: timestamp };
     this.statuses.set('hermes', status);
     this.broadcastStatus(status);
+    const event: NormalizedEvent = { toolId: 'hermes', state, timestamp, payload: { activeAgents } };
+    setImmediate(() => {
+      for (const listener of this.eventListeners) {
+        try { listener(event); }
+        catch (e) { logger.warn('[StateManager] event listener threw:', e); }
+      }
+    });
   }
 
   public getStatus(toolId: ToolId) {

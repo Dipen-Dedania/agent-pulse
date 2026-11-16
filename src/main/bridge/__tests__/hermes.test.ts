@@ -1,7 +1,7 @@
 // @vitest-environment node
 import http from 'http';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { HermesSessions, parseHermesEvent, HERMES_TTL_MS, type HermesEvent } from '../hermes';
+import { HermesSessions, parseHermesEvent, HERMES_TTL_MS, HERMES_TOOL_TTL_MS, type HermesEvent } from '../hermes';
 vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => [] } }));
 import { StatusStateManager } from '../state-manager';
 import { StatusBridgeServer } from '../server';
@@ -72,6 +72,30 @@ describe('Hermes correlations and bounded aggregation', () => {
     expect(s.expire(HERMES_TTL_MS + 100)).toBe(true);
     expect(s.snapshot()).toEqual({ state: 'idle', activeAgents: 0, sessions: [] });
   });
+  it('never expires a session waiting on a human; the normal TTL resumes once answered', () => {
+    const s = new HermesSessions();
+    s.accept(event('on_human_input_request', 100, a, r), 100);
+    expect(s.expire(100 + HERMES_TOOL_TTL_MS * 4)).toBe(false);
+    expect(s.snapshot().state).toBe('waiting');
+
+    const answeredAt = 100 + HERMES_TOOL_TTL_MS * 4;
+    s.accept(event('on_human_input_resolved', answeredAt, a, r), answeredAt);
+    expect(s.expire(answeredAt + HERMES_TTL_MS - 1)).toBe(false);
+    expect(s.expire(answeredAt + HERMES_TTL_MS)).toBe(true);
+  });
+  it('gives a running tool the longer silence allowance', () => {
+    const s = new HermesSessions();
+    s.accept(event('pre_llm_call', 100, a), 100);
+    s.accept(event('pre_tool_call', 200, a), 200);
+    expect(s.expire(200 + HERMES_TTL_MS)).toBe(false);
+    expect(s.snapshot().state).toBe('working');
+    expect(s.expire(200 + HERMES_TOOL_TTL_MS)).toBe(true);
+
+    const done = new HermesSessions();
+    done.accept(event('pre_tool_call', 100, a), 100);
+    done.accept(event('post_tool_call', 200, a), 200);
+    expect(done.expire(200 + HERMES_TTL_MS)).toBe(true);
+  });
   it('bounds sessions and request tombstones', () => {
     const s = new HermesSessions();
     for (let i = 0; i < 256; i++) expect(s.accept(event('pre_llm_call', 100, i.toString(16).padStart(64, '0')), 100)).toBe(true);
@@ -93,12 +117,23 @@ describe('Hermes correlations and bounded aggregation', () => {
       { ...valid, at: 1 }, { ...valid, at: 200_000 }, { ...valid, request: r },
       { ...valid, event: 'on_human_input_request' }, null]) expect(parseHermesEvent(bad, 100_000)).toBeNull();
   });
-  it('publishes aggregate only, never misattributes aggregate as a session event', async () => {
-    const manager = new StatusStateManager(); const listener = vi.fn(); manager.onEvent(listener);
-    manager.updateHermesProjection('working', 2); manager.updateHermesProjection('idle-active', 0);
+  it('publishes the aggregate to live listeners as a session-less event, never to the replay buffer', async () => {
+    const manager = new StatusStateManager();
+    const listener = vi.fn();
+    manager.onEvent(listener);
+    manager.updateHermesProjection('waiting', 2);
+    manager.updateHermesProjection('idle-active', 0);
     await new Promise(resolve => setImmediate(resolve));
     expect(manager.getStatus('hermes')).toMatchObject({ state: 'idle-active', activeAgents: 0 });
-    expect(listener).not.toHaveBeenCalled(); expect(manager.drainPending()).toEqual([]);
+    // Attention escalation and the screen-edge glow key off toolId + state.
+    expect(listener.mock.calls.map(([e]) => [e.toolId, e.state, e.payload])).toEqual([
+      ['hermes', 'waiting', { activeAgents: 2 }],
+      ['hermes', 'idle-active', { activeAgents: 0 }],
+    ]);
+    expect(manager.drainPending()).toEqual([]);
+  });
+  it('passes an explicit zero agent count through for other tools', () => {
+    const manager = new StatusStateManager();
     manager.updateStatus('cursor', 'working', { activeAgents: 2 });
     manager.updateStatus('cursor', 'idle-active', { activeAgents: 0 });
     expect(manager.getStatus('cursor')?.activeAgents).toBe(0);
@@ -106,7 +141,9 @@ describe('Hermes correlations and bounded aggregation', () => {
 });
 
 describe('Hermes authenticated HTTP boundary', () => {
-  const manager = new StatusStateManager(); let server: StatusBridgeServer; let port: number;
+  const manager = new StatusStateManager();
+  let server: StatusBridgeServer;
+  let port: number;
   const token = 'test-hermes-only-token';
   beforeAll(async () => {
     server = new StatusBridgeServer(manager, { port: 0, getHermesToken: () => token, getMcpToken: () => 'other-token' });

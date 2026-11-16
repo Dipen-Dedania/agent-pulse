@@ -73,7 +73,6 @@ export interface GuardrailConfig {
 // ping only), Copilot and Kiro have no confirmed synchronous deny path, so they
 // stay warn-only.
 export const BLOCKABLE_TOOLS: Record<ToolId, boolean> = {
-  hermes: false,
   'claude-code': true,
   'antigravity-cli': true,
   'openai-codex': true,
@@ -95,4 +94,6 @@ export const BLOCKABLE_TOOLS: Record<ToolId, boolean> = {
   // warn when the posting plugin predates the round-trip (no `canBlock`
   // marker on the event).
   'opencode': true,
+  // Hermes is observation-only: its adapter never prints hook directives.
+  'hermes': false,
 };

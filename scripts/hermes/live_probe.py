@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import tempfile
 import threading
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,7 +16,7 @@ from agent import shell_hooks
 from run_agent import AIAgent
 
 home = Path(os.environ['HERMES_HOME'])
-assert str(home).startswith('/tmp/'), 'Use disposable config only'
+assert home.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()), 'Use disposable config only'
 cfg = yaml.safe_load((home / 'config.yaml').read_text())
 specs = shell_hooks.iter_configured_hooks(cfg)
 assert len(specs) == 6

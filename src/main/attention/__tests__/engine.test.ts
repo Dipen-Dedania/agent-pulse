@@ -10,7 +10,11 @@ const { sendSpy, notificationCtor } = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({
   BrowserWindow: {
-    getAllWindows: () => [{ isDestroyed: () => false, webContents: { send: sendSpy } }],
+    getAllWindows: () => [{
+      id: 1, isDestroyed: () => false, isVisible: () => true, isMinimized: () => false,
+      getTitle: () => 'bubble', getBounds: () => ({}),
+      webContents: { send: sendSpy, isDestroyed: () => false, getURL: () => '' },
+    }],
   },
   Notification: class {
     constructor(opts: unknown) { notificationCtor(opts); }
@@ -23,7 +27,7 @@ const sendWebhookMock = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true })
 vi.mock('../../notifications/webhook', () => ({ sendWebhook: sendWebhookMock }));
 
 import { AttentionEngine } from '../engine';
-import type { StatusStateManager } from '../../bridge/state-manager';
+import { StatusStateManager } from '../../bridge/state-manager';
 
 // Stub state manager: capture the engine's listener so tests can emit events.
 function makeStubStateManager() {
@@ -64,6 +68,20 @@ describe('AttentionEngine', () => {
     notificationCtor.mockClear();
   });
   afterEach(() => vi.useRealTimers());
+
+  it('escalates a Hermes wait published through the live aggregate projection', () => {
+    const stateManager = new StatusStateManager();
+    const engine = new AttentionEngine(
+      cfg({ escalateAfterSeconds: 10, webhooks: [{ id: 'w', kind: 'discord', url: 'http://x', enabled: true }] }),
+      { stateManager },
+    );
+    engine.start();
+
+    stateManager.updateHermesProjection('waiting', 1);
+    vi.advanceTimersByTime(10_000);
+    expect(sendSpy).toHaveBeenCalledWith('attention:escalate', expect.objectContaining({ toolId: 'hermes' }));
+    expect(sendWebhookMock).toHaveBeenCalledTimes(1);
+  });
 
   it('escalates after the threshold when a tool stays waiting', () => {
     const { stateManager, emit } = makeStubStateManager();

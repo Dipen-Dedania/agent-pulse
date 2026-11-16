@@ -54,18 +54,59 @@ def observe(namespace):
         conn.close()
 
 
+def command_line(args, windows=os.name == 'nt'):
+    """Join argv the way Hermes's split_command_line splits it back.
+
+    POSIX: shlex.split, so shlex.join. Windows: shlex.split(posix=False) and one
+    layer of matching quotes stripped per token, so double-quote every token and
+    refuse embedded double quotes (backslashes are literal there)."""
+    if not windows:
+        import shlex
+        return shlex.join(args)
+    if any('"' in a for a in args):
+        raise ValueError('Paths containing double quotes are not supported on Windows')
+    return ' '.join('"' + a + '"' for a in args)
+
+
+def shell_quote(text, windows=os.name == 'nt'):
+    """Quote one argument for the user's shell: PowerShell on Windows, sh elsewhere."""
+    if windows:
+        return "'" + text.replace("'", "''") + "'"
+    import shlex
+    return shlex.quote(text)
+
+
+def lock_exclusive(handle):
+    """Serialize concurrent runs of this helper (cannot coordinate other editors)."""
+    if os.name == 'nt':
+        import msvcrt
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)  # retries ~10s, then OSError
+    else:
+        import fcntl
+        fcntl.flock(handle, fcntl.LOCK_EX)
+
+
 def configure(home, remove=False):
     """Explicit manual setup; never approves a hook or executes Hermes hooks."""
-    import fcntl
-    import shlex
     import uuid
-    from ruamel.yaml import YAML
+    try:
+        from ruamel.yaml import YAML
+    except ImportError:
+        raise SystemExit('This helper needs ruamel.yaml. Run: ' + shell_quote(sys.executable)
+                         + ' -m pip install --user ruamel.yaml   then retry.')
     yaml = YAML()
     yaml.version = (1, 1)  # Match Hermes config semantics, including yes/no booleans.
     yaml.preserve_quotes = True
     yaml.allow_duplicate_keys = False
-    from hermes_cli.plugins import VALID_HOOKS, SHELL_UNSUPPORTED_HOOKS
-    if not set(EVENTS) <= set(VALID_HOOKS) - set(SHELL_UNSUPPORTED_HOOKS):
+    # Hermes's launcher runs with its own import path, so hermes_cli is usually
+    # not importable here. Check capabilities when it is; otherwise rely on the
+    # documented minimum version (v0.23.1) and `hermes hooks doctor`.
+    try:
+        from hermes_cli.plugins import VALID_HOOKS, SHELL_UNSUPPORTED_HOOKS
+    except ImportError:
+        VALID_HOOKS = SHELL_UNSUPPORTED_HOOKS = None
+    if VALID_HOOKS is not None and not set(EVENTS) <= set(VALID_HOOKS) - set(SHELL_UNSUPPORTED_HOOKS):
         raise ValueError('Hermes lacks required shell hook capabilities')
     home = Path(home).expanduser().resolve()
     if not home.is_dir():
@@ -76,20 +117,32 @@ def configure(home, remove=False):
         raise ValueError('Refusing symlink setup target')
     folder.mkdir(mode=0o700, exist_ok=True)
     manifest_path = folder / 'manifest.json'
-    with (folder / 'setup.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with (folder / 'setup.lock').open('a+') as lock:
+        lock_exclusive(lock)
         before = cfg_path.read_bytes() if cfg_path.exists() else b''
         config = yaml.load(before) if before else {}
-        if not isinstance(config, dict) or not isinstance(config.get('hooks', {}), dict):
+        if config is None:
+            config = {}
+        # A bare `hooks:` key parses as null and means "no hooks yet".
+        if not isinstance(config, dict) or not isinstance(config.get('hooks') or {}, dict):
             raise ValueError('Expected config and hooks mappings')
         manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
         previous = manifest.get('command')
-        hooks = config.setdefault('hooks', {})
+        hooks = config.get('hooks')
+        if hooks is None:
+            hooks = {}  # attached below only when installing
         for event in EVENTS:
-            entries = hooks.get(event, [])
+            entries = hooks.get(event) or []
             if not isinstance(entries, list):
                 raise ValueError('Expected hook lists; existing config left untouched')
-            hooks[event] = [e for e in entries if not (isinstance(e, dict) and previous and e.get('command') == previous)]
+            kept = [e for e in entries if not (isinstance(e, dict) and previous and e.get('command') == previous)]
+            # Only touch keys this helper changed: a list emptied by removing our
+            # own entries goes away instead of lingering as `event: []`.
+            if len(kept) != len(entries):
+                if kept:
+                    hooks[event] = kept
+                else:
+                    del hooks[event]
         if not remove:
             source = Path(__file__).read_bytes()
             digest = hashlib.sha256(source).hexdigest()
@@ -101,9 +154,15 @@ def configure(home, remove=False):
             elif target.read_bytes() != source:
                 raise ValueError('Adapter content mismatch')
             namespace = manifest.get('namespace') or uuid.uuid4().hex
-            command = shlex.join([sys.executable, str(target), '--observe', namespace])
+            # The observer itself is stdlib-only, so the interpreter running this
+            # setup is a valid hook runtime; it must stay installed afterwards.
+            command = command_line([sys.executable, str(target), '--observe', namespace])
             for event in EVENTS:
+                if hooks.get(event) is None:
+                    hooks[event] = []
                 hooks[event].append({'command': command, 'timeout': 1, 'fail_closed': False})
+            if config.get('hooks') is None:
+                config['hooks'] = hooks
             manifest = {'namespace': namespace, 'command': command}
         if before != (cfg_path.read_bytes() if cfg_path.exists() else b''):
             raise ValueError('Config changed during setup; retry')
@@ -112,7 +171,7 @@ def configure(home, remove=False):
             os.chmod(backup, 0o600)
             out.write(before)
         temp = folder / 'config.tmp'
-        with temp.open('w') as out:
+        with temp.open('w', encoding='utf-8', newline='') as out:
             os.chmod(temp, 0o600)
             yaml.dump(config, out)
         os.replace(temp, cfg_path)
@@ -122,7 +181,7 @@ def configure(home, remove=False):
         print('Removed observer entries.' if remove else 'Configured observer. Consent NOT granted. Restart Hermes and approve only these observer commands individually.')
         print('Run hermes hooks doctor with this profile selected. Backup retained in agent-pulse-observer.')
         if remove and previous:
-            print('To remove only its old consent, run: hermes hooks revoke ' + shlex.quote(previous))
+            print('To remove only its old consent, run: hermes hooks revoke ' + shell_quote(previous))
 
 
 if __name__ == '__main__':
@@ -139,4 +198,8 @@ if __name__ == '__main__':
         modes.add_argument('--uninstall', action='store_true')
         parser.add_argument('--home', required=True)
         args = parser.parse_args()
-        configure(args.home, args.uninstall)
+        try:
+            configure(args.home, args.uninstall)
+        except (ValueError, OSError) as error:
+            # Setup refusals are expected outcomes, not crashes: one clear line.
+            raise SystemExit('Agent Pulse setup failed: ' + str(error))

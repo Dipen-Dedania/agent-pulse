@@ -12,7 +12,8 @@ import urllib.request
 root = Path(__file__).resolve().parents[2]
 home = Path(tempfile.mkdtemp(prefix='pulse-hermes-live-'))
 (home / '.hermes').mkdir()
-env = dict(os.environ, HOME=str(home), HERMES_HOME=str(home / '.hermes'),
+# USERPROFILE too: Node's os.homedir() and Python's Path.home() read it on Windows.
+env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), HERMES_HOME=str(home / '.hermes'),
            HERMES_RUNTIME_DIR=str(home / 'runtime'), PYTHONPATH=os.environ['HERMES_TEST_SOURCE'],
            AGENT_PULSE_LOG_LEVEL='debug')
 python = os.environ['HERMES_TEST_PYTHON']

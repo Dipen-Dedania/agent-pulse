@@ -5,6 +5,7 @@ import { ToolId, StatusLineRuntime } from '../../common/types';
 import { whichAsync } from './which';
 import { opencodeConfigDir, opencodeDataDirs } from './opencode-paths';
 import { museConfigDir, museWindowsInstallDir } from './muse-paths';
+import { hermesHome } from '../bridge/hermes-connection';
 
 export interface ToolDetection {
   installed: boolean;
@@ -58,7 +59,7 @@ export class ToolDetector {
   }
 
   private async runDetectAll(): Promise<DetectionResult> {
-    const [claudeCode, cursor, vscodeCopilot, openaiCodex, kiro, antigravityCli, grok, opencode, museCode] =
+    const [claudeCode, cursor, vscodeCopilot, openaiCodex, kiro, antigravityCli, grok, opencode, museCode, hermes] =
       await Promise.all([
         this.detectClaudeCode(),
         this.detectCursor(),
@@ -69,6 +70,7 @@ export class ToolDetector {
         this.detectGrok(),
         this.detectOpencode(),
         this.detectMuseCode(),
+        this.detectHermes(),
       ]);
     return {
       'claude-code': claudeCode,
@@ -80,7 +82,7 @@ export class ToolDetector {
       'grok': grok,
       'opencode': opencode,
       'muse-code': museCode,
-      hermes: { installed: !!(await this.whichCommand('hermes')) || existsSync(process.env.HERMES_HOME || path.join(os.homedir(), '.hermes')) },
+      'hermes': hermes,
     };
   }
 
@@ -263,6 +265,17 @@ export class ToolDetector {
     if (existsSync(configDir)) return { installed: true, location: configDir };
 
     const cliPath = await this.whichCommand('grok');
+    if (cliPath) return { installed: true, location: cliPath };
+    return { installed: false };
+  }
+
+  private async detectHermes(): Promise<ToolDetection> {
+    // Hermes keeps its profile under HERMES_HOME, else %LOCALAPPDATA%\hermes on
+    // native Windows and ~/.hermes elsewhere (including WSL2's own home).
+    const configDir = hermesHome();
+    if (existsSync(configDir)) return { installed: true, location: configDir };
+
+    const cliPath = await this.whichCommand('hermes');
     if (cliPath) return { installed: true, location: cliPath };
     return { installed: false };
   }

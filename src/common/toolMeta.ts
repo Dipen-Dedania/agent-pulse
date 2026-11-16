@@ -24,15 +24,6 @@ const COMMON_TROUBLESHOOTING = [
 ];
 
 export const TOOL_META: Record<ToolId, ToolMeta> = {
-  hermes: {
-    label: 'Hermes', icon: './assets/hermes.svg', badges: ['Experimental', 'Observation only'],
-    hookInfo: {
-      mechanism: 'Filtered shell hooks · manual setup', configFile: '$HERMES_HOME/config.yaml',
-      description: 'Live status only for Hermes v0.23.1. Install with the Hermes Python interpreter using the repository helper below, then approve only its commands in Hermes. Setup does not grant consent. No blocking, transcripts, usage accounting or session analytics. Quiet sessions expire after five minutes; this does not imply process death.',
-      snippet: 'python public/hermes/agent_pulse.py --install --home /absolute/path/to/hermes-profile\nhermes hooks doctor',
-      troubleshooting: ['See docs/hermes.md in the Agent Pulse repository for installation and removal.', 'Use Hermes v0.23.1 and its Python interpreter. Restart Hermes and approve each new Agent Pulse command individually.', 'Do not enable global hook auto-accept. Synthetic hooks test is not proof of runtime consent.', 'Multiple profiles require separate installations. Start Agent Pulse before testing.'],
-    },
-  },
   'claude-code': {
     label: 'Claude Code',
     icon: './assets/claude.png',
@@ -331,6 +322,40 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
         'Confirm hooks = true is set under [features] in ~/.codex/config.toml.',
         'Verify ~/.codex/hooks/agent-pulse.sh is executable.',
         ...COMMON_TROUBLESHOOTING,
+      ],
+    },
+  },
+  'hermes': {
+    label: 'Hermes',
+    icon: './assets/hermes.svg',
+    badges: ['Experimental', 'Observation only'],
+    hookInfo: {
+      mechanism: 'Filtered shell hooks · manual setup',
+      configFile: '<Hermes home>/config.yaml',
+      description:
+        'Live status only, for Hermes v0.23.1 or newer on macOS, Linux and native Windows. While Hermes is ' +
+        'installed, Agent Pulse keeps a setup helper at ~/.agent-pulse/hermes/agent_pulse.py. Run it with any ' +
+        'Python 3.9+ that has ruamel.yaml; it adds six filtered command hooks to your Hermes profile and ' +
+        'leaves every other setting alone. It never grants consent, so approve only its commands when ' +
+        'Hermes asks. The hooks send only event names, timestamps and hashed IDs. No blocking, transcripts, ' +
+        'usage accounting or session history. A pending question stays "waiting" until it is answered; ' +
+        'other quiet sessions expire (30 minutes inside a running tool, otherwise 5).',
+      snippet:
+        '# macOS / Linux\n' +
+        'python3 -m pip install --user ruamel.yaml\n' +
+        'python3 ~/.agent-pulse/hermes/agent_pulse.py --install --home ~/.hermes\n\n' +
+        '# Windows (PowerShell)\n' +
+        'py -m pip install --user ruamel.yaml\n' +
+        'py "$env:USERPROFILE\\.agent-pulse\\hermes\\agent_pulse.py" --install --home "$env:LOCALAPPDATA\\hermes"\n\n' +
+        '# then, in the same profile\n' +
+        'hermes hooks doctor',
+      troubleshooting: [
+        'Start Agent Pulse before setup, then restart Hermes and approve each Agent Pulse command individually.',
+        'Keep the Python you ran setup with installed: the hooks use it. Re-run setup after replacing it.',
+        'Do not enable global hook auto-accept. `hermes hooks test` is not proof of runtime consent.',
+        'Each Hermes profile needs its own setup (pass that profile\'s folder to --home).',
+        'Hermes inside WSL2 is not supported yet: it has its own home folder and loopback network.',
+        'Remove with the same command and --uninstall; see docs/hermes.md in the Agent Pulse repository.',
       ],
     },
   },

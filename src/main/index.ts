@@ -15,7 +15,7 @@ import { TrayManager } from './windows/tray';
 import { ENABLE_APP_MENU } from './feature-flags';
 import { StatusStateManager } from './bridge/state-manager';
 import { StatusBridgeServer } from './bridge/server';
-import { writeHermesConnection } from './bridge/hermes-connection';
+import { writeHermesConnection, publishHermesHelper } from './bridge/hermes-connection';
 import { ToolDetector, DetectionResult } from './installer/detector';
 import { ConfigWriter } from './installer/config-writer';
 import path from 'path';
@@ -161,6 +161,8 @@ class AgentPulseApp {
     // direction, and Settings reports MCP capture as unavailable.
     this.mcpConnection = writeConnectionFile(BRIDGE_PORT);
     const hermesToken = writeHermesConnection(BRIDGE_PORT);
+    // public/** ships unpacked from the asar, so Electron's fs reads it either way.
+    publishHermesHelper(path.join(app.getAppPath(), 'public', 'hermes', 'agent_pulse.py'));
     this.bridgeServer = new StatusBridgeServer(this.stateManager, {
       getGuardrailConfig: () => this.userConfig.guardrails,
       onGuardrailEvent: (event) => this.handleGuardrailEvent(event),

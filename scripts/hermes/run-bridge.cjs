@@ -3,6 +3,12 @@
 const { StatusBridgeServer } = require('../../dist/main/bridge/server');
 const { StatusStateManager } = require('../../dist/main/bridge/state-manager');
 const { writeHermesConnection } = require('../../dist/main/bridge/hermes-connection');
+const os = require('os');
+const path = require('path');
+// Never rotate the real user's ~/.agent-pulse/hermes.json: run-live.py points
+// HOME/USERPROFILE at a temp dir, and anything else is refused.
+const rel = path.relative(os.tmpdir(), os.homedir());
+if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('Run with HOME/USERPROFILE under the temp dir (see run-live.py)');
 const manager = new StatusStateManager();
 const token = writeHermesConnection(4242);
 if (!token) throw new Error('Cannot publish isolated connection');

@@ -18,9 +18,9 @@ export default function Hero() {
   const currentOS = detectOS();
   const osLabel = OS_LABELS[currentOS];
 
-  // Primary download href: use the asset URL for the detected OS when available;
-  // fall back to the releases page so the button is never a dead-end.
-  const downloadHref = release.assets[currentOS] ?? RELEASES_URL;
+  // Mac browsers do not reliably reveal CPU architecture: offer explicit choices.
+  // Other platforms use their installer or fall back to the releases page.
+  const downloadHref = currentOS === 'mac' ? '#download' : release.assets[currentOS] ?? RELEASES_URL;
 
   // Version caption text — only show the version fragment when the API has loaded it.
   const versionCaption = release.version
@@ -85,12 +85,12 @@ export default function Hero() {
                     fontSize: 16,
                     lineHeight: 1.5,
                   }}
-                  // Open installer downloads directly; fall-back releases page opens in same tab
-                  {...(release.assets[currentOS]
+                  // Keep the Mac chooser in-page; open the fallback releases page in a new tab.
+                  {...(currentOS === 'mac' || release.assets[currentOS]
                     ? {}
                     : { target: '_blank', rel: 'noopener noreferrer' })}
                 >
-                  Download for {osLabel}
+                  {currentOS === 'mac' ? 'Choose your Mac download' : `Download for ${osLabel}`}
                 </a>
 
                 {/* Version caption */}

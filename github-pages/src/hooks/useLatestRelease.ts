@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
+import { pickMacDownloads, type MacDownloads } from './macDownloads';
 
 export const REPO_URL = 'https://github.com/Dipen-Dedania/agent-pulse';
 export const RELEASES_URL = `${REPO_URL}/releases/latest`;
 export const ISSUES_URL = `${REPO_URL}/issues`;
-export const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`;
+export const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE.md`;
 
 export type OS = 'windows' | 'mac' | 'linux';
 
@@ -18,6 +19,7 @@ export interface LatestRelease {
    * dead-end.
    */
   assets: Record<OS, string | null>;
+  macDownloads: MacDownloads;
   /** True once the fetch settled (success or failure) */
   loaded: boolean;
 }
@@ -54,18 +56,9 @@ const EMPTY: LatestRelease = {
   version: null,
   publishedAt: null,
   assets: { windows: null, mac: null, linux: null },
+  macDownloads: { appleSilicon: null, intel: null },
   loaded: false,
 };
-
-function pickDmg(assets: GitHubAsset[]): string | null {
-  const dmgs = assets.filter((a) => a.name.endsWith('.dmg'));
-  if (dmgs.length === 0) return null;
-  const preferred =
-    dmgs.find((a) => a.name.toLowerCase().includes('universal')) ??
-    dmgs.find((a) => a.name.toLowerCase().includes('arm64')) ??
-    dmgs[0];
-  return preferred.browser_download_url;
-}
 
 // Module-level cache so Hero and DownloadSection share a single API call
 // (GitHub allows 60 unauthenticated requests per hour per IP).
@@ -85,10 +78,12 @@ function fetchLatestRelease(): Promise<LatestRelease> {
       assets: {
         windows:
           release.assets.find((a) => a.name.endsWith('.exe'))?.browser_download_url ?? null,
-        mac: pickDmg(release.assets),
+        // A generic Mac button must not guess the CPU architecture.
+        mac: null,
         linux:
           release.assets.find((a) => a.name.endsWith('.AppImage'))?.browser_download_url ?? null,
       },
+      macDownloads: pickMacDownloads(release.assets),
       loaded: true,
     }))
     .catch(() => ({ ...EMPTY, loaded: true }));

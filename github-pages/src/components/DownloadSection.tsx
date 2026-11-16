@@ -92,7 +92,7 @@ const platforms: PlatformCard[] = [
     os: 'mac',
     label: 'macOS',
     buttonText: 'Download .dmg',
-    caption: 'Universal (Apple Silicon + Intel)',
+    caption: 'Choose Apple Silicon (M-series) or Intel',
     Icon: MacIcon,
   },
   {
@@ -109,7 +109,7 @@ const platforms: PlatformCard[] = [
 // ---------------------------------------------------------------------------
 
 export default function DownloadSection() {
-  const { version, publishedAt, assets, loaded } = useLatestRelease();
+  const { version, publishedAt, assets, macDownloads, loaded } = useLatestRelease();
   const userOS = detectOS();
 
   // Format publishedAt as "Month DD, YYYY"
@@ -169,22 +169,41 @@ export default function DownloadSection() {
                 </h3>
 
                 {/* Download button */}
-                <a
-                  href={href}
-                  {...(href !== RELEASES_URL || !assets[os]
-                    ? href.startsWith('https://github.com')
-                      ? { target: '_blank', rel: 'noreferrer' }
-                      : {}
-                    : { target: '_blank', rel: 'noreferrer' })}
-                  className={[
-                    'mb-4 w-full rounded-buttons px-6 py-3 text-body-sm font-semibold transition-opacity hover:opacity-90',
-                    isRecommended
-                      ? 'bg-signal-blue text-paper shadow-sm-3'
-                      : 'border border-mist-border bg-paper text-midnight-navy',
-                  ].join(' ')}
-                >
-                  {buttonText}
-                </a>
+                {os === 'mac' ? (
+                  <div className='mb-4 flex w-full flex-col gap-3'>
+                    {([
+                      ['Apple Silicon', macDownloads.appleSilicon],
+                      ['Intel', macDownloads.intel],
+                    ] as const).map(([architecture, url]) => (
+                      <a
+                        key={architecture}
+                        href={url ?? RELEASES_URL}
+                        target='_blank'
+                        rel='noreferrer'
+                        className='w-full rounded-buttons border border-mist-border bg-paper px-4 py-3 text-body-sm font-semibold text-midnight-navy transition-opacity hover:opacity-90'
+                      >
+                        {url ? 'Download' : 'View releases for'} {architecture}
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <a
+                    href={href}
+                    {...(href !== RELEASES_URL || !assets[os]
+                      ? href.startsWith('https://github.com')
+                        ? { target: '_blank', rel: 'noreferrer' }
+                        : {}
+                      : { target: '_blank', rel: 'noreferrer' })}
+                    className={[
+                      'mb-4 w-full rounded-buttons px-6 py-3 text-body-sm font-semibold transition-opacity hover:opacity-90',
+                      isRecommended
+                        ? 'bg-signal-blue text-paper shadow-sm-3'
+                        : 'border border-mist-border bg-paper text-midnight-navy',
+                    ].join(' ')}
+                  >
+                    {buttonText}
+                  </a>
+                )}
 
                 {/* File caption */}
                 <p className='text-micro text-steel-blue'>{caption}</p>

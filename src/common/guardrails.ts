@@ -94,4 +94,6 @@ export const BLOCKABLE_TOOLS: Record<ToolId, boolean> = {
   // warn when the posting plugin predates the round-trip (no `canBlock`
   // marker on the event).
   'opencode': true,
+  // Hermes is observation-only: its adapter never prints hook directives.
+  'hermes': false,
 };

@@ -74,7 +74,7 @@ describe('ToolDetector', () => {
   it('covers every tool id in one result', async () => {
     const result = await new ToolDetector().detectAll();
     expect(Object.keys(result).sort()).toEqual(
-      ['antigravity-cli', 'claude-code', 'cursor', 'grok', 'kiro', 'muse-code', 'openai-codex', 'opencode', 'vscode-copilot'],
+      ['antigravity-cli', 'claude-code', 'cursor', 'grok', 'hermes', 'kiro', 'muse-code', 'openai-codex', 'opencode', 'vscode-copilot'],
     );
   });
 

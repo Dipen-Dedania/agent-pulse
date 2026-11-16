@@ -64,6 +64,8 @@ const TOOL_APP_NAME: Record<ToolId, { mac: string | null; linux: string | null }
   'opencode':       { mac: null,                  linux: null },
   // Muse Code is a CLI/TUI — terminal-only, same as the other CLIs.
   'muse-code':      { mac: null,                  linux: null },
+  // Hermes is a CLI/TUI — terminal-only.
+  'hermes':         { mac: null,                  linux: null },
 };
 
 // Last-resort click target: the tool's product page. Used only after every
@@ -80,6 +82,7 @@ const TOOL_WEB_URLS: Record<ToolId, string> = {
   'grok':            'https://grok.com',
   'opencode':        'https://opencode.ai',
   'muse-code':       'https://dev.meta.ai/docs/muse-code',
+  'hermes':          'https://github.com/NousResearch/hermes-agent',
 };
 
 // ─── Windows ─────────────────────────────────────────────────────────────────
@@ -117,6 +120,10 @@ const TOOL_CLI_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
   // a `muse.cmd` launcher; Get-Process -Name accepts the wildcard. macOS /
   // Linux installs expose a plain `muse` binary.
   'muse-code':      ['muse', 'muse-bin*'],
+  // Hermes on Windows runs under a hermes.exe launcher that stays the parent
+  // of its managed Python. The POSIX launcher is an sh wrapper that `exec`s
+  // Python, so there the name rarely matches and the click falls through.
+  'hermes':         ['hermes'],
 };
 
 // URI schemes registered by GUI editors (HKCR on Windows, LaunchServices on

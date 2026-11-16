@@ -93,6 +93,10 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
 
   // ── Wire bridge event stream → events writer + sessions deriver. ─────
   const onBridgeEvent = (event: NormalizedEvent) => {
+    // Hermes publishes one aggregate status over all its sessions (see
+    // StatusStateManager.updateHermesProjection). Recording it would invent a
+    // single tool/project session and false turn counts, so it stays live-only.
+    if (event.toolId === 'hermes') return;
     // Transcript reading runs first so any token delta is staged before the
     // events-writer attaches it to the row being written. Codex is triggered
     // even without a hook-supplied path — the reader resolves its rollout file

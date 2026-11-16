@@ -1003,7 +1003,7 @@ export const SettingsPanel: React.FC<{ onBack?: () => void }> = ({ onBack }) => 
                     {toolDetected ? (
                       <>
                         <p className='text-xs text-muted mt-0.5'>
-                          {config.hookInstalled
+                          {toolId === 'hermes' ? 'Manual setup · verify consent in Hermes' : config.hookInstalled
                             ? '✓ Hook installed'
                             : 'Hook not installed'}
                         </p>
@@ -1059,11 +1059,11 @@ export const SettingsPanel: React.FC<{ onBack?: () => void }> = ({ onBack }) => 
                     </Badge>
                   ) : (
                     <Button
-                      onClick={() => handleInstallHook(toolId)}
+                      onClick={() => toolId === 'hermes' ? setActiveInfo(toolId) : handleInstallHook(toolId)}
                       disabled={!toolDetected}
                       className='flex-1'
                     >
-                      Install Hook
+                      {toolId === 'hermes' ? 'Setup guide' : 'Install Hook'}
                     </Button>
                   )}
                   <Button

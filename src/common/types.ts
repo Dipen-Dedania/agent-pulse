@@ -1,4 +1,4 @@
-export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'antigravity-cli' | 'grok' | 'opencode' | 'muse-code';
+export type ToolId = 'claude-code' | 'cursor' | 'vscode-copilot' | 'openai-codex' | 'kiro' | 'antigravity-cli' | 'grok' | 'opencode' | 'muse-code' | 'hermes';
 export type AgentState = 'working' | 'waiting' | 'idle' | 'idle-active' | 'error';
 
 // Animated characters that can replace a bubble's orb. 'none' = show the orb.

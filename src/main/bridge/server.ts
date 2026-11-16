@@ -1,4 +1,5 @@
 import http from 'http';
+import { HermesSessions, parseHermesEvent } from './hermes';
 import { StatusStateManager } from './state-manager';
 import { BRIDGE_PORT } from './config';
 import { ToolId, AgentState, NormalizedEvent } from '../../common/types';
@@ -33,6 +34,7 @@ export interface BacklogMcpApi {
 }
 
 export interface BridgeOptions {
+  getHermesToken?: () => string | null;
   getGuardrailConfig?: () => GuardrailConfig;
   onGuardrailEvent?: (event: GuardrailEvent) => void;
   // Secret Protection (separate guardrail family — gates file *reads*).
@@ -212,6 +214,11 @@ export class StatusBridgeServer {
   private port: number = BRIDGE_PORT;
   private options: BridgeOptions;
   private listenAttempts = 0;
+  private hermes = new HermesSessions();
+  private hermesActive = 0;
+  private hermesWindow = 0;
+  private hermesCount = 0;
+
 
   constructor(stateManager: StatusStateManager, options: BridgeOptions = {}) {
     this.stateManager = stateManager;
@@ -248,6 +255,11 @@ export class StatusBridgeServer {
       logger.error(`[Bridge] Failed to bind 127.0.0.1:${this.port} (${err.code ?? 'unknown'}): ${err.message}`);
       this.options.onListenError?.(err, this.port);
     });
+    const timer = setInterval(() => {
+      if (this.hermes.expire()) this.publishHermes();
+    }, 5_000);
+    timer.unref();
+    this.server.once('close', () => clearInterval(timer));
     this.listen();
   }
 
@@ -275,6 +287,11 @@ export class StatusBridgeServer {
       logger.warn(`[Bridge] rejected request with non-local Host header: ${req.headers.host}`);
       res.writeHead(403);
       res.end();
+      return;
+    }
+
+    if (req.url === '/hermes/event' || req.url === '/hermes/status') {
+      await this.handleHermes(req, res);
       return;
     }
 
@@ -377,6 +394,62 @@ export class StatusBridgeServer {
       res.writeHead(404);
       res.end();
     }
+  }
+
+  private publishHermes() {
+    const snap = this.hermes.snapshot();
+    this.stateManager.updateHermesProjection(snap.state, snap.activeAgents);
+  }
+
+  private async handleHermes(req: http.IncomingMessage, res: http.ServerResponse) {
+    const reply = (code: number, body?: unknown) => {
+      res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(body === undefined ? undefined : JSON.stringify(body));
+    };
+    if (req.headers.origin || !tokensMatch(this.options.getHermesToken?.(), req.headers['x-pulse-token'])) {
+      reply(401); return;
+    }
+    if (req.method === 'GET' && req.url === '/hermes/status') {
+      if (this.hermes.expire()) this.publishHermes();
+      reply(200, this.hermes.snapshot()); return;
+    }
+    if (req.method !== 'POST' || req.url !== '/hermes/event') { reply(405); return; }
+    if (req.headers['content-type'] !== 'application/json') { reply(415); return; }
+    const window = Math.floor(Date.now() / 1000);
+    if (window !== this.hermesWindow) { this.hermesWindow = window; this.hermesCount = 0; }
+    if (++this.hermesCount > 100 || this.hermesActive >= 16) { reply(429); return; }
+    this.hermesActive++;
+    try {
+      // Separate reader: byte bound + absolute deadline, no raw-body logging.
+      const body = await new Promise<string | null>(resolve => {
+        const chunks: Buffer[] = []; let bytes = 0; let done = false;
+        const finish = (value: string | null) => {
+          if (done) return; done = true; clearTimeout(timer); resolve(value);
+        };
+        const timer = setTimeout(() => { finish(null); req.destroy(); }, 1000);
+        req.on('data', (chunk: Buffer) => {
+          if (done) return;
+          bytes += chunk.length;
+          if (bytes > 2048) { finish(null); req.resume(); return; }
+          chunks.push(chunk);
+        });
+        req.on('end', () => finish(Buffer.concat(chunks).toString('utf8')));
+        req.on('aborted', () => finish(null)); req.on('error', () => finish(null));
+      });
+      if (body === null) {
+        if (!res.destroyed) {
+          res.setHeader('Connection', 'close');
+          res.once('finish', () => req.destroy());
+          reply(413);
+        }
+        return;
+      }
+      let event;
+      try { event = parseHermesEvent(JSON.parse(body)); } catch { /* reject silently */ }
+      if (!event) { reply(400); return; }
+      if (!this.hermes.accept(event)) { reply(429); return; }
+      this.publishHermes(); reply(204);
+    } finally { this.hermesActive--; }
   }
 
   /**

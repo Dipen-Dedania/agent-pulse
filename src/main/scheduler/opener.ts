@@ -1,4 +1,5 @@
-// The scheduler's one action: a minimal `claude -p --model haiku` ping. It
+// The scheduler's one action: a minimal `claude -p --model haiku` ping that
+// denies permission prompts (there is no interactive host to answer them). It
 // anchors a fresh 5-hour window (if the previous one expired) and refreshes
 // Claude Code's OAuth token in the same call. No prep, no content — just the
 // reset. Runs inside the Electron main process, i.e. the user's logged-in
@@ -199,7 +200,9 @@ export function fireOpener(): Promise<OpenerResult> {
   }
   return spawnPing({
     bin,
-    args: ['-p', PROMPT, '--model', 'haiku'],
+    // Scheduled pings have no interactive host to answer permission prompts.
+    // Deny tools that would prompt rather than blocking until the timeout.
+    args: ['-p', PROMPT, '--model', 'haiku', '--permission-prompts', 'none'],
     timeoutMs: OPENER_TIMEOUT_MS,
     logTag: '[scheduler/opener]',
     onEnoent: resetClaudeBinCache,

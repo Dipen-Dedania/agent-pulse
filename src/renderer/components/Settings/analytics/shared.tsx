@@ -15,7 +15,8 @@ export function formatDuration(ms: number): string {
 export function formatCompactNumber(n: number): string {
   if (n < 1000) return n.toString();
   if (n < 1_000_000) return (n / 1000).toFixed(n < 10_000 ? 1 : 0) + 'k';
-  return (n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0) + 'M';
+  if (n < 1_000_000_000) return (n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0) + 'M';
+  return (n / 1_000_000_000).toFixed(n < 10_000_000_000 ? 2 : 1) + 'B';
 }
 
 // Sub-minute-aware duration, for think-time gaps (e.g. 78_000 → "1m 18s").
@@ -55,6 +56,31 @@ export { Segmented } from '../../Shared/Segmented';
 export const InfoPill: React.FC<{ children: React.ReactNode; tone?: 'info' | 'warn' }> = ({ children, tone = 'info' }) => (
   <Badge tone={tone} variant='tag' size='sm'>{children}</Badge>
 );
+
+// Row heading for a per-session stat row (statusline-feed cards): the session's
+// title when Claude Code has one, else the project name, with the project and
+// short session id underneath so the row can still be matched to `--resume`.
+export const SessionLabel: React.FC<{
+  sessionId: string;
+  title: string | null;
+  project: string | null;
+}> = ({ sessionId, title, project }) => {
+  const shortId = sessionId.slice(0, 8);
+  const heading = title ?? project;
+  const detail = title && project ? `${project} · ${shortId}` : shortId;
+  return (
+    <div className='flex-1 min-w-0'>
+      {heading ? (
+        <>
+          <p className='text-xs font-medium text-primary truncate'>{heading}</p>
+          <p className='text-[11px] font-mono text-muted truncate'>{detail}</p>
+        </>
+      ) : (
+        <p className='text-xs font-mono text-primary truncate'>{shortId}</p>
+      )}
+    </div>
+  );
+};
 
 // InfoTooltip (the "i" popover) and useChartTip (the cursor-following chart
 // tip) are app-wide primitives — they now live in components/Shared alongside

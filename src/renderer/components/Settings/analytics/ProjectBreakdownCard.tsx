@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
+import { ProjectBreakdownRow } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
 import { AnimatedNumber, Tooltip } from '../../Shared';
@@ -6,9 +7,74 @@ import { useProjectBreakdown } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
 
+type SortKey = 'name' | 'tokens' | 'time';
+type SortDir = 'asc' | 'desc';
+
+const SORT_VALUE: Record<SortKey, (row: ProjectBreakdownRow) => number | string> = {
+  name: (row) => row.displayName.toLowerCase(),
+  tokens: (row) => row.tokensIn + row.tokensOut,
+  time: (row) => row.activeMs,
+};
+
+const SortHeader: React.FC<{
+  label: string;
+  sortKey: SortKey;
+  active: SortKey;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
+  className?: string;
+}> = ({ label, sortKey, active, dir, onSort, className = '' }) => {
+  const isActive = active === sortKey;
+  return (
+    <div
+      role='columnheader'
+      aria-sort={isActive ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={`flex ${className}`}
+    >
+      <button
+        type='button'
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-medium cursor-pointer transition-colors hover:text-primary ${
+          isActive ? 'text-primary' : 'text-faint'
+        }`}
+      >
+        {label}
+        <span aria-hidden='true' className={isActive ? '' : 'opacity-0'}>
+          {dir === 'asc' ? '↑' : '↓'}
+        </span>
+      </button>
+    </div>
+  );
+};
+
 export const ProjectBreakdownCard: React.FC = () => {
   const range = useGlobalRange();
   const { data, loading } = useProjectBreakdown(range);
+  const [sortKey, setSortKey] = useState<SortKey>('time');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      // Names read naturally A→Z; numeric columns lead with the biggest.
+      setSortDir(key === 'name' ? 'asc' : 'desc');
+    }
+  };
+
+  const sortedRows = useMemo(() => {
+    if (!data) return [];
+    const value = SORT_VALUE[sortKey];
+    const sign = sortDir === 'asc' ? 1 : -1;
+    return [...data.rows].sort((a, b) => {
+      const av = value(a);
+      const bv = value(b);
+      const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : av - (bv as number);
+      // Ties fall back to active time so the order stays stable across refreshes.
+      return cmp !== 0 ? cmp * sign : b.activeMs - a.activeMs;
+    });
+  }, [data, sortKey, sortDir]);
 
   return (
     <Card
@@ -21,7 +87,12 @@ export const ProjectBreakdownCard: React.FC = () => {
         <EmptyState message='No project-tagged activity yet. Install hooks and run agents inside a git repo.' />
       ) : (
         <div className='flex flex-col gap-1.5'>
-          {data.rows.map((row) => (
+          <div role='row' className='flex items-center gap-3 px-3'>
+            <SortHeader label='Project' sortKey='name' active={sortKey} dir={sortDir} onSort={handleSort} className='flex-1 min-w-0' />
+            <SortHeader label='Tokens' sortKey='tokens' active={sortKey} dir={sortDir} onSort={handleSort} className='justify-end shrink-0 w-20' />
+            <SortHeader label='Time' sortKey='time' active={sortKey} dir={sortDir} onSort={handleSort} className='justify-end shrink-0 w-20' />
+          </div>
+          {sortedRows.map((row) => (
             <div key={row.projectId} className='flex items-center gap-3 px-3 py-2 glass-secondary rounded-lg'>
               <div className='flex-1 min-w-0'>
                 <Tooltip content={row.projectPath}>

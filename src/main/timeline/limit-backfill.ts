@@ -22,14 +22,14 @@ const MAX_FILES = 5000;
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 /** ~/.claude/projects, honoring CLAUDE_CONFIG_DIR like Claude Code itself. */
-function claudeProjectsDir(): string {
+export function claudeProjectsDir(): string {
   const base = process.env.CLAUDE_CONFIG_DIR
     ? process.env.CLAUDE_CONFIG_DIR
     : path.join(os.homedir(), '.claude');
   return path.join(base, 'projects');
 }
 
-function listTranscripts(dir: string): string[] {
+export function listTranscripts(dir: string): string[] {
   const out: string[] = [];
   let projectDirs: fs.Dirent[];
   try { projectDirs = fs.readdirSync(dir, { withFileTypes: true }); }

@@ -3,7 +3,7 @@ import { CacheHealthDayBucket } from '../../../../common/timeline-types';
 import { AnimatedNumber, Eyebrow, Meter } from '../../Shared';
 import { useCacheHealth } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
-import { Card, EmptyState, InfoPill, SkeletonLine, useChartTip } from './shared';
+import { Card, EmptyState, InfoPill, SessionLabel, SkeletonLine, useChartTip } from './shared';
 
 // Long ranges (90d/1y) have too many days for one bar each — roll up to weekly
 // averages, same readability guard LimitHitsCard uses.
@@ -78,7 +78,7 @@ export const CacheHealthCard: React.FC = () => {
             {data.rows.filter((r) => r.hitRatio !== null).slice(0, 5).map((r) => (
               <div key={r.sessionId} className='glass-secondary p-3'>
                 <div className='flex items-center gap-2 mb-2'>
-                  <p className='text-xs font-mono text-primary flex-1 truncate'>{r.sessionId.slice(0, 8)}</p>
+                  <SessionLabel sessionId={r.sessionId} title={r.title} project={r.project} />
                   {r.model && <p className='text-[11px] text-muted truncate max-w-[40%]'>{r.model}</p>}
                   {r.warm === false && <InfoPill tone='warn'>cold</InfoPill>}
                 </div>

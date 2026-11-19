@@ -10,6 +10,10 @@ import { HeatmapCard } from './analytics/HeatmapCard';
 import { HourRhythmCard } from './analytics/HourRhythmCard';
 import { ToolMixCard } from './analytics/ToolMixCard';
 import { ModelUsageCard } from './analytics/ModelUsageCard';
+import { ActionMixCard } from './analytics/ActionMixCard';
+import { LinesChangedCard } from './analytics/LinesChangedCard';
+import { PromptSizeCard } from './analytics/PromptSizeCard';
+import { SubagentUseCard } from './analytics/SubagentUseCard';
 import { ProjectBreakdownCard } from './analytics/ProjectBreakdownCard';
 import { TokensTimelineCard } from './analytics/TokensTimelineCard';
 import { GuardrailsCard } from './analytics/GuardrailsCard';
@@ -21,6 +25,7 @@ import { CacheHealthCard } from './analytics/CacheHealthCard';
 import { ContextPressureCard } from './analytics/ContextPressureCard';
 import { LifecycleCard } from './analytics/LifecycleCard';
 import { SummaryHeroCard } from './analytics/SummaryHeroCard';
+import { LifetimeTokensCard } from './analytics/LifetimeTokensCard';
 import { Card, Segmented } from './analytics/shared';
 import { refreshAnalytics, useAnalyticsFreshness } from './analytics/useAnalytics';
 import { AnalyticsRangeProvider, RANGE_OPTIONS } from './analytics/rangeContext';
@@ -175,6 +180,9 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
           <UnavailableBanner reason={status.reason ?? 'Pulse Timeline is currently unavailable.'} />
         )}
 
+        {/* All-time total — sits above the filter row because no range scopes it. */}
+        <LifetimeTokensCard />
+
         {/* Filter row: the range scopes every card below it (the digest and
             trailing-window cards keep their intrinsic windows and say so). */}
         <div className='mb-4 flex items-center justify-between gap-3 flex-wrap'>
@@ -196,6 +204,12 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
         <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
           <HourRhythmCard />
           <ToolMixCard />
+        </div>
+        <ActionMixCard />
+        <LinesChangedCard />
+        <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
+          <PromptSizeCard />
+          <SubagentUseCard />
         </div>
         <ModelUsageCard />
         <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>

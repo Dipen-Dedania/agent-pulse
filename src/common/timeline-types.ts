@@ -1,5 +1,6 @@
 import { ToolId } from './types';
 import { CostBreakdown } from './pricing';
+import { ActionCategory } from './action-mix';
 
 export type TimelineRange = '7d' | '30d' | '90d' | '1y';
 export type HeatmapRange = TimelineRange;
@@ -179,6 +180,22 @@ export interface AnalyticsSummaryPayload {
   queriedAt: number;
 }
 
+// ─── Lifetime tokens (top-of-tab hero) ───────────────────────────────────────
+// Every token Agent Pulse has ever recorded, independent of the range filter.
+// Backed by the `sessions` rollup, which is never pruned.
+
+export interface LifetimeTokensPayload {
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;            // sum of the four classes above
+  costUsd: number;                // estimated API-equivalent spend (0 if unpriced)
+  sessions: number;
+  firstSessionAt: number | null;  // epoch ms of the oldest recorded session
+  queriedAt: number;
+}
+
 export interface AnalyticsConfig {
   redactTaskText: boolean;
   idleGapMinutes: number;
@@ -271,6 +288,8 @@ export type ContextPressureRange = TimelineRange;
 
 export interface CacheHealthSessionRow {
   sessionId: string;
+  title: string | null;      // Claude Code's session title (AI-generated or /rename)
+  project: string | null;    // project folder name, when hooks reported one
   model: string | null;
   hitRatio: number | null;   // 0..1, from the session's latest sample
   warm: boolean | null;
@@ -297,6 +316,8 @@ export interface CacheHealthPayload {
 
 export interface ContextPressureSessionRow {
   sessionId: string;
+  title: string | null;      // see CacheHealthSessionRow
+  project: string | null;
   model: string | null;
   usedPct: number;           // 0..100, from the session's latest sample
   sampledAt: number;
@@ -315,6 +336,121 @@ export interface ContextPressurePayload {
   maxUsedPct: number | null;
   highPressureSessions: number;      // latest sample ≥ 80% used
   byDay: ContextPressureDayBucket[];
+  queriedAt: number;
+}
+
+// ─── Agent actions (tool-call mix) ───────────────────────────────────────────
+// What agents spend their tool calls on, from the tool name each before-tool
+// hook reports. One row in `events` per call (see common/action-mix.ts for the
+// agents that report twice). Empty for periods recorded with task-text
+// redaction on, since the tool name is stored in the redacted column.
+
+export type ActionMixRange = TimelineRange;
+
+export interface ActionMixCategoryCount {
+  category: ActionCategory;
+  calls: number;
+  pct: number;               // share of the enclosing total, 0..100
+}
+
+export interface ActionMixToolCount {
+  name: string;              // tool name as the agent reported it
+  category: ActionCategory;
+  calls: number;
+}
+
+export interface ActionMixAgentRow {
+  toolId: ToolId;
+  calls: number;
+  categories: ActionMixCategoryCount[]; // non-zero only, in ACTION_CATEGORIES order
+  topTools: ActionMixToolCount[];       // this agent's most-called tools
+}
+
+export interface ActionMixPayload {
+  range: ActionMixRange;
+  totalCalls: number;
+  categories: ActionMixCategoryCount[]; // across all agents, non-zero only
+  agents: ActionMixAgentRow[];          // most calls first
+  queriedAt: number;
+}
+
+// ─── Activity facts (prompt size, lines changed, subagent use) ───────────────
+// Backed by activity_facts — numeric facts read from Claude Code and Codex
+// session files (main/timeline/activity-facts.ts). Only those two agents
+// report today; other agents simply have no rows.
+
+export type ActivityRange = TimelineRange;
+
+export interface PromptSizeBucket {
+  label: string;             // '1–10', '11–25', … '250+'
+  count: number;
+}
+
+export interface PromptSizeAgentRow {
+  toolId: ToolId;
+  prompts: number;           // prompts with at least one word
+  medianWords: number;
+  avgWords: number;
+}
+
+export interface PromptSizePayload {
+  range: ActivityRange;
+  // Word stats cover prompts with at least one word; an image-only message has
+  // none and is counted separately so it doesn't drag the averages down.
+  prompts: number;
+  imageOnlyPrompts: number;
+  medianWords: number;
+  avgWords: number;
+  longestWords: number;
+  buckets: PromptSizeBucket[];   // fixed order, zero counts included
+  agents: PromptSizeAgentRow[];  // most prompts first
+  queriedAt: number;
+}
+
+export interface LinesChangedAgentRow {
+  toolId: ToolId;
+  edits: number;
+  added: number;
+  removed: number;
+}
+
+export interface LinesChangedDayBucket {
+  date: string;              // YYYY-MM-DD (local)
+  added: number;
+  removed: number;
+}
+
+export interface LinesChangedPayload {
+  range: ActivityRange;
+  edits: number;
+  added: number;
+  removed: number;
+  agents: LinesChangedAgentRow[]; // most lines touched first
+  byDay: LinesChangedDayBucket[];
+  queriedAt: number;
+}
+
+export interface SubagentAgentRow {
+  toolId: ToolId;
+  launches: number;
+  sessionsWithSubagents: number;
+  sessions: number;          // sessions with any recorded activity, the denominator
+  autoReviews: number;       // Codex guardian reviews — not user-launched, shown apart
+}
+
+export interface SubagentDayBucket {
+  date: string;              // YYYY-MM-DD (local)
+  launches: number;
+}
+
+export interface SubagentUsePayload {
+  range: ActivityRange;
+  launches: number;
+  sessionsWithSubagents: number;
+  sessions: number;
+  autoReviews: number;
+  agents: SubagentAgentRow[]; // every agent with activity, most launches first
+  byDay: SubagentDayBucket[];
   queriedAt: number;
 }
 

@@ -151,3 +151,5 @@ clawd-svgs/
 docs/archive/*
 # Landing-site SSR bundle (scripts/prerender.mjs deletes it after a build)
 github-pages/dist-ssr
+
+promo-remotion/*

@@ -17,6 +17,8 @@ import {
   LimitHitsRange,
   CacheHealthRange,
   ContextPressureRange,
+  ActionMixRange,
+  ActivityRange,
 } from '../../common/timeline-types';
 import { logger } from '../../common/logger';
 
@@ -53,6 +55,12 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     if (!queries) return null;
     try { return queries.getSummary(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-summary:', e); return null; }
+  });
+
+  ipcMain.handle('analytics:get-lifetime-tokens', () => {
+    if (!queries) return null;
+    try { return queries.getLifetimeTokens(); }
+    catch (e) { logger.warn('[Timeline/ipc] get-lifetime-tokens:', e); return null; }
   });
 
   ipcMain.handle('analytics:get-heatmap', (_e, args: { range: HeatmapRange; groupBy: 'tool' | 'project' | 'all' }) => {
@@ -150,6 +158,30 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     try { return queries.getContextPressure(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-context-pressure:', e); return null; }
   });
+
+  ipcMain.handle('analytics:get-action-mix', (_e, args: { range: ActionMixRange }) => {
+    if (!queries) return null;
+    try { return queries.getActionMix(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-action-mix:', e); return null; }
+  });
+
+  ipcMain.handle('analytics:get-prompt-size', (_e, args: { range: ActivityRange }) => {
+    if (!queries) return null;
+    try { return queries.getPromptSize(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-prompt-size:', e); return null; }
+  });
+
+  ipcMain.handle('analytics:get-lines-changed', (_e, args: { range: ActivityRange }) => {
+    if (!queries) return null;
+    try { return queries.getLinesChanged(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-lines-changed:', e); return null; }
+  });
+
+  ipcMain.handle('analytics:get-subagent-use', (_e, args: { range: ActivityRange }) => {
+    if (!queries) return null;
+    try { return queries.getSubagentUse(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-subagent-use:', e); return null; }
+  });
 }
 
 /** Called by bootTimeline when the timeline cannot start. */
@@ -162,6 +194,8 @@ export function unregisterTimelineIpc() {
   for (const channel of [
     'analytics:get-status',
     'analytics:get-digest',
+    'analytics:get-summary',
+    'analytics:get-lifetime-tokens',
     'analytics:get-heatmap',
     'analytics:get-hour-rhythm',
     'analytics:get-tool-mix',
@@ -178,6 +212,10 @@ export function unregisterTimelineIpc() {
     'analytics:get-limit-hits',
     'analytics:get-cache-health',
     'analytics:get-context-pressure',
+    'analytics:get-action-mix',
+    'analytics:get-prompt-size',
+    'analytics:get-lines-changed',
+    'analytics:get-subagent-use',
   ]) {
     ipcMain.removeHandler(channel);
   }

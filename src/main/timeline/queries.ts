@@ -35,6 +35,7 @@ import {
   WindowValueSlice,
   AnalyticsSummaryPayload,
   SummarySlice,
+  LifetimeTokensPayload,
   CadencePayload,
   CadenceRange,
   CadenceRow,
@@ -57,7 +58,26 @@ import {
   ContextPressurePayload,
   ContextPressureRange,
   ContextPressureSessionRow,
+  ActionMixPayload,
+  ActionMixRange,
+  ActionMixAgentRow,
+  ActionMixCategoryCount,
+  ActionMixToolCount,
+  ActivityRange,
+  PromptSizePayload,
+  PromptSizeAgentRow,
+  LinesChangedPayload,
+  LinesChangedAgentRow,
+  SubagentUsePayload,
+  SubagentAgentRow,
 } from '../../common/timeline-types';
+import {
+  ACTION_CATEGORIES,
+  ActionCategory,
+  DOUBLE_REPORTING_AGENTS,
+  classifyToolName,
+  countPairedToolCalls,
+} from '../../common/action-mix';
 import { estimateCost, estimateCostBreakdown, rateForModel, CostBreakdown, TokenCounts } from '../../common/pricing';
 import { realModels } from './models';
 
@@ -118,7 +138,28 @@ interface SessionAggregateRow {
 }
 
 export class TimelineQueries {
-  constructor(private db: TimelineDb) {}
+  // `resolveSessionTitle` maps a native session id to a human title (Claude
+  // Code's transcript title). Injected so the queries stay free of fs access
+  // and the caller can switch titles off (task-text redaction).
+  constructor(
+    private db: TimelineDb,
+    private resolveSessionTitle: (sessionId: string) => string | null = () => null,
+  ) {}
+
+  // Display label for a statusline-feed session row: the session's title plus
+  // the project it ran in (basename of the newest hook event's project path).
+  private statuslineSessionLabel(sessionId: string): { title: string | null; project: string | null } {
+    const row = this.db.query<{ project_path: string }>(
+      `SELECT project_path FROM events
+       WHERE session_id = ? AND project_path IS NOT NULL
+       ORDER BY timestamp DESC LIMIT 1`,
+      [sessionId],
+    )[0];
+    let title: string | null = null;
+    try { title = this.resolveSessionTitle(sessionId); }
+    catch { /* a title is cosmetic — never fail the card over it */ }
+    return { title, project: row?.project_path ? path.basename(row.project_path) : null };
+  }
 
   // Estimate a session's cost. Token totals are session-level, so when a
   // session used more than one model we split the tokens evenly across them
@@ -219,6 +260,52 @@ export class TimelineQueries {
       if (!topProject || p.activeMs > topProject.activeMs) topProject = p;
     }
     return { activeMs, sessions: rows.length, costUsd, topProject };
+  }
+
+  // All-time token totals for the top-of-tab hero. Reads the `sessions` rollup
+  // because it is the only token source that is never pruned (events go at 365
+  // days). Grouped by model set so cost is priced per group instead of per row
+  // — costForSession is linear in tokens, so the result is identical.
+  getLifetimeTokens(): LifetimeTokensPayload {
+    const rows = this.db.query<{
+      models_used: string | null;
+      sessions: number;
+      first_started_at: number | null;
+      tokens_in: number;
+      tokens_out: number;
+      cache_read: number;
+      cache_write: number;
+    }>(
+      `SELECT models_used,
+              COUNT(*)                               AS sessions,
+              MIN(started_at)                        AS first_started_at,
+              COALESCE(SUM(total_tokens_in),    0)   AS tokens_in,
+              COALESCE(SUM(total_tokens_out),   0)   AS tokens_out,
+              COALESCE(SUM(total_cache_read),   0)   AS cache_read,
+              COALESCE(SUM(total_cache_write),  0)   AS cache_write
+       FROM sessions GROUP BY models_used`,
+    );
+
+    const out: LifetimeTokensPayload = {
+      tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+      costUsd: 0, sessions: 0, firstSessionAt: null, queriedAt: Date.now(),
+    };
+    for (const r of rows) {
+      out.tokensIn   += r.tokens_in;
+      out.tokensOut  += r.tokens_out;
+      out.cacheRead  += r.cache_read;
+      out.cacheWrite += r.cache_write;
+      out.sessions   += r.sessions;
+      out.costUsd    += this.costForSession(r.models_used, {
+        tokensIn: r.tokens_in, tokensOut: r.tokens_out,
+        cacheRead: r.cache_read, cacheWrite: r.cache_write,
+      }).costUsd;
+      if (r.first_started_at != null && (out.firstSessionAt == null || r.first_started_at < out.firstSessionAt)) {
+        out.firstSessionAt = r.first_started_at;
+      }
+    }
+    out.totalTokens = out.tokensIn + out.tokensOut + out.cacheRead + out.cacheWrite;
+    return out;
   }
 
   getHeatmap(range: HeatmapRange, groupBy: 'tool' | 'project' | 'all'): HeatmapPayload {
@@ -1079,6 +1166,7 @@ export class TimelineQueries {
 
     const rows: CacheHealthSessionRow[] = latest.slice(0, 8).map((r) => ({
       sessionId: r.session_id,
+      ...this.statuslineSessionLabel(r.session_id),
       model: r.model,
       hitRatio: r.cache_hit_ratio,
       warm: r.cache_warm === null ? null : r.cache_warm === 1,
@@ -1133,6 +1221,7 @@ export class TimelineQueries {
 
     const rows: ContextPressureSessionRow[] = latest.slice(0, 8).map((r) => ({
       sessionId: r.session_id,
+      ...this.statuslineSessionLabel(r.session_id),
       model: r.model,
       usedPct: r.context_used_pct as number,
       sampledAt: r.sampled_at,
@@ -1165,6 +1254,247 @@ export class TimelineQueries {
       maxUsedPct: pcts.length ? Math.max(...pcts) : null,
       highPressureSessions: pcts.filter((p) => p >= 80).length,
       byDay,
+      queriedAt: now,
+    };
+  }
+
+  // Agent actions — what agents spend their tool calls on. Reads the tool name
+  // every before-tool hook leaves in `task_summary` ("Tool: <name>"). Only
+  // `working` rows count: after-tool events are stored as idle and permission
+  // prompts as waiting, and both repeat the same tool name.
+  getActionMix(range: ActionMixRange): ActionMixPayload {
+    const now = Date.now();
+    const startMs = now - rangeMs(range);
+    const TOOL_ROW = `timestamp >= ? AND state = 'working' AND task_summary LIKE 'Tool: %'`;
+
+    // agent → tool name → calls
+    const byAgent = new Map<string, Map<string, number>>();
+    const grouped = this.db.query<{ tool_id: string; name: string; n: number }>(
+      `SELECT tool_id, substr(task_summary, 7) AS name, COUNT(*) AS n
+         FROM events
+        WHERE ${TOOL_ROW}
+        GROUP BY tool_id, name`,
+      [startMs],
+    );
+    for (const r of grouped) {
+      if (!r.name) continue;
+      const names = byAgent.get(r.tool_id) ?? new Map<string, number>();
+      names.set(r.name, r.n);
+      byAgent.set(r.tool_id, names);
+    }
+
+    // Agents that log each call twice: recount from the ordered rows, pairing
+    // each before-event with its after-event. (Calls an agent issues in
+    // parallel interleave and stay unpaired, so those still count twice.)
+    for (const toolId of byAgent.keys()) {
+      if (!DOUBLE_REPORTING_AGENTS.has(toolId as ToolId)) continue;
+      const ordered = this.db.query<{ session_id: string | null; name: string }>(
+        `SELECT session_id, substr(task_summary, 7) AS name
+           FROM events
+          WHERE ${TOOL_ROW} AND tool_id = ?
+          ORDER BY session_id, timestamp, id`,
+        [startMs, toolId],
+      );
+      byAgent.set(toolId, countPairedToolCalls(
+        ordered.filter((r) => r.name).map((r) => ({ sessionId: r.session_id, name: r.name })),
+      ));
+    }
+
+    const toCategoryCounts = (perCategory: Map<ActionCategory, number>, total: number): ActionMixCategoryCount[] =>
+      ACTION_CATEGORIES
+        .filter((c) => (perCategory.get(c) ?? 0) > 0)
+        .map((c) => {
+          const calls = perCategory.get(c) ?? 0;
+          return { category: c, calls, pct: total > 0 ? (calls / total) * 100 : 0 };
+        });
+
+    const overall = new Map<ActionCategory, number>();
+    let totalCalls = 0;
+    const agents: ActionMixAgentRow[] = [];
+    for (const [toolId, names] of byAgent) {
+      const perCategory = new Map<ActionCategory, number>();
+      const tools: ActionMixToolCount[] = [];
+      let calls = 0;
+      for (const [name, n] of names) {
+        const category = classifyToolName(name);
+        perCategory.set(category, (perCategory.get(category) ?? 0) + n);
+        overall.set(category, (overall.get(category) ?? 0) + n);
+        tools.push({ name, category, calls: n });
+        calls += n;
+      }
+      if (calls === 0) continue;
+      totalCalls += calls;
+      tools.sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name));
+      agents.push({
+        toolId: toolId as ToolId,
+        calls,
+        categories: toCategoryCounts(perCategory, calls),
+        topTools: tools.slice(0, 5),
+      });
+    }
+    agents.sort((a, b) => b.calls - a.calls);
+
+    return {
+      range,
+      totalCalls,
+      categories: toCategoryCounts(overall, totalCalls),
+      agents,
+      queriedAt: now,
+    };
+  }
+
+  // ─── Activity facts ────────────────────────────────────────────────────
+  // The three cards below read activity_facts. They share an inclusive
+  // local-day window so the day-bucketed charts line up with the totals.
+  private activityWindow(range: ActivityRange): { now: number; windowStart: number; days: number } {
+    const now = Date.now();
+    const days = rangeDays(range);
+    return { now, days, windowStart: startOfLocalDay(now) - (days - 1) * DAY_MS };
+  }
+
+  // Prompt size — how much the user writes per prompt, in words.
+  getPromptSize(range: ActivityRange): PromptSizePayload {
+    const { now, windowStart } = this.activityWindow(range);
+    const rows = this.db.query<{ tool_id: string; words: number | null }>(
+      `SELECT tool_id, words FROM activity_facts WHERE kind = 'prompt' AND ts >= ?`,
+      [windowStart],
+    );
+
+    const bounds: Array<{ label: string; max: number }> = [
+      { label: '1–10', max: 10 }, { label: '11–25', max: 25 }, { label: '26–50', max: 50 },
+      { label: '51–100', max: 100 }, { label: '101–250', max: 250 }, { label: '250+', max: Infinity },
+    ];
+    const bucketCounts = bounds.map(() => 0);
+    const all: number[] = [];
+    const perAgent = new Map<string, number[]>();
+    let imageOnly = 0;
+    for (const r of rows) {
+      const words = r.words ?? 0;
+      if (words <= 0) { imageOnly++; continue; }
+      all.push(words);
+      const list = perAgent.get(r.tool_id) ?? [];
+      list.push(words);
+      perAgent.set(r.tool_id, list);
+      bucketCounts[bounds.findIndex((b) => words <= b.max)]++;
+    }
+
+    const stats = (values: number[]) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const sum = sorted.reduce((s, v) => s + v, 0);
+      return {
+        median: median(sorted),
+        avg: sorted.length > 0 ? sum / sorted.length : 0,
+        max: sorted.length > 0 ? sorted[sorted.length - 1] : 0,
+      };
+    };
+    const overall = stats(all);
+    const agents: PromptSizeAgentRow[] = Array.from(perAgent.entries())
+      .map(([toolId, values]) => {
+        const s = stats(values);
+        return { toolId: toolId as ToolId, prompts: values.length, medianWords: s.median, avgWords: s.avg };
+      })
+      .sort((a, b) => b.prompts - a.prompts);
+
+    return {
+      range,
+      prompts: all.length,
+      imageOnlyPrompts: imageOnly,
+      medianWords: overall.median,
+      avgWords: overall.avg,
+      longestWords: overall.max,
+      buckets: bounds.map((b, i) => ({ label: b.label, count: bucketCounts[i] })),
+      agents,
+      queriedAt: now,
+    };
+  }
+
+  // Lines changed — what agents' edit calls added and removed.
+  getLinesChanged(range: ActivityRange): LinesChangedPayload {
+    const { now, windowStart, days } = this.activityWindow(range);
+    const rows = this.db.query<{ tool_id: string; ts: number; added: number | null; removed: number | null }>(
+      `SELECT tool_id, ts, lines_added AS added, lines_removed AS removed
+         FROM activity_facts WHERE kind = 'edit' AND ts >= ?`,
+      [windowStart],
+    );
+
+    const byDayMap = new Map<string, { added: number; removed: number }>();
+    for (let i = 0; i < days; i++) byDayMap.set(formatLocalDate(windowStart + i * DAY_MS), { added: 0, removed: 0 });
+    const perAgent = new Map<string, LinesChangedAgentRow>();
+    let added = 0;
+    let removed = 0;
+    for (const r of rows) {
+      const a = r.added ?? 0;
+      const d = r.removed ?? 0;
+      added += a;
+      removed += d;
+      const agent = perAgent.get(r.tool_id) ?? { toolId: r.tool_id as ToolId, edits: 0, added: 0, removed: 0 };
+      agent.edits += 1;
+      agent.added += a;
+      agent.removed += d;
+      perAgent.set(r.tool_id, agent);
+      const day = byDayMap.get(formatLocalDate(r.ts));
+      if (day) { day.added += a; day.removed += d; }
+    }
+
+    return {
+      range,
+      edits: rows.length,
+      added,
+      removed,
+      agents: Array.from(perAgent.values()).sort((x, y) => (y.added + y.removed) - (x.added + x.removed)),
+      byDay: Array.from(byDayMap.entries()).map(([date, v]) => ({ date, ...v })),
+      queriedAt: now,
+    };
+  }
+
+  // Subagent use — how often work was delegated, and in how many sessions.
+  // Codex auto-reviews are reported alongside but never counted as launches.
+  getSubagentUse(range: ActivityRange): SubagentUsePayload {
+    const { now, windowStart, days } = this.activityWindow(range);
+
+    const perAgentRows = this.db.query<{
+      tool_id: string; launches: number; auto_reviews: number; sessions: number; sessions_with: number;
+    }>(
+      `SELECT tool_id,
+              SUM(kind = 'subagent')    AS launches,
+              SUM(kind = 'auto_review') AS auto_reviews,
+              COUNT(DISTINCT session_id) AS sessions,
+              COUNT(DISTINCT CASE WHEN kind = 'subagent' THEN session_id END) AS sessions_with
+         FROM activity_facts
+        WHERE ts >= ?
+        GROUP BY tool_id`,
+      [windowStart],
+    );
+    const agents: SubagentAgentRow[] = perAgentRows
+      .map((r) => ({
+        toolId: r.tool_id as ToolId,
+        launches: r.launches ?? 0,
+        sessionsWithSubagents: r.sessions_with ?? 0,
+        sessions: r.sessions ?? 0,
+        autoReviews: r.auto_reviews ?? 0,
+      }))
+      .sort((a, b) => b.launches - a.launches || b.sessions - a.sessions);
+
+    const byDayMap = new Map<string, number>();
+    for (let i = 0; i < days; i++) byDayMap.set(formatLocalDate(windowStart + i * DAY_MS), 0);
+    const launchRows = this.db.query<{ ts: number }>(
+      `SELECT ts FROM activity_facts WHERE kind = 'subagent' AND ts >= ?`,
+      [windowStart],
+    );
+    for (const r of launchRows) {
+      const key = formatLocalDate(r.ts);
+      if (byDayMap.has(key)) byDayMap.set(key, (byDayMap.get(key) ?? 0) + 1);
+    }
+
+    const sum = (pick: (a: SubagentAgentRow) => number) => agents.reduce((s, a) => s + pick(a), 0);
+    return {
+      range,
+      launches: sum((a) => a.launches),
+      sessionsWithSubagents: sum((a) => a.sessionsWithSubagents),
+      sessions: sum((a) => a.sessions),
+      autoReviews: sum((a) => a.autoReviews),
+      agents,
+      byDay: Array.from(byDayMap.entries()).map(([date, launches]) => ({ date, launches })),
       queriedAt: now,
     };
   }

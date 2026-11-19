@@ -19,6 +19,7 @@ import {
   SecretAccessAnalyticsPayload,
   WindowValuePayload,
   AnalyticsSummaryPayload,
+  LifetimeTokensPayload,
   TimelineRange,
   CadencePayload,
   WaitingPayload,
@@ -28,6 +29,10 @@ import {
   LimitHitsRange,
   CacheHealthPayload,
   ContextPressurePayload,
+  ActionMixPayload,
+  PromptSizePayload,
+  LinesChangedPayload,
+  SubagentUsePayload,
 } from '../../../../common/timeline-types';
 import { BacklogStatsPayload } from '../../../../common/backlog-types';
 
@@ -133,6 +138,10 @@ export function useSummary(range: TimelineRange) {
   return useAnalyticsQuery<AnalyticsSummaryPayload>('analytics:get-summary', { range }, range);
 }
 
+export function useLifetimeTokens() {
+  return useAnalyticsQuery<LifetimeTokensPayload>('analytics:get-lifetime-tokens', undefined, '');
+}
+
 export function useHeatmap(range: HeatmapRange, groupBy: 'tool' | 'project' | 'all') {
   return useAnalyticsQuery<HeatmapPayload>('analytics:get-heatmap', { range, groupBy }, `${range}/${groupBy}`);
 }
@@ -195,6 +204,22 @@ export function useCacheHealth(range: TimelineRange) {
 
 export function useContextPressure(range: TimelineRange) {
   return useAnalyticsQuery<ContextPressurePayload>('analytics:get-context-pressure', { range }, range);
+}
+
+export function useActionMix(range: TimelineRange) {
+  return useAnalyticsQuery<ActionMixPayload>('analytics:get-action-mix', { range }, range);
+}
+
+export function usePromptSize(range: TimelineRange) {
+  return useAnalyticsQuery<PromptSizePayload>('analytics:get-prompt-size', { range }, range);
+}
+
+export function useLinesChanged(range: TimelineRange) {
+  return useAnalyticsQuery<LinesChangedPayload>('analytics:get-lines-changed', { range }, range);
+}
+
+export function useSubagentUse(range: TimelineRange) {
+  return useAnalyticsQuery<SubagentUsePayload>('analytics:get-subagent-use', { range }, range);
 }
 
 // Overnight Backlog — served from the backlog DB via backlog:get-stats (not the

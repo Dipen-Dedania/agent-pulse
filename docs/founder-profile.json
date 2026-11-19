@@ -1,0 +1,28 @@
+{
+  "name": "Dipen Dedania",
+  "source": "https://dipen-dedania.github.io/",
+  "inspectedOn": "2026-10-13",
+  "publicEmail": "dipen27891@gmail.com",
+  "profiles": {
+    "website": "https://dipen-dedania.github.io/",
+    "github": "https://github.com/dipen-dedania",
+    "linkedin": "https://www.linkedin.com/in/dipen-dedania",
+    "twitter": "https://twitter.com/i_m_vampire_",
+    "facebook": "https://www.facebook.com/dipen.dedania.7",
+    "blog": "https://dipen-dedania.github.io/posts/"
+  },
+  "careerAsListed": [
+    { "organization": "Zuru Tech", "location": "Ahmedabad", "role": "Tech Lead", "dateLabel": "Apr. 2017" },
+    { "organization": "Maruti Techlabs", "location": "Ahmedabad", "role": "Full stack developer", "dateLabel": "Oct. 2012" }
+  ],
+  "skillsAsListed": ["ReactJS", "Vibe Coding", "Python", "HTML/CSS/JS", "NodeJS", ".Net"],
+  "agentPulse": {
+    "website": "https://dipen-dedania.github.io/agent-pulse/",
+    "portfolioDescription": "Track AI Agents in single glance."
+  },
+  "verificationNotes": [
+    "Profile URLs were extracted from portfolio page links; destination accounts were not independently verified.",
+    "Career information reflects the portfolio text at inspection time and should be rechecked when current employment matters.",
+    "Zuru Tech is listed as an employer, not as the owner or company behind Agent Pulse."
+  ]
+}

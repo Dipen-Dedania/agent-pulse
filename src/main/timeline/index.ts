@@ -6,10 +6,13 @@ import { SessionsDeriver, DEFAULT_IDLE_GAP_MS } from './sessions-deriver';
 import { QuotaWriter } from './quota-writer';
 import { StatuslineWriter } from './statusline-writer';
 import { TranscriptReader } from './transcript-reader';
+import { ActivitySync } from './activity-sync';
+import { maybeBackfillActivity } from './activity-backfill';
 import { TimelineQueries } from './queries';
 import { registerTimelineIpc, registerTimelineIpcUnavailable, unregisterTimelineIpc } from './ipc';
 import { PruneScheduler } from './prune';
 import { maybeBackfillLimitEvents } from './limit-backfill';
+import { resolveClaudeSessionTitle } from './session-titles';
 import { maybeCleanupSyntheticModels } from './synthetic-cleanup';
 import { StatusStateManager } from '../bridge/state-manager';
 import type { NormalizedEvent } from '../../common/types';
@@ -18,6 +21,9 @@ import { UsagePoller } from '../usage/poller';
 import { CodexUsagePoller } from '../codex-usage/poller';
 import { CursorUsagePoller } from '../cursor-usage/poller';
 import { AntigravityUsagePoller } from '../antigravity-usage/poller';
+
+// How long after the timeline boots the activity backfill starts.
+const ACTIVITY_BACKFILL_DELAY_MS = 15_000;
 
 export interface TimelineBootOptions {
   stateManager: StatusStateManager;
@@ -59,6 +65,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
   );
   const quotaWriter = new QuotaWriter(db);
   const statuslineWriter = new StatuslineWriter(db);
+  const activitySync = new ActivitySync(db);
   const transcriptReader = new TranscriptReader(
     eventsWriter,
     sessionsDeriver,
@@ -81,6 +88,17 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     catch (e) { logger.warn('[Timeline] limit backfill failed:', e); }
   });
 
+  // One-time read of the session files already on disk, so the activity cards
+  // (prompt size, lines changed, subagents) start with history. Held back until
+  // boot has settled, then spread one file per tick; marker-guarded like the
+  // backfill above. Cancelled when the timeline closes so it can't touch a
+  // closed DB.
+  let cancelActivityBackfill: () => void = () => undefined;
+  const activityBackfillTimer = setTimeout(() => {
+    try { cancelActivityBackfill = maybeBackfillActivity(db, activitySync); }
+    catch (e) { logger.warn('[Timeline] activity backfill failed:', e); }
+  }, ACTIVITY_BACKFILL_DELAY_MS);
+
   // One-time rewrite of sessions recorded before the "<synthetic>" guard, so
   // the pseudo-model stops appearing as a phantom row in Model usage. Same
   // deferred, marker-guarded pattern as the limit backfill above.
@@ -88,7 +106,13 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     try { maybeCleanupSyntheticModels(db); }
     catch (e) { logger.warn('[Timeline] synthetic-model cleanup failed:', e); }
   });
-  const queries = new TimelineQueries(db);
+  // Session titles come from prompt content, so they follow the same privacy
+  // switch as stored task text.
+  let redactTaskText = opts.redactTaskText;
+  const queries = new TimelineQueries(
+    db,
+    (sessionId) => (redactTaskText ? null : resolveClaudeSessionTitle(sessionId)),
+  );
   const prune = new PruneScheduler(db);
 
   // ── Wire bridge event stream → events writer + sessions deriver. ─────
@@ -121,6 +145,10 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     }
     sessionsDeriver.onEvent(event, tokenDelta ?? undefined);
     eventsWriter.write(event);
+    // Prompt / edit / subagent facts from the same session files. Queued for a
+    // later tick and tracked with its own offsets, so it can't delay or skew
+    // the token path above.
+    activitySync.onAgentEvent(event.toolId, event.payload.sessionId, event.payload.transcriptPath);
   };
   const unsubEvents = opts.stateManager.onEvent(onBridgeEvent);
   // The timeline boots in a deferred launch stage while the bridge has been
@@ -161,6 +189,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     flushSessions,
     updateOptions: (next) => {
       if (next.redactTaskText !== undefined) {
+        redactTaskText = next.redactTaskText;
         eventsWriter.updateOptions({ redactTaskText: next.redactTaskText });
       }
       if (next.idleGapMinutes !== undefined) {
@@ -174,6 +203,8 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
       try { unsubCursor(); } catch { /* ignore */ }
       try { unsubAg(); }     catch { /* ignore */ }
       prune.stop();
+      clearTimeout(activityBackfillTimer);
+      cancelActivityBackfill();
       unregisterTimelineIpc();
       try { db.close(); } catch { /* ignore */ }
     },

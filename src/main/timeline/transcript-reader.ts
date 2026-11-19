@@ -516,7 +516,7 @@ function findGrokUpdates(sessionId: string): string | null {
  * scan that bounded tree (year/month/day dirs only) for a name ending with the
  * id. Returns null if the sessions dir is absent or no match is found.
  */
-function findCodexRollout(sessionId: string): string | null {
+export function findCodexRollout(sessionId: string): string | null {
   const root = path.join(os.homedir(), '.codex', 'sessions');
   const suffix = `${sessionId}.jsonl`;
   try {

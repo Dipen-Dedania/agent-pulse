@@ -3,7 +3,7 @@ import { ContextPressureDayBucket } from '../../../../common/timeline-types';
 import { AnimatedNumber, Eyebrow, Meter } from '../../Shared';
 import { useContextPressure } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
-import { Card, EmptyState, InfoPill, SkeletonLine, useChartTip } from './shared';
+import { Card, EmptyState, InfoPill, SessionLabel, SkeletonLine, useChartTip } from './shared';
 
 function fillClassFor(usedPct: number): string {
   if (usedPct >= 80) return 'bg-red-500';
@@ -79,7 +79,7 @@ export const ContextPressureCard: React.FC = () => {
             {data.rows.slice(0, 5).map((r) => (
               <div key={r.sessionId} className='glass-secondary p-3'>
                 <div className='flex items-center gap-2 mb-2'>
-                  <p className='text-xs font-mono text-primary flex-1 truncate'>{r.sessionId.slice(0, 8)}</p>
+                  <SessionLabel sessionId={r.sessionId} title={r.title} project={r.project} />
                   {r.model && <p className='text-[11px] text-muted truncate max-w-[40%]'>{r.model}</p>}
                   <p className='text-xs font-mono tabular-nums text-body shrink-0'>{r.usedPct.toFixed(0)}%</p>
                 </div>

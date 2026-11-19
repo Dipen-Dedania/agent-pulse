@@ -23,7 +23,7 @@ interface Database {
 }
 type DatabaseConstructor = new (path: string) => Database;
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -174,6 +174,36 @@ CREATE TABLE IF NOT EXISTS transcript_offsets (
   session_id     TEXT,
   codex_snapshot TEXT
 );
+
+-- Activity facts (v7). One small numeric row per prompt the user typed, file
+-- edit an agent made, subagent it launched, or Codex auto-review, read from the
+-- agents' own session files (see activity-facts.ts). Holds counts only — never
+-- prompt text or file content. \`key\` is the source record's id, so re-reads
+-- and the history backfill insert idempotently (INSERT OR IGNORE). Pruned on
+-- the events retention cutoff.
+CREATE TABLE IF NOT EXISTS activity_facts (
+  key           TEXT PRIMARY KEY,
+  ts            INTEGER NOT NULL,
+  tool_id       TEXT    NOT NULL,
+  session_id    TEXT,
+  kind          TEXT    NOT NULL,
+  tool_name     TEXT,
+  words         INTEGER,
+  lines_added   INTEGER,
+  lines_removed INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_kind_ts ON activity_facts (kind, ts);
+
+-- How far the activity-facts reader has read each session file, plus the
+-- per-file context a later tail read needs (a Codex rollout only states its
+-- thread type in its first record). Separate from transcript_offsets so the
+-- token reader's accounting is untouched.
+CREATE TABLE IF NOT EXISTS activity_offsets (
+  path    TEXT PRIMARY KEY,
+  offset  INTEGER NOT NULL,
+  context TEXT
+);
 `;
 
 export interface EventRow {
@@ -271,6 +301,24 @@ export interface TranscriptOffsetRow {
   codexSnapshot?: string | null; // JSON-encoded CodexSnapshot, or null
 }
 
+export interface ActivityFactRow {
+  key: string;
+  ts: number;
+  toolId: string;
+  sessionId?: string | null;
+  kind: string;
+  toolName?: string | null;
+  words?: number | null;
+  linesAdded?: number | null;
+  linesRemoved?: number | null;
+}
+
+export interface ActivityOffsetRow {
+  path: string;
+  offset: number;
+  context?: string | null; // JSON, reader-defined
+}
+
 export interface TimelineDb {
   insertEvent: (row: EventRow) => void;
   insertSession: (row: SessionRow) => number;
@@ -279,6 +327,10 @@ export interface TimelineDb {
   insertGuardrailEvent: (row: GuardrailEventRow) => void;
   insertSecretAccessEvent: (row: SecretAccessEventRow) => void;
   insertLimitEvent: (row: LimitEventRow) => void;
+  // Inserts facts in one transaction; returns how many were new (not dedup'd).
+  insertActivityFacts: (rows: ActivityFactRow[]) => number;
+  loadActivityOffsets: () => ActivityOffsetRow[];
+  saveActivityOffset: (row: ActivityOffsetRow) => void;
   getMeta: (key: string) => string | null;
   setMeta: (key: string, value: string) => void;
   loadTranscriptOffsets: () => TranscriptOffsetRow[];
@@ -327,7 +379,8 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     if (current === undefined) {
       db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
     } else if (current !== SCHEMA_VERSION) {
-      // Every migration so far (through v5, which adds limit_events + meta) only
+      // Every migration so far (through v7, which adds activity_facts +
+      // activity_offsets; v5 added limit_events + meta) only
       // adds new tables (CREATE TABLE IF NOT EXISTS in SCHEMA_SQL already created
       // them above), so just bump the recorded version. The one-time limit-hit
       // backfill is triggered separately in bootTimeline via the `meta` marker,
@@ -402,6 +455,20 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     VALUES (@uuid, @ts, @toolId, @sessionId, @kind, @resetText)
   `);
 
+  const insertActivityStmt: Statement = db.prepare(`
+    INSERT OR IGNORE INTO activity_facts (
+      key, ts, tool_id, session_id, kind, tool_name, words, lines_added, lines_removed
+    ) VALUES (
+      @key, @ts, @toolId, @sessionId, @kind, @toolName, @words, @linesAdded, @linesRemoved
+    )
+  `);
+  const selectActivityOffsetsStmt: Statement = db.prepare('SELECT path, offset, context FROM activity_offsets');
+  const upsertActivityOffsetStmt: Statement = db.prepare(`
+    INSERT INTO activity_offsets (path, offset, context)
+    VALUES (@path, @offset, @context)
+    ON CONFLICT(path) DO UPDATE SET offset = excluded.offset, context = excluded.context
+  `);
+
   const getMetaStmt: Statement = db.prepare('SELECT value FROM meta WHERE key = ?');
   const setMetaStmt: Statement = db.prepare(
     'INSERT INTO meta (key, value) VALUES (@key, @value) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
@@ -424,6 +491,7 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
   const pruneStatuslineStmt: Statement = db.prepare('DELETE FROM statusline_samples WHERE sampled_at < ?');
   const pruneGuardrailStmt: Statement = db.prepare('DELETE FROM guardrail_events WHERE ts < ?');
   const pruneSecretStmt: Statement    = db.prepare('DELETE FROM secret_access_events WHERE ts < ?');
+  const pruneActivityStmt: Statement  = db.prepare('DELETE FROM activity_facts WHERE ts < ?');
 
   // better-sqlite3 throws "Missing named parameter" if a bound object omits any
   // @named parameter the statement declares. Our row interfaces mark most fields
@@ -459,6 +527,10 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
   const SECRET_KEYS = ['ts', 'toolId', 'decision', 'blockable', 'filePath', 'viaShell', 'ruleIds', 'ruleMessages'] as const;
   const LIMIT_KEYS = ['uuid', 'ts', 'toolId', 'sessionId', 'kind', 'resetText'] as const;
   const OFFSET_KEYS = ['path', 'offset', 'sessionId', 'codexSnapshot'] as const;
+  const ACTIVITY_KEYS = [
+    'key', 'ts', 'toolId', 'sessionId', 'kind', 'toolName', 'words', 'linesAdded', 'linesRemoved',
+  ] as const;
+  const ACTIVITY_OFFSET_KEYS = ['path', 'offset', 'context'] as const;
 
   return {
     insertEvent: (row) => {
@@ -494,6 +566,28 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
       try { insertLimitStmt.run(normalize(row, LIMIT_KEYS)); }
       catch (e: any) { logger.warn('[Timeline] insertLimitEvent failed:', e?.message ?? e); }
     },
+    insertActivityFacts: (rows) => {
+      if (rows.length === 0) return 0;
+      let inserted = 0;
+      try {
+        db.exec('BEGIN');
+        for (const row of rows) inserted += Number(insertActivityStmt.run(normalize(row, ACTIVITY_KEYS)).changes);
+        db.exec('COMMIT');
+      } catch (e: any) {
+        try { db.exec('ROLLBACK'); } catch { /* no open transaction */ }
+        logger.warn('[Timeline] insertActivityFacts failed:', e?.message ?? e);
+        return 0;
+      }
+      return inserted;
+    },
+    loadActivityOffsets: () => {
+      try { return selectActivityOffsetsStmt.all() as ActivityOffsetRow[]; }
+      catch (e: any) { logger.warn('[Timeline] loadActivityOffsets failed:', e?.message ?? e); return []; }
+    },
+    saveActivityOffset: (row) => {
+      try { upsertActivityOffsetStmt.run(normalize(row, ACTIVITY_OFFSET_KEYS)); }
+      catch (e: any) { logger.warn('[Timeline] saveActivityOffset failed:', e?.message ?? e); }
+    },
     getMeta: (key) => {
       try { return ((getMetaStmt.get(key) as { value?: string } | undefined)?.value) ?? null; }
       catch (e: any) { logger.warn('[Timeline] getMeta failed:', e?.message ?? e); return null; }
@@ -513,6 +607,8 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     prune: (eventsOlderThanMs, quotaOlderThanMs, guardrailOlderThanMs, secretOlderThanMs) => {
       try {
         const evInfo = pruneEventsStmt.run(eventsOlderThanMs);
+        // Activity facts describe the same sessions as events — same retention.
+        pruneActivityStmt.run(eventsOlderThanMs);
         const quInfo = pruneQuotaStmt.run(quotaOlderThanMs);
         // Statusline samples share the quota retention window (same cadence,
         // same purpose); their count isn't reported separately.

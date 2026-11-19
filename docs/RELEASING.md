@@ -12,11 +12,18 @@ Maintainer documentation for cutting releases and operating the auto-update feed
 
 The CI workflow (`.github/workflows/release.yml`) handles building, packaging, and uploading. You just bump and tag.
 
-1. **Bump `package.json`** to the new version (e.g. `1.1.8`) and commit it on `main`.
-2. **Tag and push** — this is the trigger:
+1. **Bump the application and lockfile together** on a branch:
    ```bash
-   git tag v1.1.8
-   git push origin v1.1.8
+   npm version patch --no-git-tag-version
+   git diff -- package.json package-lock.json
+   ```
+   Use an explicit version instead of `patch` when preparing a minor or major release.
+   Commit both files and merge the version-bump PR into `main` before publishing.
+   This keeps `package.json` and both root version fields in `package-lock.json` in sync without creating a release tag.
+2. **Tag the merged `main` commit and push** — this is the release trigger. The tag must match `package.json` (for example, `1.4.4`):
+   ```bash
+   git tag v1.4.4
+   git push origin v1.4.4
    ```
    Alternatively, use **Actions → Build Distribution → Run workflow** and type the version. The workflow refuses to run if the typed version doesn't match `package.json` — cheap insurance against typos.
 3. **The workflow then** (matrix: `windows-latest`, `macos-latest`, `ubuntu-latest`):

@@ -9,11 +9,7 @@ import { comparisonRows, competitors, type Cell } from '../data/comparison';
 export function CellValue({ value, emphasis }: { value: Cell; emphasis?: boolean }) {
   if (value === true) {
     return (
-      <span
-        className={emphasis ? 'text-signal-blue' : 'text-slate-blue'}
-        aria-label="Yes"
-        title="Yes"
-      >
+      <span className={emphasis ? 'text-signal-blue' : 'text-slate-blue'}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden className="inline">
           <path
             d="M5 13l4 4L19 7"
@@ -23,12 +19,13 @@ export function CellValue({ value, emphasis }: { value: Cell; emphasis?: boolean
             strokeLinejoin="round"
           />
         </svg>
+        <span className="sr-only">Yes</span>
       </span>
     );
   }
   if (value === false) {
     return (
-      <span className="text-steel-blue" aria-label="No" title="No">
+      <span className="text-steel-blue">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden className="inline">
           <path
             d="M6 6l12 12M18 6L6 18"
@@ -37,6 +34,7 @@ export function CellValue({ value, emphasis }: { value: Cell; emphasis?: boolean
             strokeLinecap="round"
           />
         </svg>
+        <span className="sr-only">No</span>
       </span>
     );
   }

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ProjectBreakdownRow } from '../../../../common/timeline-types';
 import { TOOL_META } from '../../../../common/toolMeta';
 import { ToolId } from '../../../../common/types';
-import { AnimatedNumber, Tooltip } from '../../Shared';
+import { AnimatedNumber, EYEBROW_SIZES, Tooltip } from '../../Shared';
 import { useProjectBreakdown } from './useAnalytics';
 import { useGlobalRange } from './rangeContext';
 import { Card, EmptyState, SkeletonLine, formatCompactNumber, formatDuration } from './shared';
@@ -34,7 +34,9 @@ const SortHeader: React.FC<{
       <button
         type='button'
         onClick={() => onSort(sortKey)}
-        className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-medium cursor-pointer transition-colors hover:text-primary ${
+        // Eyebrow typography from the shared tier; colour stays here because
+        // the active column flips to text-primary, which <Eyebrow> can't do.
+        className={`inline-flex items-center gap-1 ${EYEBROW_SIZES.sm} cursor-pointer transition-colors hover:text-primary ${
           isActive ? 'text-primary' : 'text-faint'
         }`}
       >

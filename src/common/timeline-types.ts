@@ -454,6 +454,40 @@ export interface SubagentUsePayload {
   queriedAt: number;
 }
 
+// Context compactions. Claude Code states each compaction's trigger and the
+// context size around it; Codex states neither, so its trigger is inferred
+// from the shape of the turn (see activity-facts.ts) and it has no size.
+export interface CompactionsAgentRow {
+  toolId: ToolId;
+  auto: number;
+  manual: number;
+  unknown: number;
+  sessionsCompacted: number;
+  sessions: number;                  // sessions with any recorded activity
+  medianTokensBefore: number | null; // null when the agent does not report it
+}
+
+export interface CompactionsDayBucket {
+  date: string;              // YYYY-MM-DD (local)
+  auto: number;
+  manual: number;
+  unknown: number;
+}
+
+export interface CompactionsPayload {
+  range: ActivityRange;
+  total: number;
+  auto: number;
+  manual: number;
+  unknown: number;
+  sessionsCompacted: number;
+  sessions: number;
+  medianTokensBefore: number | null;
+  agents: CompactionsAgentRow[];  // every agent with activity, most compactions first
+  byDay: CompactionsDayBucket[];
+  queriedAt: number;
+}
+
 // ─── Claude usage-window value ────────────────────────────────────────────────
 // Estimated API-equivalent spend for Claude Code over the trailing usage
 // windows, so users can see how much of their flat-rate plan they're actually

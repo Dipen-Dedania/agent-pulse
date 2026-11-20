@@ -6,6 +6,9 @@
 // handed to the pure extractors in activity-facts.ts, and the facts are
 // inserted with INSERT OR IGNORE. The first read of a file therefore captures
 // its whole history; later reads only the new tail.
+//
+// All file work — including finding the file — happens on a queue drained one
+// job per tick, never in the hook path that called onAgentEvent.
 
 import fs from 'fs';
 import os from 'os';
@@ -16,9 +19,10 @@ import { ActivityFact, CodexThreadContext, extractClaudeFacts, extractCodexFacts
 import { findCodexRollout } from './transcript-reader';
 
 export interface ActivitySink {
-  insertActivityFacts: (rows: ActivityFact[]) => number;
+  // null = the write failed; the lines must be read again later.
+  insertActivityFacts: (rows: ActivityFact[]) => number | null;
   loadActivityOffsets: () => Array<{ path: string; offset: number; context?: string | null }>;
-  saveActivityOffset: (row: { path: string; offset: number; context?: string | null }) => void;
+  saveActivityOffset: (row: { path: string; offset: number; context?: string | null; updatedAt?: number | null }) => void;
 }
 
 interface OffsetEntry {
@@ -26,33 +30,66 @@ interface OffsetEntry {
   codex?: CodexThreadContext;
 }
 
-// Upper bound on one read. A longer unread stretch is consumed over successive
-// reads, so a huge file can't stall the main process in one go.
+type Job =
+  | { kind: 'event'; toolId: ToolId; sessionId: string; transcriptPath?: string }
+  | { kind: 'file'; path: string; toolId: ToolId; sessionId: string }
+  | { kind: 'codex-sweep' };
+
+// Upper bound on one read. A longer unread stretch is consumed over several
+// ticks, so a huge file can't stall the main process in one go.
 const MAX_READ_BYTES = 32 * 1024 * 1024;
-const MAX_CHUNKS_PER_SYNC = 16;
+// Guard for the synchronous syncFile() loop (tests, tools): 64 × 32 MB.
+const MAX_CHUNKS_PER_SYNC = 64;
 // Codex writes child threads (subagents, auto-reviews) to their own rollout
-// files that no hook points at; look for them at most this often.
+// files that no hook points at; look for them at most this often…
 const CODEX_SWEEP_INTERVAL_MS = 60_000;
+// …and once more this long after the last Codex event, so whatever a session
+// wrote in its final minute is still picked up.
+const CODEX_TRAILING_SWEEP_MS = 90_000;
 // How many of the newest day-directories a sweep lists.
 const CODEX_SWEEP_DAYS = 2;
+// A rollout that could not be found is looked for again after this long (it
+// may simply not exist yet on a session's first event).
+const CODEX_MISS_TTL_MS = 30_000;
+// How often one Claude Code session's subagents folder is listed.
+const SUBAGENT_LIST_INTERVAL_MS = 30_000;
 
 export interface ActivitySyncOptions {
   codexSessionsDir?: string;                 // default ~/.codex/sessions
   resolveCodexRollout?: (sessionId: string) => string | null;
   defer?: (fn: () => void) => void;          // default setImmediate
+  // Runs `fn` after `ms`; returns a cancel function. Default: an unref'd timer.
+  setTimer?: (fn: () => void, ms: number) => () => void;
   now?: () => number;
   maxReadBytes?: number;                     // default MAX_READ_BYTES (tests shrink it)
 }
 
+/** Subagent transcripts Claude Code keeps beside a session: <session>/subagents/agent-*.jsonl. */
+export function listClaudeSubagentFiles(transcriptPath: string): string[] {
+  const dir = path.join(transcriptPath.replace(/\.jsonl$/i, ''), 'subagents');
+  try {
+    return fs.readdirSync(dir)
+      .filter((f) => f.startsWith('agent-') && f.endsWith('.jsonl'))
+      .map((f) => path.join(dir, f));
+  } catch {
+    return []; // no subagents for this session
+  }
+}
+
 export class ActivitySync {
   private offsets = new Map<string, OffsetEntry>();
-  private pending = new Map<string, { toolId: ToolId; sessionId: string }>();
+  private jobs = new Map<string, Job>();
   private flushScheduled = false;
-  private codexPathCache = new Map<string, string | null>();
+  private disposed = false;
+  private codexPathCache = new Map<string, { path: string | null; at: number }>();
+  private subagentListedAt = new Map<string, number>();
+  private oversizeWarned = new Set<string>();
   private lastCodexSweep = 0;
+  private cancelTrailingSweep: (() => void) | null = null;
   private readonly codexSessionsDir: string;
   private readonly resolveCodexRollout: (sessionId: string) => string | null;
   private readonly defer: (fn: () => void) => void;
+  private readonly setTimer: (fn: () => void, ms: number) => () => void;
   private readonly now: () => number;
   private readonly maxReadBytes: number;
 
@@ -60,6 +97,11 @@ export class ActivitySync {
     this.codexSessionsDir = opts.codexSessionsDir ?? path.join(os.homedir(), '.codex', 'sessions');
     this.resolveCodexRollout = opts.resolveCodexRollout ?? findCodexRollout;
     this.defer = opts.defer ?? ((fn) => { setImmediate(fn); });
+    this.setTimer = opts.setTimer ?? ((fn, ms) => {
+      const t = setTimeout(fn, ms);
+      t.unref?.();
+      return () => clearTimeout(t);
+    });
     this.now = opts.now ?? Date.now;
     this.maxReadBytes = opts.maxReadBytes ?? MAX_READ_BYTES;
     try {
@@ -77,71 +119,128 @@ export class ActivitySync {
   }
 
   /**
-   * Live trigger: a hook event arrived for `sessionId`. Queues that session's
-   * file (and, for Codex, any sibling thread files) for a read on the next
-   * tick, so the hook path itself never waits on file I/O.
+   * Live trigger: a hook event arrived for `sessionId`. Only records that the
+   * session needs a read; locating and reading its files happens on later
+   * ticks. Agents other than Claude Code and Codex are ignored.
    */
   public onAgentEvent(toolId: ToolId, sessionId: string | undefined, transcriptPath?: string): void {
-    if (!sessionId) return;
-    if (toolId === 'claude-code') {
-      if (transcriptPath) this.enqueue(transcriptPath, toolId, sessionId);
-    } else if (toolId === 'openai-codex') {
-      const rollout = this.codexPathFor(sessionId, transcriptPath);
-      if (rollout) this.enqueue(rollout, toolId, sessionId);
-      const now = this.now();
-      if (now - this.lastCodexSweep >= CODEX_SWEEP_INTERVAL_MS) {
-        this.lastCodexSweep = now;
-        for (const file of this.recentCodexRollouts()) this.enqueue(file, toolId, sessionId);
-      }
+    if (this.disposed || !sessionId) return;
+    if (toolId !== 'claude-code' && toolId !== 'openai-codex') return;
+    this.enqueue(`e:${toolId}:${sessionId}`, { kind: 'event', toolId, sessionId, transcriptPath });
+    if (toolId === 'openai-codex') {
+      this.cancelTrailingSweep?.();
+      this.cancelTrailingSweep = this.setTimer(() => {
+        this.cancelTrailingSweep = null;
+        if (!this.disposed) this.enqueue('sweep', { kind: 'codex-sweep' });
+      }, CODEX_TRAILING_SWEEP_MS);
     }
   }
 
   /**
-   * Read one file's unread tail and store its facts. Returns how many new
-   * facts were inserted. Synchronous; never throws.
+   * Read one chunk of a file's unread tail and store its facts. `more` is true
+   * when unread complete lines may remain. Synchronous; never throws.
    */
-  public syncFile(filePath: string, toolId: ToolId, sessionId: string): number {
+  public syncStep(filePath: string, toolId: ToolId, sessionId: string): { inserted: number; more: boolean } {
+    if (this.disposed) return { inserted: 0, more: false };
     try {
-      // A stretch longer than MAX_READ_BYTES is read in several chunks.
-      let inserted = 0;
-      for (let i = 0; i < MAX_CHUNKS_PER_SYNC; i++) {
-        const step = this.readTail(filePath, toolId, sessionId);
-        inserted += step.inserted;
-        if (!step.more) break;
-      }
-      return inserted;
+      return this.readTail(filePath, toolId, sessionId);
     } catch (e: any) {
       logger.warn('[Timeline/activity] sync failed:', e?.message ?? e);
-      return 0;
+      return { inserted: 0, more: false };
     }
   }
 
-  // ─── Internals ──────────────────────────────────────────────────────────
+  /** Read a file's whole unread tail in one go. For tests and one-off tools. */
+  public syncFile(filePath: string, toolId: ToolId, sessionId: string): number {
+    let inserted = 0;
+    for (let i = 0; i < MAX_CHUNKS_PER_SYNC; i++) {
+      const step = this.syncStep(filePath, toolId, sessionId);
+      inserted += step.inserted;
+      if (!step.more) break;
+    }
+    return inserted;
+  }
 
-  private enqueue(filePath: string, toolId: ToolId, sessionId: string): void {
-    this.pending.set(filePath, { toolId, sessionId });
+  /**
+   * Stop all work: drops the queue and timers and turns every later call into
+   * a no-op. Call before closing the database.
+   */
+  public dispose(): void {
+    this.disposed = true;
+    this.jobs.clear();
+    this.cancelTrailingSweep?.();
+    this.cancelTrailingSweep = null;
+  }
+
+  // ─── Queue ──────────────────────────────────────────────────────────────
+
+  private enqueue(key: string, job: Job): void {
+    if (this.disposed) return;
+    this.jobs.delete(key); // re-queue at the back, keeping the newest payload
+    this.jobs.set(key, job);
     this.scheduleFlush();
   }
 
-  // One file per tick: a first read can be several MB, and a Codex sweep can
-  // queue a day's worth of files at once.
+  private enqueueFile(filePath: string, toolId: ToolId, sessionId: string): void {
+    this.enqueue(`f:${filePath}`, { kind: 'file', path: filePath, toolId, sessionId });
+  }
+
+  // One job per tick: a first read can be several MB, and a sweep can queue a
+  // day's worth of files at once.
   private scheduleFlush(): void {
     if (this.flushScheduled) return;
     this.flushScheduled = true;
     this.defer(() => {
       this.flushScheduled = false;
-      const next = this.pending.entries().next();
+      if (this.disposed) return;
+      const next = this.jobs.entries().next();
       if (next.done) return;
-      const [file, job] = next.value;
-      this.pending.delete(file);
-      this.syncFile(file, job.toolId, job.sessionId);
-      if (this.pending.size > 0) this.scheduleFlush();
+      const [key, job] = next.value;
+      this.jobs.delete(key);
+      try { this.run(job); }
+      catch (e: any) { logger.warn('[Timeline/activity] job failed:', e?.message ?? e); }
+      if (this.jobs.size > 0) this.scheduleFlush();
     });
   }
 
-  // Reads one chunk. `more` is true when unread complete lines may remain.
-  private readTail(filePath: string, toolId: ToolId, sessionId: string): { inserted: number; more: boolean } {
+  private run(job: Job): void {
+    if (job.kind === 'file') {
+      const step = this.syncStep(job.path, job.toolId, job.sessionId);
+      if (step.more) this.enqueueFile(job.path, job.toolId, job.sessionId);
+      return;
+    }
+    if (job.kind === 'codex-sweep') {
+      for (const file of this.recentCodexRollouts()) this.enqueueFile(file, 'openai-codex', '');
+      return;
+    }
+    if (job.toolId === 'claude-code') {
+      // Hook payloads are untrusted input; a relative path would resolve
+      // against the app's working directory.
+      if (!job.transcriptPath || !path.isAbsolute(job.transcriptPath)) return;
+      const transcript = path.normalize(job.transcriptPath);
+      this.enqueueFile(transcript, 'claude-code', job.sessionId);
+      const now = this.now();
+      if (now - (this.subagentListedAt.get(job.sessionId) ?? -Infinity) >= SUBAGENT_LIST_INTERVAL_MS) {
+        this.subagentListedAt.set(job.sessionId, now);
+        for (const file of listClaudeSubagentFiles(transcript)) this.enqueueFile(file, 'claude-code', job.sessionId);
+      }
+      return;
+    }
+    // Codex
+    const rollout = this.codexPathFor(job.sessionId, job.transcriptPath);
+    if (rollout) this.enqueueFile(rollout, 'openai-codex', job.sessionId);
+    const now = this.now();
+    if (now - this.lastCodexSweep >= CODEX_SWEEP_INTERVAL_MS) {
+      this.lastCodexSweep = now;
+      this.enqueue('sweep', { kind: 'codex-sweep' });
+    }
+  }
+
+  // ─── Reading ────────────────────────────────────────────────────────────
+
+  private readTail(rawPath: string, toolId: ToolId, sessionId: string): { inserted: number; more: boolean } {
     const idle = { inserted: 0, more: false };
+    const filePath = path.normalize(rawPath);
     let size: number;
     try { size = fs.statSync(filePath).size; }
     catch { return idle; } // missing/unreadable — try again on a later event
@@ -162,7 +261,20 @@ export class ActivitySync {
     // Consume whole lines only. Cutting at the last newline *byte* keeps the
     // offset exact even when the read ends inside a multi-byte character.
     const lastNewline = buffer.lastIndexOf(0x0a, read - 1);
-    if (lastNewline < 0) return idle; // no complete line yet (or one line longer than a chunk)
+    if (lastNewline < 0) {
+      // A full chunk without a newline is one line longer than a chunk, which
+      // would otherwise block this file forever. Drop the chunk: the rest of
+      // that line arrives as an unparseable fragment and is skipped.
+      if (read === this.maxReadBytes && start + read < size) {
+        if (!this.oversizeWarned.has(filePath)) {
+          this.oversizeWarned.add(filePath);
+          logger.warn(`[Timeline/activity] skipping a line longer than ${this.maxReadBytes} bytes in ${path.basename(filePath)}`);
+        }
+        this.commit(filePath, start + read, codex);
+        return { inserted: 0, more: true };
+      }
+      return idle; // a line still being written
+    }
     const text = buffer.toString('utf8', 0, lastNewline);
 
     let facts: ActivityFact[];
@@ -175,29 +287,40 @@ export class ActivitySync {
     }
 
     const inserted = this.sink.insertActivityFacts(facts);
-    const next: OffsetEntry = { offset: start + lastNewline + 1, codex };
-    this.offsets.set(filePath, next);
+    // Write failed (database locked, disk full): leave the offset where it
+    // was so these lines are read again, rather than losing their facts.
+    if (inserted === null) return idle;
+
+    const nextOffset = start + lastNewline + 1;
+    this.commit(filePath, nextOffset, codex);
+    return { inserted, more: nextOffset < size };
+  }
+
+  private commit(filePath: string, offset: number, codex: CodexThreadContext | undefined): void {
+    this.offsets.set(filePath, { offset, codex });
     try {
       this.sink.saveActivityOffset({
         path: filePath,
-        offset: next.offset,
+        offset,
         context: codex ? JSON.stringify(codex) : null,
+        updatedAt: this.now(),
       });
     } catch (e: any) {
       logger.warn('[Timeline/activity] failed to persist offset:', e?.message ?? e);
     }
-    return { inserted, more: next.offset < size };
   }
 
+  // ─── Codex file discovery ───────────────────────────────────────────────
+
   private codexPathFor(sessionId: string, payloadPath?: string): string | null {
-    if (payloadPath) {
-      try { if (fs.statSync(payloadPath).isFile()) return payloadPath; } catch { /* fall through */ }
+    if (payloadPath && path.isAbsolute(payloadPath)) {
+      try { if (fs.statSync(payloadPath).isFile()) return path.normalize(payloadPath); } catch { /* fall through */ }
     }
     const cached = this.codexPathCache.get(sessionId);
-    if (cached) return cached;
+    const now = this.now();
+    if (cached && (cached.path !== null || now - cached.at < CODEX_MISS_TTL_MS)) return cached.path;
     const found = this.resolveCodexRollout(sessionId);
-    // Only cache hits: the rollout may simply not exist yet on the first event.
-    if (found) this.codexPathCache.set(sessionId, found);
+    this.codexPathCache.set(sessionId, { path: found, at: now });
     return found;
   }
 

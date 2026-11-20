@@ -8,8 +8,8 @@ import { ACTIVITY_EMPTY, AgentRow, DayAxis, StatTile, rollupDays } from './activ
 
 const NOTE =
   'Lines written and removed by your agents’ own edit calls, read from Claude Code and Codex session ' +
-  'files. Your manual edits and anything a shell command changed are not included. A new file counts ' +
-  'as all lines added.';
+  'files. Subagents’ edits and automated runs such as backlog cards are included. Your manual edits ' +
+  'and anything a shell command changed are not. A new file counts as all lines added.';
 
 const mergeDays = (chunk: LinesChangedDayBucket[]): LinesChangedDayBucket => ({
   date: chunk[0].date,

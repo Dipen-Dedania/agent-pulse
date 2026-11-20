@@ -1,4 +1,4 @@
-import { app } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { logger } from '../../common/logger';
 import { initTimelineDb, TimelineDb } from './db';
 import { EventsWriter } from './events-writer';
@@ -7,7 +7,7 @@ import { QuotaWriter } from './quota-writer';
 import { StatuslineWriter } from './statusline-writer';
 import { TranscriptReader } from './transcript-reader';
 import { ActivitySync } from './activity-sync';
-import { maybeBackfillActivity } from './activity-backfill';
+import { startActivityBackfill } from './activity-backfill';
 import { TimelineQueries } from './queries';
 import { registerTimelineIpc, registerTimelineIpcUnavailable, unregisterTimelineIpc } from './ipc';
 import { PruneScheduler } from './prune';
@@ -88,15 +88,24 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     catch (e) { logger.warn('[Timeline] limit backfill failed:', e); }
   });
 
-  // One-time read of the session files already on disk, so the activity cards
-  // (prompt size, lines changed, subagents) start with history. Held back until
-  // boot has settled, then spread one file per tick; marker-guarded like the
-  // backfill above. Cancelled when the timeline closes so it can't touch a
-  // closed DB.
+  // Reads the session files the live path has not seen: everything on disk the
+  // first time (so the activity cards start with history), the last few days on
+  // later launches (sessions that ran while the app was closed). Held back
+  // until boot has settled, then spread one chunk per tick. When it recorded
+  // anything, open windows are told to refetch, so the cards fill in without a
+  // manual refresh. Cancelled when the timeline closes.
   let cancelActivityBackfill: () => void = () => undefined;
   const activityBackfillTimer = setTimeout(() => {
-    try { cancelActivityBackfill = maybeBackfillActivity(db, activitySync); }
-    catch (e) { logger.warn('[Timeline] activity backfill failed:', e); }
+    try {
+      cancelActivityBackfill = startActivityBackfill(db, activitySync, {
+        onDone: ({ inserted }) => {
+          if (inserted === 0) return;
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) win.webContents.send('analytics:data-changed', {});
+          }
+        },
+      });
+    } catch (e) { logger.warn('[Timeline] activity backfill failed:', e); }
   }, ACTIVITY_BACKFILL_DELAY_MS);
 
   // One-time rewrite of sessions recorded before the "<synthetic>" guard, so
@@ -205,6 +214,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
       prune.stop();
       clearTimeout(activityBackfillTimer);
       cancelActivityBackfill();
+      activitySync.dispose(); // before db.close(): drops queued reads and timers
       unregisterTimelineIpc();
       try { db.close(); } catch { /* ignore */ }
     },

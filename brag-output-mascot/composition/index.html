@@ -1,0 +1,1051 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face {
+        font-family: "Manrope";
+        font-style: normal;
+        font-weight: 400 800;
+        font-display: block;
+        src: url("assets/fonts/manrope-latin.woff2") format("woff2");
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      :root {
+        --midnight-navy: #0b3558;
+        --signal-blue: #006bff;
+        --slate-blue: #476788;
+        --steel-blue: #a6bbd1;
+        --mist: #f8f9fb;
+        --fog: #e7edf6;
+        --mist-border: #d4e0ed;
+        --paper: #ffffff;
+        --working: #16a34a;
+        --waiting: #2563eb;
+        --idle: #d97706;
+        --error: #dc2626;
+        --badge: #ea580c;
+      }
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--mist);
+        font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ── Background ─────────────────────────────────────────── */
+      #bg {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(160deg, #ffffff 0%, var(--mist) 42%, var(--fog) 100%);
+      }
+      #blob {
+        position: absolute;
+        width: 1100px;
+        height: 1100px;
+        right: -180px;
+        top: -260px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle at 40% 40%,
+          rgba(229, 92, 255, 0.32) 0%,
+          rgba(130, 71, 245, 0.22) 38%,
+          rgba(130, 71, 245, 0) 70%
+        );
+        filter: blur(20px);
+      }
+      #blob2 {
+        position: absolute;
+        width: 820px;
+        height: 820px;
+        left: -220px;
+        bottom: -260px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle at 50% 50%,
+          rgba(0, 107, 255, 0.16) 0%,
+          rgba(0, 107, 255, 0) 70%
+        );
+        filter: blur(24px);
+      }
+
+      .scene {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+      }
+
+      .badge {
+        position: absolute;
+        border-radius: 50%;
+        background: var(--badge);
+        color: #fff;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(234, 88, 12, 0.55);
+      }
+
+      /* ── Scene 1 — the silent stall (waiting) ───────────────── */
+      #s1-story {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 132px;
+        text-align: center;
+        font-size: 34px;
+        font-weight: 600;
+        color: var(--slate-blue);
+        opacity: 0;
+      }
+      /* Clawd (the real Claude Code mascot) replaces the old status bubble.
+         Stage is 220px square; the character's ground line sits at ~189px. */
+      #cw-stage {
+        position: absolute;
+        left: 850px;
+        top: 205px;
+        width: 220px;
+        height: 220px;
+        opacity: 0;
+      }
+      #cw-glow {
+        position: absolute;
+        left: 14px;
+        top: 168px;
+        width: 192px;
+        height: 42px;
+        border-radius: 50%;
+        background: radial-gradient(ellipse at center, rgba(37, 99, 235, 0.5) 0%, rgba(37, 99, 235, 0) 70%);
+        filter: blur(8px);
+        opacity: 0;
+        z-index: 0;
+      }
+      #cw-ring {
+        position: absolute;
+        left: 26px;
+        top: 164px;
+        width: 168px;
+        height: 50px;
+        border-radius: 50%;
+        border: 3px solid rgba(37, 99, 235, 0.6);
+        opacity: 0;
+        z-index: 0;
+      }
+      #cw-svg {
+        position: absolute;
+        left: 0;
+        top: 0;
+        z-index: 1;
+        overflow: visible;
+      }
+      #cw-badge {
+        width: 34px;
+        height: 34px;
+        font-size: 18px;
+        left: 18px;
+        top: 46px;
+        z-index: 2;
+        opacity: 0;
+      }
+      #p1-toast {
+        position: absolute;
+        left: 1100px;
+        top: 290px;
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid var(--mist-border);
+        border-radius: 999px;
+        padding: 15px 28px;
+        box-shadow: rgba(71, 103, 136, 0.12) 0px 16px 36px 0px;
+        font-size: 23px;
+        font-weight: 700;
+        color: var(--midnight-navy);
+        opacity: 0;
+        white-space: nowrap;
+      }
+      #p1-toast .tdot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--waiting);
+        box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.18);
+      }
+      #p1-prompt {
+        position: absolute;
+        left: 630px;
+        top: 458px;
+        width: 660px;
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid var(--mist-border);
+        border-radius: 18px;
+        padding: 30px 34px 32px;
+        box-shadow: rgba(71, 103, 136, 0.04) 0px 4px 5px 0px,
+          rgba(71, 103, 136, 0.12) 0px 30px 60px 0px;
+        backdrop-filter: blur(8px);
+        opacity: 0;
+      }
+      .pp-head {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--slate-blue);
+        margin-bottom: 18px;
+      }
+      .pp-head .d {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--waiting);
+      }
+      .pp-title {
+        font-size: 31px;
+        font-weight: 800;
+        color: var(--midnight-navy);
+        letter-spacing: -0.01em;
+        margin-bottom: 28px;
+      }
+      .pp-btns {
+        display: flex;
+        gap: 14px;
+      }
+      .pp-btn {
+        padding: 13px 24px;
+        border-radius: 11px;
+        font-size: 19px;
+        font-weight: 700;
+        border: 1px solid var(--mist-border);
+        color: var(--slate-blue);
+        background: #fff;
+      }
+      .pp-btn.primary {
+        background: var(--signal-blue);
+        color: #fff;
+        border-color: var(--signal-blue);
+      }
+      #s1-punch {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 812px;
+        text-align: center;
+        font-size: 44px;
+        font-weight: 800;
+        color: var(--midnight-navy);
+        letter-spacing: -0.01em;
+        opacity: 0;
+      }
+
+      /* ── Scene 2 — the mascot lineup ────────────────────────── */
+      #s2-left {
+        position: absolute;
+        left: 130px;
+        top: 360px;
+        width: 760px;
+      }
+      .eyebrow {
+        font-size: 17px;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        color: #0a51c2;
+        text-transform: uppercase;
+        margin-bottom: 20px;
+      }
+      #s2-left h2 {
+        font-size: 64px;
+        font-weight: 800;
+        color: var(--midnight-navy);
+        letter-spacing: -0.015em;
+        line-height: 1.06;
+        margin-bottom: 24px;
+      }
+      #s2-left p {
+        font-size: 29px;
+        line-height: 1.5;
+        color: var(--slate-blue);
+        max-width: 660px;
+      }
+      #tl {
+        position: absolute;
+        left: 1120px;
+        top: 220px;
+        width: 680px;
+        height: 640px;
+      }
+      #tl-rail {
+        position: absolute;
+        left: 40px;
+        top: 0;
+        width: 250px;
+        height: 640px;
+        border-radius: 64px;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(11, 20, 36, 0.94));
+        border: 1px solid rgba(148, 173, 201, 0.28);
+        box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.5),
+          rgba(71, 103, 136, 0.18) 0px 30px 60px 0px;
+      }
+      .tl-row {
+        position: absolute;
+        left: 70px;
+        display: flex;
+        align-items: center;
+        gap: 38px;
+        opacity: 0;
+      }
+      #tl1 { top: 20px; }
+      #tl2 { top: 225px; }
+      #tl3 { top: 430px; }
+      .m-cell {
+        position: relative;
+        width: 190px;
+        height: 190px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+      }
+      .m-cell svg {
+        position: relative;
+        z-index: 1;
+        flex-shrink: 0;
+        overflow: visible;
+      }
+      .m-halo {
+        position: absolute;
+        inset: 14px;
+        border-radius: 50%;
+        filter: blur(18px);
+        z-index: 0;
+      }
+      .halo-working { background: rgba(22, 163, 74, 0.45); }
+      .halo-idle { background: rgba(217, 119, 6, 0.45); }
+      .halo-error { background: rgba(220, 38, 38, 0.5); }
+      .tl-label .name {
+        font-size: 30px;
+        font-weight: 800;
+        color: var(--midnight-navy);
+      }
+      .tl-label .state {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        margin-top: 8px;
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--slate-blue);
+      }
+      .tl-label .state i {
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      /* ── Scene 3 — guardrails (terminal block) ──────────────── */
+      #s3-head {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 130px;
+        text-align: center;
+        font-size: 60px;
+        font-weight: 800;
+        color: var(--midnight-navy);
+        letter-spacing: -0.015em;
+        opacity: 0;
+      }
+      #term {
+        position: absolute;
+        left: 460px;
+        top: 286px;
+        width: 1000px;
+        background: #0b1220;
+        border: 1px solid rgba(148, 173, 201, 0.25);
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: rgba(11, 20, 36, 0.45) 0px 40px 80px 0px;
+        opacity: 0;
+      }
+      .term-bar {
+        height: 48px;
+        background: #131c2e;
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        gap: 9px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .term-bar i {
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .term-bar span {
+        margin-left: 16px;
+        color: #8aa0bd;
+        font-size: 16px;
+        font-family: ui-monospace, monospace;
+      }
+      .term-body {
+        padding: 32px 36px 36px;
+        font-family: ui-monospace, monospace;
+        font-size: 27px;
+        line-height: 1.65;
+      }
+      .term-line { color: #4ec9b0; opacity: 0; }
+      .term-cmd { color: #e7eefb; opacity: 0; }
+      .term-cmd .pr { color: #5aa7ff; }
+      .term-cmd .danger { color: #ff6b6b; font-weight: 700; }
+      #term-block {
+        margin-top: 26px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        background: rgba(220, 38, 38, 0.14);
+        border: 1px solid rgba(239, 68, 68, 0.55);
+        border-radius: 13px;
+        padding: 20px 24px;
+        opacity: 0;
+      }
+      #term-block .x {
+        width: 46px;
+        height: 46px;
+        border-radius: 50%;
+        background: var(--error);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 26px;
+        font-weight: 800;
+        flex-shrink: 0;
+        font-family: "Manrope", sans-serif;
+      }
+      #term-block .t1 {
+        font-family: "Manrope", sans-serif;
+        font-size: 25px;
+        font-weight: 800;
+        color: #ff8a8a;
+      }
+      #term-block .t1 code {
+        font-family: ui-monospace, monospace;
+        color: #ffb4b4;
+        font-weight: 700;
+      }
+      #term-block .t2 {
+        font-family: "Manrope", sans-serif;
+        font-size: 19px;
+        color: #b9c6d8;
+        margin-top: 3px;
+      }
+      #s3-punch {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 838px;
+        text-align: center;
+        font-size: 36px;
+        font-weight: 700;
+        color: var(--slate-blue);
+        opacity: 0;
+      }
+      #s3-punch b { color: var(--midnight-navy); font-weight: 800; }
+
+      /* ── Scene 4 — outro ────────────────────────────────────── */
+      #s4-wrap {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 280px;
+        text-align: center;
+      }
+      #s4-logo {
+        width: 132px;
+        height: 132px;
+        object-fit: contain;
+        opacity: 0;
+      }
+      #s4-name {
+        font-size: 66px;
+        font-weight: 800;
+        color: var(--midnight-navy);
+        letter-spacing: -0.01em;
+        margin-top: 26px;
+        opacity: 0;
+      }
+      #s4-tag {
+        font-size: 29px;
+        color: var(--slate-blue);
+        margin-top: 16px;
+        opacity: 0;
+      }
+      #s4-stats {
+        font-size: 30px;
+        color: var(--slate-blue);
+        margin-top: 34px;
+        opacity: 0;
+        font-weight: 500;
+      }
+      #s4-stats b {
+        color: var(--midnight-navy);
+        font-weight: 800;
+      }
+      #s4-stats .dot {
+        color: var(--steel-blue);
+        margin: 0 18px;
+      }
+      #s4-trust {
+        font-size: 22px;
+        color: var(--steel-blue);
+        margin-top: 30px;
+        opacity: 0;
+        font-weight: 600;
+      }
+      #s4-url {
+        font-size: 23px;
+        color: var(--signal-blue);
+        margin-top: 12px;
+        opacity: 0;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="22"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- Background -->
+      <div id="bg" class="clip" data-start="0" data-duration="22" data-track-index="0">
+        <div id="blob"></div>
+        <div id="blob2"></div>
+      </div>
+
+      <!-- Scene 1 — the silent stall. Clawd (the real Claude Code mascot,
+           src/renderer/components/Bubble/ClawdMascot.tsx) waves its "Need input"
+           pennant beside the frozen permission prompt. -->
+      <div id="s1" class="scene clip" data-start="0" data-duration="6.8" data-track-index="2">
+        <div id="s1-story">You stepped into a meeting. Claude kept building…</div>
+        <div id="cw-stage">
+          <div id="cw-glow"></div>
+          <div id="cw-ring"></div>
+          <!-- Clawd rig, geometry verbatim from ClawdMascot.tsx (waiting pose props only) -->
+          <svg id="cw-svg" viewBox="-16 -50 158 158" width="220" height="220" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <g id="cw-char">
+              <g clip-path="url(#cw-ground-clip)">
+                <rect id="cw-leg4" x="85" y="60" width="11" height="26" fill="#DD775B" />
+                <rect id="cw-leg3" x="64" y="60" width="11" height="26" fill="#DD775B" />
+                <rect id="cw-leg2" x="32" y="60" width="11" height="26" fill="#DD775B" />
+                <rect id="cw-leg1" x="11" y="60" width="11" height="26" fill="#DD775B" />
+              </g>
+              <g id="cw-body">
+                <rect x="11" y="0" width="85" height="65" fill="#DD775B" />
+                <rect id="cw-right-hand" x="85" y="21" width="22" height="23" fill="#DD775B" />
+                <rect id="cw-left-hand" x="0" y="21" width="22" height="23" fill="#DD775B" />
+                <g id="cw-eyes">
+                  <rect x="75" y="11" width="11" height="11" fill="black" />
+                  <rect x="21" y="11" width="11" height="11" fill="black" />
+                </g>
+              </g>
+              <!-- "Need input" pennant, held in the right hand -->
+              <g id="cw-flag" opacity="0">
+                <rect x="99" y="-48" width="3" height="76" rx="1.5" fill="#5D5B56" />
+                <rect x="101" y="-50" width="48" height="32" rx="5" fill="#FBF7EF" stroke="#D9CFC0" stroke-width="1" />
+                <text x="125" y="-38" text-anchor="middle" font-family="ui-sans-serif, sans-serif" font-size="11" font-weight="700" fill="#3A3530">
+                  <tspan x="125" dy="0">Need</tspan>
+                  <tspan x="125" dy="13">input</tspan>
+                </text>
+              </g>
+            </g>
+            <defs>
+              <clipPath id="cw-ground-clip"><rect x="-20" y="-50" width="160" height="146" /></clipPath>
+            </defs>
+          </svg>
+          <div id="cw-badge" class="badge">1</div>
+        </div>
+        <div id="p1-toast"><span class="tdot"></span>Claude is waiting for you</div>
+        <div id="p1-prompt">
+          <div class="pp-head"><span class="d"></span>Claude Code · Waiting</div>
+          <div class="pp-title">Allow Claude to edit files in this session?</div>
+          <div class="pp-btns">
+            <div class="pp-btn">Deny</div>
+            <div class="pp-btn">Allow once</div>
+            <div class="pp-btn primary">Allow for session</div>
+          </div>
+        </div>
+        <div id="s1-punch">Agent Pulse pinged you instantly.</div>
+      </div>
+
+      <!-- Scene 2 — the mascot lineup. Each agent's mascot ACTS OUT its state:
+           Clawd does jumping jacks (working), the Codex frog sleeps (idle), the
+           Kiro ghost strobes red with an alert badge (error). Rigs verbatim from
+           CodexMascot.tsx / KiroMascot.tsx. -->
+      <div id="s2" class="scene clip" data-start="6.5" data-duration="5.4" data-track-index="3">
+        <div id="s2-left">
+          <div class="eyebrow">The fix</div>
+          <h2>Every agent<br />acts out its state.</h2>
+          <p>Jumping jacks means working. A nap means idle. A red strobe means something broke. One glance reads the whole fleet.</p>
+        </div>
+        <div id="tl">
+          <div id="tl-rail"></div>
+
+          <!-- Row 1 — Clawd, WORKING: jog in place, then jumping jacks with dumbbells -->
+          <div class="tl-row" id="tl1">
+            <div class="m-cell">
+              <div class="m-halo halo-working"></div>
+              <svg id="cg-svg" viewBox="-16 -50 158 158" width="170" height="170" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <g id="cg-char">
+                  <g clip-path="url(#cg-ground-clip)">
+                    <rect id="cg-leg4" x="85" y="60" width="11" height="26" fill="#DD775B" />
+                    <rect id="cg-leg3" x="64" y="60" width="11" height="26" fill="#DD775B" />
+                    <rect id="cg-leg2" x="32" y="60" width="11" height="26" fill="#DD775B" />
+                    <rect id="cg-leg1" x="11" y="60" width="11" height="26" fill="#DD775B" />
+                  </g>
+                  <g id="cg-body">
+                    <rect x="11" y="0" width="85" height="65" fill="#DD775B" />
+                    <rect id="cg-right-hand" x="85" y="21" width="22" height="23" fill="#DD775B" />
+                    <rect id="cg-left-hand" x="0" y="21" width="22" height="23" fill="#DD775B" />
+                    <g id="cg-left-dumbbell" opacity="0">
+                      <rect x="1" y="31" width="20" height="4" rx="2" fill="#8A8A8A" />
+                      <rect x="-3" y="26" width="7" height="14" rx="2" fill="#454545" />
+                      <rect x="18" y="26" width="7" height="14" rx="2" fill="#454545" />
+                    </g>
+                    <g id="cg-right-dumbbell" opacity="0">
+                      <rect x="86" y="31" width="20" height="4" rx="2" fill="#8A8A8A" />
+                      <rect x="82" y="26" width="7" height="14" rx="2" fill="#454545" />
+                      <rect x="103" y="26" width="7" height="14" rx="2" fill="#454545" />
+                    </g>
+                    <g id="cg-eyes">
+                      <rect x="75" y="11" width="11" height="11" fill="black" />
+                      <rect x="21" y="11" width="11" height="11" fill="black" />
+                    </g>
+                  </g>
+                </g>
+                <defs>
+                  <clipPath id="cg-ground-clip"><rect x="-20" y="-50" width="160" height="146" /></clipPath>
+                </defs>
+              </svg>
+            </div>
+            <div class="tl-label">
+              <div class="name">Claude Code</div>
+              <div class="state"><i style="background:#16a34a"></i>Working</div>
+            </div>
+          </div>
+
+          <!-- Row 2 — Codex frog, IDLE: asleep on its pillow, drifting zzz -->
+          <div class="tl-row" id="tl2">
+            <div class="m-cell">
+              <div class="m-halo halo-idle"></div>
+              <svg id="fx-svg" viewBox="-16 -30 224 286" width="145" height="185" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <linearGradient id="fx-bodyGrad" x1="172" y1="56" x2="40" y2="196" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#3f4a30" />
+                    <stop offset=".45" stop-color="#5e6d44" />
+                    <stop offset="1" stop-color="#7e8a58" />
+                  </linearGradient>
+                  <radialGradient id="fx-headHi" cx="92" cy="50" r="78" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#8a9760" stop-opacity=".55" />
+                    <stop offset="1" stop-color="#8a9760" stop-opacity="0" />
+                  </radialGradient>
+                  <radialGradient id="fx-bellyGrad" cx="60" cy="166" r="70" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#bcc296" />
+                    <stop offset=".55" stop-color="#a7ae80" />
+                    <stop offset="1" stop-color="#8a986a" />
+                  </radialGradient>
+                  <radialGradient id="fx-lidGrad" cx="0" cy="0" r="1" gradientTransform="translate(56 56) rotate(90) scale(24)" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#8c996090" />
+                    <stop offset=".6" stop-color="#76845a" />
+                    <stop offset="1" stop-color="#566445" />
+                  </radialGradient>
+                  <radialGradient id="fx-irisGrad" cx="0" cy="0" r="1" gradientTransform="translate(63 60) rotate(90) scale(16)" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#d8cd76" />
+                    <stop offset=".55" stop-color="#bdab4c" />
+                    <stop offset="1" stop-color="#8a7a2c" />
+                  </radialGradient>
+                  <radialGradient id="fx-irisGrad2" cx="0" cy="0" r="1" gradientTransform="translate(114 52) rotate(90) scale(17)" gradientUnits="userSpaceOnUse">
+                    <stop offset="0" stop-color="#d8cd76" />
+                    <stop offset=".55" stop-color="#bdab4c" />
+                    <stop offset="1" stop-color="#8a7a2c" />
+                  </radialGradient>
+                </defs>
+
+                <text id="fx-zzz" x="128" y="30" font-family="ui-sans-serif, sans-serif" font-size="30" font-style="italic" font-weight="700" fill="#cfd3da" opacity="0">z z z</text>
+                <rect id="fx-pillow" x="-12" y="170" width="96" height="34" rx="17" fill="#ECE6DA" opacity="0" />
+
+                <g id="fx-char">
+                  <g id="fx-leg-left" fill="#677648">
+                    <path d="M 74 184 C 66 194, 58 204, 56 214 C 58 217, 64 217, 66 214 C 70 204, 78 194, 82 186 C 80 183, 76 182, 74 184 Z" />
+                    <path d="M 62 210 C 50 210, 40 214, 36 219 C 40 220, 44 222, 47 220 C 49 222, 53 222, 55 220 C 57 222, 61 221, 63 219 C 66 216, 66 211, 62 210 Z" />
+                  </g>
+                  <g id="fx-leg-right" fill="#5e6c42">
+                    <path d="M 118 184 C 126 194, 134 204, 136 214 C 134 217, 128 217, 126 214 C 122 204, 114 194, 110 186 C 112 183, 116 182, 118 184 Z" />
+                    <path d="M 130 210 C 142 210, 152 214, 156 219 C 152 220, 148 222, 145 220 C 143 222, 139 222, 137 220 C 135 222, 131 221, 129 219 C 126 216, 126 211, 130 210 Z" />
+                  </g>
+                  <g id="fx-body">
+                    <path fill="url(#fx-bodyGrad)"
+                      d="M 18 98 C 14 82, 18 64, 34 52 C 44 44, 56 44, 66 52 C 76 44, 92 36, 112 38 C 138 40, 158 52, 170 80 C 182 104, 182 132, 174 156 C 166 178, 148 190, 122 195 C 96 200, 66 199, 44 190 C 28 183, 20 166, 22 144 C 23 128, 20 116, 18 104 C 17 101, 17 100, 18 98 Z" />
+                    <path fill="url(#fx-headHi)"
+                      d="M 18 98 C 14 82, 18 64, 34 52 C 44 44, 56 44, 66 52 C 76 44, 92 36, 112 38 C 138 40, 158 52, 170 80 C 178 96, 180 112, 178 126 C 150 150, 60 150, 30 120 C 22 112, 18 104, 18 98 Z" />
+                    <ellipse cx="150" cy="92" rx="20" ry="26" fill="#3a4530" opacity=".35" />
+                    <ellipse cx="128" cy="68" rx="16" ry="14" fill="#3a4530" opacity=".25" />
+                    <path fill="url(#fx-bellyGrad)"
+                      d="M 30 150 C 26 130, 30 114, 44 106 C 60 98, 84 102, 96 120 C 105 133, 106 162, 97 182 C 87 196, 52 196, 40 184 C 32 176, 31 162, 30 150 Z" />
+                    <g id="fx-left-hand" fill="#6a784c">
+                      <path d="M 44 100 C 40 122, 50 144, 66 154 C 70 157, 76 156, 76 150 C 64 142, 58 122, 56 102 C 55 97, 46 96, 44 100 Z" />
+                      <g stroke="#6a784c" stroke-width="6" stroke-linecap="round">
+                        <path d="M 70 153 L 66 164" />
+                        <path d="M 73 152 L 74 165" />
+                        <path d="M 76 151 L 82 161" />
+                      </g>
+                    </g>
+                    <g id="fx-right-hand" fill="#62714a">
+                      <path d="M 156 100 C 160 122, 150 144, 134 154 C 130 157, 124 156, 124 150 C 136 142, 142 122, 144 102 C 145 97, 154 96, 156 100 Z" />
+                      <g stroke="#62714a" stroke-width="6" stroke-linecap="round">
+                        <path d="M 130 153 L 134 164" />
+                        <path d="M 127 152 L 126 165" />
+                        <path d="M 124 151 L 118 161" />
+                      </g>
+                    </g>
+                    <g id="fx-face">
+                      <ellipse cx="33" cy="80" rx="2.4" ry="1.8" fill="#2f3722" />
+                      <path d="M 64 96 C 48 99, 33 99, 24 95" stroke="#2f3722" stroke-width="3" fill="none" stroke-linecap="round" />
+                      <path d="M 24 95 C 21 97, 21 100, 24 101" stroke="#2f3722" stroke-width="3" fill="none" stroke-linecap="round" />
+                    </g>
+                    <ellipse cx="58" cy="60" rx="25" ry="23" fill="url(#fx-lidGrad)" />
+                    <ellipse cx="112" cy="52" rx="27" ry="25" fill="url(#fx-lidGrad)" />
+                    <path d="M 44 56 C 47 46, 73 46, 77 56 C 69 51, 51 51, 44 56 Z" fill="#3a4530" opacity=".55" />
+                    <path d="M 96 49 C 100 38, 128 38, 132 49 C 122 44, 106 44, 96 49 Z" fill="#34402b" opacity=".55" />
+                    <g id="fx-eyes">
+                      <g>
+                        <circle cx="60" cy="62" r="15.5" fill="url(#fx-irisGrad)" />
+                        <circle cx="63" cy="59" r="7" fill="#191c10" />
+                        <circle cx="66" cy="55" r="2.5" fill="#fdfdf0" />
+                      </g>
+                      <g>
+                        <circle cx="113" cy="54" r="17" fill="url(#fx-irisGrad2)" />
+                        <circle cx="117" cy="51" r="7.5" fill="#191c10" />
+                        <circle cx="121" cy="47" r="2.7" fill="#fdfdf0" />
+                      </g>
+                    </g>
+                  </g>
+                </g>
+              </svg>
+            </div>
+            <div class="tl-label">
+              <div class="name">OpenAI Codex</div>
+              <div class="state"><i style="background:#d97706"></i>Idle</div>
+            </div>
+          </div>
+
+          <!-- Row 3 — Kiro ghost, ERROR: red strobe + glitch shudder + X-eyes + alert badge -->
+          <div class="tl-row" id="tl3">
+            <div class="m-cell">
+              <div class="m-halo halo-error"></div>
+              <svg id="kg-svg" viewBox="-120 -200 860 860" width="200" height="200" style="margin-bottom:8px" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <g id="kg-char">
+                  <g id="kg-body">
+                    <g transform="translate(265.367,317.039) scale(1.45761) scale(-1,1)" fill="#FFFFFF">
+                      <path d="M124.87,-2.1 C121.93,-31.07 121.46,-58.98 113.86,-83.37 C81.31,-222.74 -107.8,-222.6 -145.63,-84.08 C-201.45,150.35 133.69,84.83 124.87,-2.1 Z" />
+                      <path d="M-9.99,160.68 C7.8,54.3 -74.53,-129.56 -145.63,-84.08 C-151.15,-63.76 -172.64,34.71 -119.42,131.25 C-95.27,175.04 -27.93,217.21 -9.99,160.68 Z" />
+                      <path d="M-9.99,160.68 C51.06,211.09 133.83,189.49 94.96,103.35 C94.96,103.35 29.18,-50.21 -20.94,-22.83 C-74.72,6.54 -64.24,96.15 -9.99,160.68 Z" />
+                      <path d="M100.24,105.75 C100.24,105.76 100.24,105.74 100.24,105.74 C156.15,126.17 161.72,86.21 149.88,66.35 C112.42,3.53 128.2,-32.83 113.86,-83.37 C81.31,-222.74 -15.53,40.72 100.24,105.75 Z" />
+                    </g>
+                    <g id="kg-eyes" fill="#000000" opacity="0">
+                      <path d="M-18.456,-0.001 C-18.456,11.057 -16.138,29.607 -0.615,29.607 C-0.615,29.607 -0.612,29.607 -0.612,29.607 C11.327,29.607 18.456,18.54 18.456,-0.001 C18.456,-9.814 16.48,-17.707 12.741,-22.831 C9.459,-27.328 4.807,-29.607 -0.615,-29.607 C-6.037,-29.607 -10.3,-27.363 -13.28,-22.94 C-16.667,-17.913 -18.456,-9.981 -18.456,-0.001 Z" transform="translate(263.3,317.039) scale(1.45761) translate(17.992,-53.739)" />
+                      <path d="M-18.456,-0.001 C-18.456,11.057 -16.138,29.607 -0.615,29.607 C-0.615,29.607 -0.612,29.607 -0.612,29.607 C11.327,29.607 18.456,18.54 18.456,-0.001 C18.456,-9.814 16.48,-17.707 12.741,-22.831 C9.459,-27.328 4.807,-29.607 -0.615,-29.607 C-6.037,-29.607 -10.3,-27.363 -13.28,-22.94 C-16.667,-17.913 -18.456,-9.981 -18.456,-0.001 Z" transform="translate(265.367,317.039) scale(1.45761) translate(81.822,-53.739)" />
+                    </g>
+                    <g id="kg-eyes-x" opacity="1" stroke="#000000" stroke-width="14" stroke-linecap="round">
+                      <line x1="268" y1="205" x2="311" y2="273" />
+                      <line x1="311" y1="205" x2="268" y2="273" />
+                      <line x1="363" y1="205" x2="406" y2="273" />
+                      <line x1="406" y1="205" x2="363" y2="273" />
+                    </g>
+                    <g id="kg-red" transform="translate(265.367,317.039) scale(1.45761) scale(-1,1)" fill="#E5484D" opacity="0" style="mix-blend-mode:multiply">
+                      <path d="M124.87,-2.1 C121.93,-31.07 121.46,-58.98 113.86,-83.37 C81.31,-222.74 -107.8,-222.6 -145.63,-84.08 C-201.45,150.35 133.69,84.83 124.87,-2.1 Z" />
+                      <path d="M-9.99,160.68 C7.8,54.3 -74.53,-129.56 -145.63,-84.08 C-151.15,-63.76 -172.64,34.71 -119.42,131.25 C-95.27,175.04 -27.93,217.21 -9.99,160.68 Z" />
+                      <path d="M-9.99,160.68 C51.06,211.09 133.83,189.49 94.96,103.35 C94.96,103.35 29.18,-50.21 -20.94,-22.83 C-74.72,6.54 -64.24,96.15 -9.99,160.68 Z" />
+                      <path d="M100.24,105.75 C100.24,105.76 100.24,105.74 100.24,105.74 C156.15,126.17 161.72,86.21 149.88,66.35 C112.42,3.53 128.2,-32.83 113.86,-83.37 C81.31,-222.74 -15.53,40.72 100.24,105.75 Z" />
+                    </g>
+                  </g>
+                  <g id="kg-alert" opacity="0">
+                    <path d="M270 -105 L318 -20 L222 -20 Z" fill="#E5484D" stroke="#FFFFFF" stroke-width="6" stroke-linejoin="round" />
+                    <rect x="265" y="-80" width="10" height="36" rx="5" fill="#FFFFFF" />
+                    <rect x="265" y="-36" width="10" height="10" rx="5" fill="#FFFFFF" />
+                  </g>
+                </g>
+              </svg>
+            </div>
+            <div class="tl-label">
+              <div class="name">Kiro</div>
+              <div class="state"><i style="background:#dc2626"></i>Error</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scene 3 — guardrails -->
+      <div id="s3" class="scene clip" data-start="11.7" data-duration="5.8" data-track-index="4">
+        <div id="s3-head">Running unattended on Auto mode?</div>
+        <div id="term">
+          <div class="term-bar">
+            <i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>
+            <span>agent — auto mode</span>
+          </div>
+          <div class="term-body">
+            <div class="term-line" id="t-line">agent ▸ applying changes…</div>
+            <div class="term-cmd" id="t-cmd"><span class="pr">~/project ❯</span> <span class="danger">rm -rf /</span></div>
+            <div id="term-block">
+              <div class="x">✕</div>
+              <div>
+                <div class="t1">Blocked · <code>rm-rf-root</code></div>
+                <div class="t2">"rm -rf /" (or equivalent) will wipe the root filesystem.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="s3-punch">Destructive commands get <b>blocked before they run.</b></div>
+      </div>
+
+      <!-- Scene 4 — outro -->
+      <div id="s4" class="scene clip" data-start="17.3" data-duration="4.7" data-track-index="5">
+        <div id="s4-wrap">
+          <img id="s4-logo" src="assets/screenshots/logo.png" alt="" />
+          <div id="s4-name">Agent Pulse</div>
+          <div id="s4-tag">Ambient, glanceable awareness of AI coding agents.</div>
+          <div id="s4-stats">
+            <b>6 tools</b><span class="dot">·</span><b>0 bytes sent</b><span class="dot">·</span><b>1 glance</b>
+          </div>
+          <div id="s4-trust">100% local. No telemetry.</div>
+          <div id="s4-url">dipen-dedania.github.io/agent-pulse</div>
+        </div>
+      </div>
+
+      <!-- ── Audio ─────────────────────────────────────────────── -->
+      <!-- Two-part bed: low/tense under the stall, lifts at the notification turn. -->
+      <audio
+        id="music-tense"
+        class="clip"
+        data-start="0"
+        data-duration="4.5"
+        data-track-index="10"
+        data-volume="0.17"
+        src="assets/music/happy-beats-business-moves-vol-12-by-ende-dot-app.mp3"
+      ></audio>
+      <audio
+        id="music-bed"
+        class="clip"
+        data-start="4.5"
+        data-duration="15.5"
+        data-media-start="4.5"
+        data-track-index="10"
+        data-volume="0.3"
+        src="assets/music/happy-beats-business-moves-vol-12-by-ende-dot-app.mp3"
+      ></audio>
+      <audio
+        id="music-tail"
+        class="clip"
+        data-start="20"
+        data-duration="2"
+        data-media-start="20"
+        data-track-index="10"
+        data-volume="0.13"
+        src="assets/music/happy-beats-business-moves-vol-12-by-ende-dot-app.mp3"
+      ></audio>
+
+      <!-- SFX: soft + sparse. No alarms. -->
+      <audio id="sfx-prompt" class="clip" data-start="1.5" data-duration="1" data-track-index="11" data-volume="0.4" src="assets/sfx/interface/drop_002.ogg"></audio>
+      <audio id="sfx-notify" class="clip" data-start="4.5" data-duration="1" data-track-index="12" data-volume="0.55" src="assets/sfx/interface/drop_001.ogg"></audio>
+      <!-- mascot lineup arrivals (every-other-beat) -->
+      <audio id="sfx-tl1" class="clip" data-start="7.1" data-duration="1" data-track-index="13" data-volume="0.5" src="assets/sfx/interface/drop_002.ogg"></audio>
+      <audio id="sfx-tl2" class="clip" data-start="8.2" data-duration="1" data-track-index="14" data-volume="0.5" src="assets/sfx/interface/drop_001.ogg"></audio>
+      <audio id="sfx-tl3" class="clip" data-start="9.3" data-duration="1" data-track-index="15" data-volume="0.5" src="assets/sfx/interface/drop_002.ogg"></audio>
+      <!-- unified lineup pulse — beat-locked 10.93 -->
+      <audio id="sfx-pulse" class="clip" data-start="10.93" data-duration="1.5" data-track-index="16" data-volume="0.4" src="assets/sfx/impact/impactGlass_light_001.ogg"></audio>
+      <!-- guardrail block — decisive clink, beat-locked 13.11 -->
+      <audio id="sfx-block" class="clip" data-start="13.11" data-duration="1.5" data-track-index="17" data-volume="0.62" src="assets/sfx/impact/impactGlass_light_001.ogg"></audio>
+      <!-- logo glass clink (17.47) + soft bell on the stats (19.66) -->
+      <audio id="sfx-logo" class="clip" data-start="17.473" data-duration="2" data-track-index="18" data-volume="0.5" src="assets/sfx/impact/impactGlass_light_001.ogg"></audio>
+      <audio id="sfx-stats" class="clip" data-start="19.656" data-duration="2.5" data-track-index="19" data-volume="0.42" src="assets/sfx/impact/impactBell_heavy_000.ogg"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // ── Ambient loops (whole video) ──────────────────────────
+      tl.to("#blob", { scale: 1.06, opacity: 0.85, duration: 4, ease: "sine.inOut", yoyo: true, repeat: 5 }, 0);
+      tl.to("#blob2", { scale: 1.08, duration: 5, ease: "sine.inOut", yoyo: true, repeat: 4 }, 0);
+
+      // ── Scene 1 — the silent stall (0 – 6.8s) ────────────────
+      // Clawd's WAITING pose, ported from ClawdMascot.tsx playHelp(): raise the
+      // right hand, show the "Need input" pennant, wave it, hop urgently, blink.
+      tl.set("#s1", { opacity: 1 }, 0);
+      tl.set("#s1-story", { opacity: 0, y: 20 }, 0);
+      tl.set("#cw-stage", { y: 38, opacity: 0 }, 0);
+      tl.set("#cw-badge", { opacity: 0, scale: 0.4, transformOrigin: "50% 50%" }, 0);
+      tl.set("#p1-toast", { opacity: 0, x: -24 }, 0);
+      tl.set("#p1-prompt", { opacity: 0, y: 28 }, 0);
+      tl.set("#s1-punch", { opacity: 0, y: 22 }, 0);
+      tl.to("#s1-story", { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 0.5);
+      tl.to("#cw-stage", { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" }, 0.4);
+      // waiting-blue pool + radar ring under the mascot (real waiting palette)
+      tl.set("#cw-glow", { opacity: 0 }, 0);
+      tl.to("#cw-glow", { opacity: 0.55, duration: 0.6 }, 0.7);
+      tl.to("#cw-glow", { opacity: 0.28, duration: 1.1, ease: "sine.inOut", yoyo: true, repeat: 4 }, 1.3);
+      tl.fromTo("#cw-ring", { opacity: 0.5, scale: 1, transformOrigin: "50% 50%" }, { opacity: 0, scale: 1.7, duration: 1.6, ease: "sine.out", repeat: 3 }, 0.8);
+      // pose: arm up, pennant out
+      tl.to("#cw-right-hand", { x: 6, y: -6, duration: 0.4, ease: "power2.out" }, 1.0);
+      tl.to("#cw-char", { y: -2, duration: 0.25, ease: "power2.out" }, 1.0);
+      tl.to("#cw-flag", { opacity: 1, duration: 0.4 }, 1.05);
+      // loops: pennant wave + urgent hop + worried blink
+      tl.fromTo("#cw-flag", { rotation: -7, svgOrigin: "100 26" }, { rotation: 7, svgOrigin: "100 26", duration: 0.8, ease: "sine.inOut", repeat: 6, yoyo: true }, 1.45);
+      tl.to("#cw-char", { y: -8, duration: 0.45, ease: "power1.inOut", repeat: 11, yoyo: true }, 1.4);
+      tl.to("#cw-eyes", { scaleY: 0.2, svgOrigin: "53 16.5", duration: 0.12, ease: "power1.inOut", repeat: 3, yoyo: true, repeatDelay: 1.3 }, 1.7);
+      tl.to("#p1-prompt", { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 1.5);
+      // the turn — strong glow pulse + badge + toast + punch (music lifts here)
+      tl.to("#cw-glow", { scale: 1.45, duration: 0.3, ease: "power2.out", yoyo: true, repeat: 1, transformOrigin: "50% 50%" }, 4.5);
+      tl.to("#cw-badge", { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, 4.5);
+      tl.to("#p1-toast", { opacity: 1, x: 0, duration: 0.5, ease: "power2.out" }, 4.6);
+      tl.to("#s1-punch", { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, 4.85);
+      tl.to("#s1", { opacity: 0, duration: 0.4, ease: "power1.in" }, 6.5);
+
+      // ── Scene 2 — the mascot lineup (6.5 – 11.9s) ────────────
+      tl.set("#s2", { opacity: 0 }, 6.5);
+      tl.set("#s2-left", { opacity: 0, x: -32 }, 6.5);
+      tl.set("#tl-rail", { opacity: 0, scaleY: 0.85, transformOrigin: "50% 50%" }, 6.5);
+      tl.set([".tl-row"], { opacity: 0, y: 18 }, 6.5);
+      tl.to("#s2", { opacity: 1, duration: 0.45 }, 6.7);
+      tl.to("#s2-left", { opacity: 1, x: 0, duration: 0.6, ease: "power2.out" }, 6.85);
+      tl.to("#tl-rail", { opacity: 1, scaleY: 1, duration: 0.6, ease: "power3.out" }, 6.85);
+      // rows one by one (every-other-beat: 7.1 / 8.2 / 9.3)
+      tl.to("#tl1", { opacity: 1, y: 0, duration: 0.5, ease: "back.out(1.4)" }, 7.1);
+      tl.to("#tl2", { opacity: 1, y: 0, duration: 0.5, ease: "back.out(1.4)" }, 8.2);
+      tl.to("#tl3", { opacity: 1, y: 0, duration: 0.5, ease: "back.out(1.4)" }, 9.3);
+
+      // — Row 1: Clawd WORKING, ported from ClawdMascot.tsx playRun():
+      //   jog in place (legs squash from their tops so feet lift), then
+      //   dumbbells appear and it does jumping jacks.
+      const CG_LEGS = ["#cg-leg1", "#cg-leg2", "#cg-leg3", "#cg-leg4"];
+      const CG_LEG_CX = { "#cg-leg1": 16.5, "#cg-leg2": 37.5, "#cg-leg3": 69.5, "#cg-leg4": 90.5 };
+      CG_LEGS.forEach((l) => tl.set(l, { svgOrigin: `${CG_LEG_CX[l]} 60` }, 6.6));
+      tl.to("#cg-char", { rotation: 4, svgOrigin: "53 86", duration: 0.25, ease: "power2.out" }, 7.15);
+      let t = 7.42;
+      const d = 0.13;
+      for (let s = 0; s < 3; s++) {
+        tl.to("#cg-char", { y: -7, duration: d, ease: "power1.out" }, t);
+        tl.to(["#cg-leg1", "#cg-leg3"], { scaleY: 0.5, duration: d, ease: "power1.out" }, t);
+        tl.to(["#cg-leg2", "#cg-leg4"], { scaleY: 1, duration: d }, t);
+        tl.to("#cg-left-hand", { y: -9, x: 3, duration: d }, t);
+        tl.to("#cg-right-hand", { y: 9, x: -3, duration: d }, t);
+        t += d;
+        tl.to("#cg-char", { y: 0, duration: d, ease: "power1.in" }, t);
+        tl.to(["#cg-leg1", "#cg-leg3"], { scaleY: 1, duration: d }, t);
+        tl.to(["#cg-leg2", "#cg-leg4"], { scaleY: 0.5, duration: d }, t);
+        tl.to("#cg-left-hand", { y: 9, x: -3, duration: d }, t);
+        tl.to("#cg-right-hand", { y: -9, x: 3, duration: d }, t);
+        t += d;
+      }
+      // settle, pick up the dumbbells
+      tl.to(CG_LEGS, { scaleY: 1, duration: 0.15 }, t);
+      tl.to(["#cg-left-hand", "#cg-right-hand"], { x: 0, y: 0, duration: 0.15 }, t);
+      tl.to("#cg-char", { rotation: 0, duration: 0.2 }, t);
+      tl.to(["#cg-left-dumbbell", "#cg-right-dumbbell"], { opacity: 1, duration: 0.2 }, t);
+      t += 0.45;
+      // jumping jacks (7 reps carries through the unified 10.93 pulse)
+      const j = 0.2;
+      const cgLeft = ["#cg-left-hand", "#cg-left-dumbbell"];
+      const cgRight = ["#cg-right-hand", "#cg-right-dumbbell"];
+      for (let r = 0; r < 7; r++) {
+        tl.to("#cg-char", { y: -10, duration: j, ease: "power2.out" }, t);
+        tl.to(cgLeft, { x: -11, y: -24, duration: j }, t);
+        tl.to(cgRight, { x: 11, y: -24, duration: j }, t);
+        tl.to("#cg-leg1", { x: -9, duration: j }, t);
+        tl.to("#cg-leg2", { x: -3, duration: j }, t);
+        tl.to("#cg-leg3", { x: 3, duration: j }, t);
+        tl.to("#cg-leg4", { x: 9, duration: j }, t);
+        t += j;
+        tl.to("#cg-char", { y: 0, duration: j, ease: "power2.in" }, t);
+        tl.to([...cgLeft, ...cgRight], { x: 0, y: 0, duration: j }, t);
+        tl.to(CG_LEGS, { x: 0, duration: j }, t);
+        t += j;
+      }
+
+      // — Row 2: Codex frog IDLE, ported from CodexMascot.tsx playSleep():
+      //   pre-posed asleep on the pillow; breathing + drifting zzz loop.
+      tl.set("#fx-pillow", { opacity: 1 }, 6.6);
+      tl.set("#fx-char", { rotation: -13, x: -6, y: 6, svgOrigin: "70 196" }, 6.6);
+      tl.set("#fx-eyes", { scaleY: 0.1, svgOrigin: "84 58" }, 6.6);
+      tl.set("#fx-zzz", { opacity: 0, scale: 0.6, svgOrigin: "134 28" }, 6.6);
+      tl.to("#fx-body", { scaleY: 1.035, svgOrigin: "100 196", duration: 1.7, ease: "sine.inOut", repeat: 3, yoyo: true }, 8.3);
+      tl.fromTo("#fx-zzz", { opacity: 0, x: 0, y: 0, scale: 0.6 }, { opacity: 0.9, x: 12, y: -22, scale: 1, duration: 1.9, ease: "sine.out" }, 8.45);
+      tl.to("#fx-zzz", { opacity: 0, duration: 0.5 }, 9.95);
+      tl.fromTo("#fx-zzz", { opacity: 0, x: 0, y: 0, scale: 0.6 }, { opacity: 0.9, x: 12, y: -22, scale: 1, duration: 1.9, ease: "sine.out" }, 10.55);
+
+      // — Row 3: Kiro ghost ERROR, ported from KiroMascot.tsx playError():
+      //   X-eyes (pre-set in markup), alert badge pops + throbs, red strobe,
+      //   glitch shudder, sharp "no" head-shake.
+      tl.set("#kg-alert", { opacity: 1, scale: 0, svgOrigin: "270 -60" }, 6.6);
+      tl.to("#kg-alert", { scale: 1, duration: 0.4, ease: "back.out(2.2)" }, 9.45);
+      tl.to("#kg-red", { opacity: 0.75, duration: 0.18, ease: "power1.inOut", repeat: 11, yoyo: true }, 9.5);
+      tl.to("#kg-char", { x: 7, duration: 0.045, ease: "none", repeat: 43, yoyo: true }, 9.5);
+      tl.to("#kg-char", { y: -5, duration: 0.07, ease: "none", repeat: 27, yoyo: true }, 9.5);
+      tl.fromTo("#kg-body", { rotation: -4, svgOrigin: "270 400" }, { rotation: 4, svgOrigin: "270 400", duration: 0.12, ease: "power1.inOut", repeat: 15, yoyo: true }, 9.5);
+      tl.to("#kg-alert", { scale: 1.15, svgOrigin: "270 -60", duration: 0.45, ease: "sine.inOut", repeat: 3, yoyo: true }, 9.9);
+
+      // all three cells pulse once together — beat-locked: 10.93s
+      tl.to(".m-cell", { scale: 1.07, duration: 0.32, ease: "sine.out", yoyo: true, repeat: 1, transformOrigin: "50% 50%" }, 10.93);
+      tl.to("#s2", { opacity: 0, duration: 0.45, ease: "power1.in" }, 11.5);
+
+      // ── Scene 3 — guardrails (11.7 – 17.5s) ──────────────────
+      tl.set("#s3", { opacity: 1 }, 11.7);
+      tl.set("#s3-head", { opacity: 0, y: 20 }, 11.7);
+      tl.set("#term", { opacity: 0, y: 30, scale: 0.98, transformOrigin: "50% 50%" }, 11.7);
+      tl.set(["#t-line", "#t-cmd"], { opacity: 0 }, 11.7);
+      tl.set("#term-block", { opacity: 0, scale: 0.96, transformOrigin: "50% 50%" }, 11.7);
+      tl.set("#s3-punch", { opacity: 0, y: 20 }, 11.7);
+      tl.to("#s3-head", { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, 11.9);
+      tl.to("#term", { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "power3.out" }, 12.15);
+      tl.to("#t-line", { opacity: 1, duration: 0.3 }, 12.5);
+      tl.to("#t-cmd", { opacity: 1, duration: 0.3 }, 12.85);
+      // the block slams in — beat-locked: 13.11s
+      tl.fromTo("#term-block", { opacity: 0, scale: 0.96 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(2)" }, 13.11);
+      tl.to("#s3-punch", { opacity: 1, y: 0, duration: 0.55, ease: "power2.out" }, 13.9);
+      tl.to("#s3", { opacity: 0, duration: 0.45, ease: "power1.in" }, 17.3);
+
+      // ── Scene 4 — the calm, named (17.3 – 22s) ───────────────
+      tl.set("#s4", { opacity: 1 }, 17.3);
+      tl.set("#s4-logo", { opacity: 0, scale: 0.8, y: 10, transformOrigin: "50% 50%" }, 17.3);
+      tl.set(["#s4-name", "#s4-tag", "#s4-stats", "#s4-trust", "#s4-url"], { opacity: 0, y: 14 }, 17.3);
+      tl.to("#s4", { opacity: 1, duration: 0.4 }, 17.35);
+      // logo lands on the strong cue — beat-locked: 17.47s
+      tl.to("#s4-logo", { opacity: 1, scale: 1, y: 0, duration: 0.6, ease: "back.out(1.5)" }, 17.473);
+      tl.to("#s4-name", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 18.05);
+      tl.to("#s4-tag", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 18.55);
+      // stats land on a strong cue — beat-locked: 19.66s
+      tl.to("#s4-stats", { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 19.656);
+      tl.fromTo("#s4-logo", { filter: "drop-shadow(0 0 0 rgba(0,107,255,0))" }, { filter: "drop-shadow(0 0 18px rgba(0,107,255,0.35))", duration: 0.5, yoyo: true, repeat: 1 }, 19.656);
+      tl.to("#s4-trust", { opacity: 1, y: 0, duration: 0.5 }, 20.2);
+      tl.to("#s4-url", { opacity: 1, y: 0, duration: 0.5 }, 20.6);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

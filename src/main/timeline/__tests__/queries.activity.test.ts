@@ -74,6 +74,59 @@ describe.skipIf(!dbAvailable)('TimelineQueries — activity cards', () => {
     db.close();
   });
 
+  it('getCompactions: trigger split, session share, context size and per-day buckets', () => {
+    const db = openTimelineDb(':memory:')!;
+    // Claude Code: 3 sessions with activity, 2 of them compacted (3 compactions).
+    fact(db, { kind: 'compaction', sessionId: 's1', trigger: 'manual', tokensBefore: 140_000, tokensAfter: 20_000 });
+    fact(db, { kind: 'compaction', sessionId: 's1', trigger: 'auto', tokensBefore: 210_000, tokensAfter: 30_000 });
+    fact(db, { kind: 'compaction', sessionId: 's2', trigger: 'auto', tokensBefore: 370_000, tokensAfter: 32_000, ts: NOW - 2 * DAY });
+    fact(db, { kind: 'prompt', words: 5, sessionId: 's3' });
+    // Codex: no context size; one whose trigger could not be told.
+    fact(db, { kind: 'compaction', toolId: 'openai-codex', sessionId: 't1', trigger: 'manual' });
+    fact(db, { kind: 'compaction', toolId: 'openai-codex', sessionId: 't1', trigger: 'unknown' });
+    fact(db, { kind: 'compaction', sessionId: 'old', trigger: 'auto', ts: NOW - 40 * DAY }); // outside 7d
+
+    const out = new TimelineQueries(db).getCompactions('7d');
+    expect(out).toMatchObject({
+      total: 5, auto: 2, manual: 2, unknown: 1,
+      sessionsCompacted: 3, sessions: 4, medianTokensBefore: 210_000,
+    });
+    expect(out.agents).toEqual([
+      { toolId: 'claude-code', auto: 2, manual: 1, unknown: 0, sessionsCompacted: 2, sessions: 3, medianTokensBefore: 210_000 },
+      { toolId: 'openai-codex', auto: 0, manual: 1, unknown: 1, sessionsCompacted: 1, sessions: 1, medianTokensBefore: null },
+    ]);
+    expect(out.byDay).toHaveLength(7);
+    expect(out.byDay.reduce((s, d) => s + d.auto + d.manual + d.unknown, 0)).toBe(5);
+    db.close();
+  });
+
+  it('getCompactions: activity but no compactions', () => {
+    const db = openTimelineDb(':memory:')!;
+    fact(db, { kind: 'prompt', words: 5 });
+    const out = new TimelineQueries(db).getCompactions('7d');
+    expect(out).toMatchObject({ total: 0, auto: 0, manual: 0, unknown: 0, sessionsCompacted: 0, sessions: 1, medianTokensBefore: null });
+    expect(out.agents).toEqual([
+      { toolId: 'claude-code', auto: 0, manual: 0, unknown: 0, sessionsCompacted: 0, sessions: 1, medianTokensBefore: null },
+    ]);
+    db.close();
+  });
+
+  it('day buckets are consecutive calendar dates ending today', () => {
+    const db = openTimelineDb(':memory:')!;
+    const days = new TimelineQueries(db).getLinesChanged('30d').byDay.map((d) => d.date);
+    expect(days).toHaveLength(30);
+    expect(new Set(days).size).toBe(30);
+    const today = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    expect(days[29]).toBe(`${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`);
+    for (let i = 1; i < days.length; i++) {
+      const prev = new Date(`${days[i - 1]}T12:00:00`);
+      prev.setDate(prev.getDate() + 1);
+      expect(days[i]).toBe(`${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-${pad(prev.getDate())}`);
+    }
+    db.close();
+  });
+
   it('getSubagentUse: launches, session share, and auto-reviews kept apart', () => {
     const db = openTimelineDb(':memory:')!;
     // Claude Code: 3 sessions, subagents in 2 of them (3 launches).

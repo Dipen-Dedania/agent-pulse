@@ -33,6 +33,7 @@ import {
   PromptSizePayload,
   LinesChangedPayload,
   SubagentUsePayload,
+  CompactionsPayload,
 } from '../../../../common/timeline-types';
 import { BacklogStatsPayload } from '../../../../common/backlog-types';
 
@@ -220,6 +221,10 @@ export function useLinesChanged(range: TimelineRange) {
 
 export function useSubagentUse(range: TimelineRange) {
   return useAnalyticsQuery<SubagentUsePayload>('analytics:get-subagent-use', { range }, range);
+}
+
+export function useCompactions(range: TimelineRange) {
+  return useAnalyticsQuery<CompactionsPayload>('analytics:get-compactions', { range }, range);
 }
 
 // Overnight Backlog — served from the backlog DB via backlog:get-stats (not the

@@ -7,7 +7,8 @@ import { ACTIVITY_EMPTY, AgentRow, StatTile } from './activityShared';
 
 const NOTE =
   'Words in the messages you typed, read from Claude Code and Codex session files. Only the count is ' +
-  'stored, never the text. Pasted text counts; attached images, slash commands and automated runs do not.';
+  'stored, never the text. Pasted text counts. Not counted: attached images and files, slash commands, ' +
+  'the text of questions an agent asked you, and automated runs such as backlog cards.';
 
 const round = (n: number) => Math.round(n).toString();
 
@@ -30,8 +31,10 @@ export const PromptSizeCard: React.FC = () => {
     >
       {loading && !data ? (
         <SkeletonLine width='100%' height='8rem' />
-      ) : !data || data.prompts === 0 ? (
+      ) : !data || data.prompts + data.imageOnlyPrompts === 0 ? (
         <EmptyState message={ACTIVITY_EMPTY} />
+      ) : data.prompts === 0 ? (
+        <EmptyState message={`Only image-only prompts in this window (${data.imageOnlyPrompts}), so there are no words to measure.`} />
       ) : (
         <div className='flex flex-col gap-4'>
           <div className='grid grid-cols-3 gap-3'>

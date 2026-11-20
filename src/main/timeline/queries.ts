@@ -70,6 +70,8 @@ import {
   LinesChangedAgentRow,
   SubagentUsePayload,
   SubagentAgentRow,
+  CompactionsPayload,
+  CompactionsAgentRow,
 } from '../../common/timeline-types';
 import {
   ACTION_CATEGORIES,
@@ -1344,12 +1346,24 @@ export class TimelineQueries {
   }
 
   // ─── Activity facts ────────────────────────────────────────────────────
-  // The three cards below read activity_facts. They share an inclusive
-  // local-day window so the day-bucketed charts line up with the totals.
-  private activityWindow(range: ActivityRange): { now: number; windowStart: number; days: number } {
+  // The cards below read activity_facts. They share an inclusive local-day
+  // window so the day-bucketed charts line up with the totals. Days are
+  // stepped by calendar date, not by 24 hours: across a daylight-saving change
+  // a fixed step skips or repeats a date, and that day's facts would then be
+  // in a card's total but missing from its chart.
+  private activityWindow(range: ActivityRange): { now: number; windowStart: number; dayKeys: string[] } {
     const now = Date.now();
     const days = rangeDays(range);
-    return { now, days, windowStart: startOfLocalDay(now) - (days - 1) * DAY_MS };
+    const dayKeys: string[] = [];
+    let windowStart = now;
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      if (i === days - 1) windowStart = d.getTime();
+      dayKeys.push(formatLocalDate(d.getTime()));
+    }
+    return { now, windowStart, dayKeys };
   }
 
   // Prompt size — how much the user writes per prompt, in words.
@@ -1410,7 +1424,7 @@ export class TimelineQueries {
 
   // Lines changed — what agents' edit calls added and removed.
   getLinesChanged(range: ActivityRange): LinesChangedPayload {
-    const { now, windowStart, days } = this.activityWindow(range);
+    const { now, windowStart, dayKeys } = this.activityWindow(range);
     const rows = this.db.query<{ tool_id: string; ts: number; added: number | null; removed: number | null }>(
       `SELECT tool_id, ts, lines_added AS added, lines_removed AS removed
          FROM activity_facts WHERE kind = 'edit' AND ts >= ?`,
@@ -1418,7 +1432,7 @@ export class TimelineQueries {
     );
 
     const byDayMap = new Map<string, { added: number; removed: number }>();
-    for (let i = 0; i < days; i++) byDayMap.set(formatLocalDate(windowStart + i * DAY_MS), { added: 0, removed: 0 });
+    for (const key of dayKeys) byDayMap.set(key, { added: 0, removed: 0 });
     const perAgent = new Map<string, LinesChangedAgentRow>();
     let added = 0;
     let removed = 0;
@@ -1450,7 +1464,7 @@ export class TimelineQueries {
   // Subagent use — how often work was delegated, and in how many sessions.
   // Codex auto-reviews are reported alongside but never counted as launches.
   getSubagentUse(range: ActivityRange): SubagentUsePayload {
-    const { now, windowStart, days } = this.activityWindow(range);
+    const { now, windowStart, dayKeys } = this.activityWindow(range);
 
     const perAgentRows = this.db.query<{
       tool_id: string; launches: number; auto_reviews: number; sessions: number; sessions_with: number;
@@ -1476,7 +1490,7 @@ export class TimelineQueries {
       .sort((a, b) => b.launches - a.launches || b.sessions - a.sessions);
 
     const byDayMap = new Map<string, number>();
-    for (let i = 0; i < days; i++) byDayMap.set(formatLocalDate(windowStart + i * DAY_MS), 0);
+    for (const key of dayKeys) byDayMap.set(key, 0);
     const launchRows = this.db.query<{ ts: number }>(
       `SELECT ts FROM activity_facts WHERE kind = 'subagent' AND ts >= ?`,
       [windowStart],
@@ -1495,6 +1509,79 @@ export class TimelineQueries {
       autoReviews: sum((a) => a.autoReviews),
       agents,
       byDay: Array.from(byDayMap.entries()).map(([date, launches]) => ({ date, launches })),
+      queriedAt: now,
+    };
+  }
+
+  // Context compactions — how often a conversation outgrew its context and
+  // was summarised, and whether the user asked for it or the agent did it.
+  getCompactions(range: ActivityRange): CompactionsPayload {
+    const { now, windowStart, dayKeys } = this.activityWindow(range);
+
+    const rows = this.db.query<{
+      tool_id: string; ts: number; session_id: string | null; trigger_kind: string | null; tokens_before: number | null;
+    }>(
+      `SELECT tool_id, ts, session_id, trigger_kind, tokens_before
+         FROM activity_facts WHERE kind = 'compaction' AND ts >= ?`,
+      [windowStart],
+    );
+    // Denominator: sessions with any recorded activity in the window.
+    const sessionRows = this.db.query<{ tool_id: string; sessions: number }>(
+      `SELECT tool_id, COUNT(DISTINCT session_id) AS sessions
+         FROM activity_facts WHERE ts >= ? GROUP BY tool_id`,
+      [windowStart],
+    );
+
+    const byDayMap = new Map<string, { auto: number; manual: number; unknown: number }>();
+    for (const key of dayKeys) byDayMap.set(key, { auto: 0, manual: 0, unknown: 0 });
+
+    const perAgent = new Map<string, CompactionsAgentRow & { seen: Set<string>; before: number[] }>();
+    for (const s of sessionRows) {
+      perAgent.set(s.tool_id, {
+        toolId: s.tool_id as ToolId, auto: 0, manual: 0, unknown: 0,
+        sessionsCompacted: 0, sessions: s.sessions ?? 0, medianTokensBefore: null,
+        seen: new Set(), before: [],
+      });
+    }
+    for (const r of rows) {
+      const trigger: 'auto' | 'manual' | 'unknown' =
+        r.trigger_kind === 'auto' || r.trigger_kind === 'manual' ? r.trigger_kind : 'unknown';
+      const agent = perAgent.get(r.tool_id);
+      if (agent) {
+        agent[trigger] += 1;
+        if (r.session_id) agent.seen.add(r.session_id);
+        if (typeof r.tokens_before === 'number') agent.before.push(r.tokens_before);
+      }
+      const day = byDayMap.get(formatLocalDate(r.ts));
+      if (day) day[trigger] += 1;
+    }
+
+    const allBefore: number[] = [];
+    const agents: CompactionsAgentRow[] = Array.from(perAgent.values())
+      .map(({ seen, before, ...row }) => {
+        allBefore.push(...before);
+        const sorted = [...before].sort((a, b) => a - b);
+        return {
+          ...row,
+          sessionsCompacted: seen.size,
+          medianTokensBefore: sorted.length > 0 ? median(sorted) : null,
+        };
+      })
+      .sort((a, b) => (b.auto + b.manual + b.unknown) - (a.auto + a.manual + a.unknown) || b.sessions - a.sessions);
+
+    const sum = (pick: (a: CompactionsAgentRow) => number) => agents.reduce((s, a) => s + pick(a), 0);
+    allBefore.sort((a, b) => a - b);
+    return {
+      range,
+      total: rows.length,
+      auto: sum((a) => a.auto),
+      manual: sum((a) => a.manual),
+      unknown: sum((a) => a.unknown),
+      sessionsCompacted: sum((a) => a.sessionsCompacted),
+      sessions: sum((a) => a.sessions),
+      medianTokensBefore: allBefore.length > 0 ? median(allBefore) : null,
+      agents,
+      byDay: Array.from(byDayMap.entries()).map(([date, v]) => ({ date, ...v })),
       queriedAt: now,
     };
   }

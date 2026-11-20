@@ -23,7 +23,7 @@ interface Database {
 }
 type DatabaseConstructor = new (path: string) => Database;
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -174,13 +174,18 @@ CREATE TABLE IF NOT EXISTS transcript_offsets (
   session_id     TEXT,
   codex_snapshot TEXT
 );
+`;
 
--- Activity facts (v7). One small numeric row per prompt the user typed, file
--- edit an agent made, subagent it launched, or Codex auto-review, read from the
--- agents' own session files (see activity-facts.ts). Holds counts only — never
--- prompt text or file content. \`key\` is the source record's id, so re-reads
--- and the history backfill insert idempotently (INSERT OR IGNORE). Pruned on
--- the events retention cutoff.
+// Activity tables, kept apart from SCHEMA_SQL so a migration can drop and
+// recreate them (see the v8 branch in openTimelineDb).
+const ACTIVITY_SCHEMA_SQL = `
+-- Activity facts (v7, reshaped in v8). One small numeric row per prompt the
+-- user typed, file edit an agent made, subagent it launched, context
+-- compaction, or Codex auto-review, read from the agents' own session files
+-- (see activity-facts.ts). Holds counts only — never prompt text or file
+-- content. \`key\` is the source record's id, so re-reads and the history
+-- backfill insert idempotently (INSERT OR IGNORE). Pruned on the events
+-- retention cutoff.
 CREATE TABLE IF NOT EXISTS activity_facts (
   key           TEXT PRIMARY KEY,
   ts            INTEGER NOT NULL,
@@ -190,7 +195,10 @@ CREATE TABLE IF NOT EXISTS activity_facts (
   tool_name     TEXT,
   words         INTEGER,
   lines_added   INTEGER,
-  lines_removed INTEGER
+  lines_removed INTEGER,
+  trigger_kind  TEXT,     -- compaction: 'auto' | 'manual' | 'unknown'
+  tokens_before INTEGER,  -- compaction: context size before, when the agent reports it
+  tokens_after  INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_activity_kind_ts ON activity_facts (kind, ts);
@@ -198,11 +206,13 @@ CREATE INDEX IF NOT EXISTS idx_activity_kind_ts ON activity_facts (kind, ts);
 -- How far the activity-facts reader has read each session file, plus the
 -- per-file context a later tail read needs (a Codex rollout only states its
 -- thread type in its first record). Separate from transcript_offsets so the
--- token reader's accounting is untouched.
+-- token reader's accounting is untouched. \`updated_at\` lets rows for files
+-- that stopped changing long ago be pruned.
 CREATE TABLE IF NOT EXISTS activity_offsets (
-  path    TEXT PRIMARY KEY,
-  offset  INTEGER NOT NULL,
-  context TEXT
+  path       TEXT PRIMARY KEY,
+  offset     INTEGER NOT NULL,
+  context    TEXT,
+  updated_at INTEGER NOT NULL DEFAULT 0
 );
 `;
 
@@ -311,12 +321,16 @@ export interface ActivityFactRow {
   words?: number | null;
   linesAdded?: number | null;
   linesRemoved?: number | null;
+  trigger?: string | null;
+  tokensBefore?: number | null;
+  tokensAfter?: number | null;
 }
 
 export interface ActivityOffsetRow {
   path: string;
   offset: number;
   context?: string | null; // JSON, reader-defined
+  updatedAt?: number | null;
 }
 
 export interface TimelineDb {
@@ -327,8 +341,10 @@ export interface TimelineDb {
   insertGuardrailEvent: (row: GuardrailEventRow) => void;
   insertSecretAccessEvent: (row: SecretAccessEventRow) => void;
   insertLimitEvent: (row: LimitEventRow) => void;
-  // Inserts facts in one transaction; returns how many were new (not dedup'd).
-  insertActivityFacts: (rows: ActivityFactRow[]) => number;
+  // Inserts facts in one transaction. Returns how many were new (not dedup'd),
+  // or null when the write failed — the caller must then NOT treat the source
+  // lines as consumed.
+  insertActivityFacts: (rows: ActivityFactRow[]) => number | null;
   loadActivityOffsets: () => ActivityOffsetRow[];
   saveActivityOffset: (row: ActivityOffsetRow) => void;
   getMeta: (key: string) => string | null;
@@ -376,15 +392,25 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     db.exec(SCHEMA_SQL);
 
     const current = (db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined)?.version;
+
+    // v8 reshapes the activity tables (new columns) and changes what the
+    // parsers count, so a v7 database's activity data is dropped and rebuilt
+    // from the session files by the backfill (its marker name changed too).
+    // ALTER TABLE is deliberately not used: the facts must be re-read anyway,
+    // and recreating keeps old and fresh databases on one identical shape.
+    if (current !== undefined && current < 8) {
+      db.exec('DROP TABLE IF EXISTS activity_facts; DROP TABLE IF EXISTS activity_offsets;');
+    }
+    db.exec(ACTIVITY_SCHEMA_SQL);
+
     if (current === undefined) {
       db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
     } else if (current !== SCHEMA_VERSION) {
-      // Every migration so far (through v7, which adds activity_facts +
-      // activity_offsets; v5 added limit_events + meta) only
-      // adds new tables (CREATE TABLE IF NOT EXISTS in SCHEMA_SQL already created
-      // them above), so just bump the recorded version. The one-time limit-hit
-      // backfill is triggered separately in bootTimeline via the `meta` marker,
-      // not here. Future breaking migrations should branch on `current`.
+      // Apart from the v8 activity reset above, every migration so far only
+      // adds new tables (CREATE TABLE IF NOT EXISTS already created them), so
+      // just bump the recorded version. The one-time limit-hit backfill is
+      // triggered separately in bootTimeline via the `meta` marker, not here.
+      // Future breaking migrations should branch on `current`.
       logger.info(`[Timeline] migrating schema_version ${current} → ${SCHEMA_VERSION}`);
       db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
     }
@@ -457,16 +483,22 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
 
   const insertActivityStmt: Statement = db.prepare(`
     INSERT OR IGNORE INTO activity_facts (
-      key, ts, tool_id, session_id, kind, tool_name, words, lines_added, lines_removed
+      key, ts, tool_id, session_id, kind, tool_name, words, lines_added, lines_removed,
+      trigger_kind, tokens_before, tokens_after
     ) VALUES (
-      @key, @ts, @toolId, @sessionId, @kind, @toolName, @words, @linesAdded, @linesRemoved
+      @key, @ts, @toolId, @sessionId, @kind, @toolName, @words, @linesAdded, @linesRemoved,
+      @trigger, @tokensBefore, @tokensAfter
     )
   `);
-  const selectActivityOffsetsStmt: Statement = db.prepare('SELECT path, offset, context FROM activity_offsets');
+  const selectActivityOffsetsStmt: Statement = db.prepare(
+    'SELECT path, offset, context, updated_at AS updatedAt FROM activity_offsets',
+  );
+  const pruneActivityOffsetsStmt: Statement = db.prepare('DELETE FROM activity_offsets WHERE updated_at < ?');
   const upsertActivityOffsetStmt: Statement = db.prepare(`
-    INSERT INTO activity_offsets (path, offset, context)
-    VALUES (@path, @offset, @context)
-    ON CONFLICT(path) DO UPDATE SET offset = excluded.offset, context = excluded.context
+    INSERT INTO activity_offsets (path, offset, context, updated_at)
+    VALUES (@path, @offset, @context, COALESCE(@updatedAt, 0))
+    ON CONFLICT(path) DO UPDATE SET
+      offset = excluded.offset, context = excluded.context, updated_at = excluded.updated_at
   `);
 
   const getMetaStmt: Statement = db.prepare('SELECT value FROM meta WHERE key = ?');
@@ -529,8 +561,9 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
   const OFFSET_KEYS = ['path', 'offset', 'sessionId', 'codexSnapshot'] as const;
   const ACTIVITY_KEYS = [
     'key', 'ts', 'toolId', 'sessionId', 'kind', 'toolName', 'words', 'linesAdded', 'linesRemoved',
+    'trigger', 'tokensBefore', 'tokensAfter',
   ] as const;
-  const ACTIVITY_OFFSET_KEYS = ['path', 'offset', 'context'] as const;
+  const ACTIVITY_OFFSET_KEYS = ['path', 'offset', 'context', 'updatedAt'] as const;
 
   return {
     insertEvent: (row) => {
@@ -576,7 +609,7 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
       } catch (e: any) {
         try { db.exec('ROLLBACK'); } catch { /* no open transaction */ }
         logger.warn('[Timeline] insertActivityFacts failed:', e?.message ?? e);
-        return 0;
+        return null;
       }
       return inserted;
     },
@@ -609,6 +642,9 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
         const evInfo = pruneEventsStmt.run(eventsOlderThanMs);
         // Activity facts describe the same sessions as events — same retention.
         pruneActivityStmt.run(eventsOlderThanMs);
+        // A file untouched for that long has nothing left to read, and its
+        // facts are gone too; without this the offsets table only ever grows.
+        pruneActivityOffsetsStmt.run(eventsOlderThanMs);
         const quInfo = pruneQuotaStmt.run(quotaOlderThanMs);
         // Statusline samples share the quota retention window (same cadence,
         // same purpose); their count isn't reported separately.

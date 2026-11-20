@@ -8,7 +8,7 @@ import { ACTIVITY_EMPTY, AgentRow, DayAxis, StatTile, rollupDays } from './activ
 
 const NOTE =
   'A launch is one time an agent handed work to a subagent, read from Claude Code and Codex session ' +
-  'files. Codex auto-reviews are its automatic approval reviewer: Codex starts them itself, so they ' +
+  'files. Automated runs such as backlog cards are included. Codex auto-reviews are its automatic approval reviewer: Codex starts them itself, so they ' +
   'are shown separately and never counted as launches.';
 
 const mergeDays = (chunk: SubagentDayBucket[]): SubagentDayBucket => ({

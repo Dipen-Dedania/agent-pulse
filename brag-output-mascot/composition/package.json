@@ -1,0 +1,14 @@
+{
+  "name": "hf-mascot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "assets": "node copy-assets.mjs",
+    "predev": "node copy-assets.mjs",
+    "dev": "npx --yes hyperframes@0.7.10 preview",
+    "precheck": "node copy-assets.mjs",
+    "check": "npx --yes hyperframes@0.7.10 lint && npx --yes hyperframes@0.7.10 validate && npx --yes hyperframes@0.7.10 inspect",
+    "prerender": "node copy-assets.mjs",
+    "render": "npx --yes hyperframes@0.7.10 render"
+  }
+}

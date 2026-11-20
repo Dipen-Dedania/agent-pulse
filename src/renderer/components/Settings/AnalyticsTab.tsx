@@ -14,6 +14,7 @@ import { ActionMixCard } from './analytics/ActionMixCard';
 import { LinesChangedCard } from './analytics/LinesChangedCard';
 import { PromptSizeCard } from './analytics/PromptSizeCard';
 import { SubagentUseCard } from './analytics/SubagentUseCard';
+import { CompactionsCard } from './analytics/CompactionsCard';
 import { ProjectBreakdownCard } from './analytics/ProjectBreakdownCard';
 import { TokensTimelineCard } from './analytics/TokensTimelineCard';
 import { GuardrailsCard } from './analytics/GuardrailsCard';
@@ -166,6 +167,15 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
     onConfigChange(partial);
   };
 
+  // The main process says when a background read of session history added
+  // data (the first-launch backfill, or a catch-up). Refetch then, so the
+  // activity cards fill in without the user pressing refresh.
+  useEffect(() => {
+    const onDataChanged = () => refreshAnalytics();
+    window.electron.on('analytics:data-changed', onDataChanged);
+    return () => { window.electron.off('analytics:data-changed', onDataChanged); };
+  }, []);
+
   // Provenance of the rates behind every cost on this tab.
   const pricing = usePricingSync();
   const priceProvenance =
@@ -221,6 +231,7 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
           <CacheHealthCard />
           <ContextPressureCard />
         </div>
+        <CompactionsCard />
         <LifecycleCard />
         <ProjectBreakdownCard />
         <GuardrailsCard />

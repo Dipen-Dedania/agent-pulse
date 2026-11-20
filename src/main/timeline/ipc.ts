@@ -182,6 +182,12 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     try { return queries.getSubagentUse(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-subagent-use:', e); return null; }
   });
+
+  ipcMain.handle('analytics:get-compactions', (_e, args: { range: ActivityRange }) => {
+    if (!queries) return null;
+    try { return queries.getCompactions(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-compactions:', e); return null; }
+  });
 }
 
 /** Called by bootTimeline when the timeline cannot start. */
@@ -216,6 +222,7 @@ export function unregisterTimelineIpc() {
     'analytics:get-prompt-size',
     'analytics:get-lines-changed',
     'analytics:get-subagent-use',
+    'analytics:get-compactions',
   ]) {
     ipcMain.removeHandler(channel);
   }

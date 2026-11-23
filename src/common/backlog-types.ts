@@ -54,7 +54,7 @@ export function normalizeAgent(value: unknown): BacklogAgent {
 
 /** Short display label for an agent (board badges, settings copy). */
 export function agentLabel(agent: BacklogAgent): string {
-  return agent === 'codex' ? 'Codex' : 'Claude Code';
+  return agent === 'codex' ? 'ChatGPT (Codex)' : 'Claude Code';
 }
 
 // Issue population (Phase 3). Which open issues a scan pulls for a linked

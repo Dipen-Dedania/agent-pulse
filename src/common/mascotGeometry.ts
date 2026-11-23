@@ -39,7 +39,7 @@ export const MASCOT_LABELS: Record<MascotId, string> = {
 // name refers to before enabling it.
 export const MASCOT_HINTS: Record<Exclude<MascotId, 'none'>, string> = {
   clawd: 'Orange crab — Claude Code',
-  frog: 'Green frog — OpenAI Codex',
+  frog: 'Green frog — ChatGPT (Codex)',
   gigi: 'Blue droplet — Antigravity',
   ghost: 'White ghost — Kiro',
   mico: 'Purple blob — VS Code Copilot',

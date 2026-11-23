@@ -217,7 +217,7 @@ export const CardTile: React.FC<Props> = ({
               card.model ? 'bg-indigo-500/15 text-indigo-300 light:text-indigo-700' : 'bg-control/40 text-faint'
             }`}
           >
-            {card.agent === 'codex' ? 'Codex' : 'Claude'}
+            {card.agent === 'codex' ? 'ChatGPT (Codex)' : 'Claude'}
             {(card.model ?? projectDefaultModel) && ` · ${card.model ?? projectDefaultModel}`}
           </span>
         </Tooltip>

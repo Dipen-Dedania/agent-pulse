@@ -63,11 +63,11 @@ export const BacklogMcpSection: React.FC = () => {
   const codexConnected = !!codex?.installed && !!codex?.current;
   const connected = claudeConnected && (!codex?.detected || codexConnected);
   const stale = !connected && (!!status?.installed || !!codex?.installed);
-  const clients = showCodex ? 'Claude Code or Codex' : 'Claude Code';
+  const clients = showCodex ? 'Claude Code or ChatGPT (Codex)' : 'Claude Code';
 
   return (
     <Card
-      title={showCodex ? 'Capture from Claude Code & Codex' : 'Capture from Claude Code'}
+      title={showCodex ? 'Capture from Claude Code & ChatGPT (Codex)' : 'Capture from Claude Code'}
       subtitle={
         <>
           Connect Agent Pulse to {clients} as an MCP server, then say
@@ -116,12 +116,12 @@ export const BacklogMcpSection: React.FC = () => {
       {showCodex && codex && (
         <SettingRow
           className='mt-3'
-          title={codexConnected ? 'Registered with Codex' : codex.installed ? 'Codex: pointing at an old install' : 'Codex: not registered yet'}
+          title={codexConnected ? 'Registered with ChatGPT (Codex)' : codex.installed ? 'ChatGPT (Codex): pointing at an old install' : 'ChatGPT (Codex): not registered yet'}
           description={
             codex.error
               ? codex.error
               : codexConnected
-                ? 'Start a new Codex session to pick it up — Codex loads MCP servers at session start.'
+                ? 'Start a new ChatGPT (Codex) session to pick it up — it loads MCP servers at session start.'
                 : `Adds an [mcp_servers.agent-pulse] table to ${codex.configPath}; every other line is left as is.`
           }
           control={

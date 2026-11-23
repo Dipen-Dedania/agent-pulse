@@ -75,6 +75,9 @@ import {
   CraftPayload,
   CraftMetrics,
   CraftCorrelation,
+  ClaudeCommandsPayload,
+  ClaudeCommandCategory,
+  ClaudeCommandRow,
   CRAFT_SHORT_PROMPT_WORDS,
 } from '../../common/timeline-types';
 import {
@@ -86,6 +89,13 @@ import {
 } from '../../common/action-mix';
 import { estimateCost, estimateCostBreakdown, rateForModel, CostBreakdown, TokenCounts } from '../../common/pricing';
 import { realModels } from './models';
+import {
+  canonicalCommand,
+  classifyCommand,
+  suggestCommand,
+  DiscoveredSource,
+  DISCOVERY_COMMANDS,
+} from '../../common/claude-commands';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -1673,6 +1683,114 @@ export class TimelineQueries {
       medianTokensBefore: allBefore.length > 0 ? median(allBefore) : null,
       agents,
       byDay: Array.from(byDayMap.entries()).map(([date, v]) => ({ date, ...v })),
+      queriedAt: now,
+    };
+  }
+
+  // ─── Slash commands (Claude Code only) ─────────────────────────────────
+  // Reads command_uses. `discovered` is the set of commands and skills found
+  // on disk right now: only raw names are stored, so classification happens
+  // here and a skill installed later reclassifies old history. Totals count
+  // typed commands only; mid-prompt mentions feed `inline` and nothing else,
+  // so a mention of a skill that was later uninstalled can never show up as an
+  // unrecognised command.
+  getClaudeCommands(
+    range: ActivityRange,
+    ctx: { discovered?: ReadonlyMap<string, DiscoveredSource>; available?: boolean } = {},
+  ): ClaudeCommandsPayload {
+    const discovered = ctx.discovered ?? new Map<string, DiscoveredSource>();
+    const { now, windowStart } = this.activityWindow(range);
+
+    const rows = this.db.query<{ name: string; entry: string; uses: number }>(
+      `SELECT name, entry, COUNT(*) AS uses FROM command_uses WHERE ts >= ? GROUP BY name, entry`,
+      [windowStart],
+    );
+    const sessionsWithCommands = this.db.query<{ n: number }>(
+      `SELECT COUNT(DISTINCT session_id) AS n FROM command_uses WHERE entry = 'typed' AND ts >= ?`,
+      [windowStart],
+    )[0]?.n ?? 0;
+    const firstRecordedAt = this.db.query<{ first: number | null }>(
+      `SELECT MIN(ts) AS first FROM command_uses`,
+    )[0]?.first ?? null;
+
+    let previousTotal: number | null = null;
+    if (range !== '1y' && firstRecordedAt !== null) {
+      const prevStart = this.previousActivityWindowStart(range, windowStart);
+      if (firstRecordedAt <= prevStart) {
+        previousTotal = this.db.query<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM command_uses WHERE entry = 'typed' AND ts >= ? AND ts < ?`,
+          [prevStart, windowStart],
+        )[0]?.n ?? 0;
+      }
+    }
+
+    const typedByName = new Map<string, number>();
+    for (const r of rows) if (r.entry === 'typed') typedByName.set(r.name, r.uses);
+
+    const byCanonical = new Map<string, ClaudeCommandRow>();
+    const rowFor = (name: string): ClaudeCommandRow => {
+      const category = classifyCommand(name, discovered);
+      // Only built-in aliases fold into a main name (`new` into `clear`).
+      const canonical = category === 'builtin' ? canonicalCommand(name) : name;
+      let row = byCanonical.get(canonical);
+      if (!row) {
+        row = { canonical, aliases: [], category, count: 0, inline: 0 };
+        byCanonical.set(canonical, row);
+      }
+      return row;
+    };
+    for (const r of rows) {
+      if (r.entry === 'typed') {
+        const row = rowFor(r.name);
+        row.count += r.uses;
+        row.aliases.push({ name: r.name, count: r.uses });
+      } else {
+        const category = classifyCommand(r.name, discovered);
+        if (category === 'custom' || category === 'plugin') rowFor(r.name).inline += r.uses;
+      }
+    }
+
+    const byCategory: Record<ClaudeCommandCategory, number> = { builtin: 0, custom: 0, plugin: 0, unknown: 0 };
+    let total = 0;
+    let distinct = 0;
+    for (const row of byCanonical.values()) {
+      row.aliases.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+      byCategory[row.category] += row.count;
+      total += row.count;
+      if (row.count > 0) distinct++;
+    }
+
+    const top = Array.from(byCanonical.values())
+      .sort((a, b) => b.count - a.count || b.inline - a.inline || a.canonical.localeCompare(b.canonical));
+
+    const unknown = top
+      .filter((row) => row.category === 'unknown' && row.count > 0)
+      .map((row) => ({
+        name: row.canonical,
+        count: row.count,
+        suggestion: suggestCommand(row.canonical, discovered, typedByName),
+      }));
+
+    // Over all kept history, not the window: on a 7-day range nearly every
+    // command is unused and the discovery tip would always fire.
+    const everUsed = new Set(
+      this.db.query<{ name: string }>(`SELECT DISTINCT name FROM command_uses WHERE entry = 'typed'`)
+        .map((r) => canonicalCommand(r.name)),
+    );
+    const neverUsed = firstRecordedAt === null ? [] : DISCOVERY_COMMANDS.filter((name) => !everUsed.has(name));
+
+    return {
+      range,
+      available: ctx.available ?? true,
+      firstRecordedAt,
+      total,
+      distinct,
+      sessionsWithCommands,
+      previousTotal,
+      top,
+      unknown,
+      byCategory,
+      neverUsed,
       queriedAt: now,
     };
   }

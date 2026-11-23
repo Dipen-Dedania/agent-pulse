@@ -93,7 +93,7 @@ const STEPS: TourStep[] = [
     key: 'settings',
     kicker: 'Step 6',
     title: 'Board settings, one gear',
-    body: 'This ⚙ opens the night session — windows when queued green cards run themselves, on Claude Code or Codex per card, idle-gated and budget-capped; the Nights 23–07 preset is one click — plus the issue-population defaults next to it.',
+    body: 'This ⚙ opens the night session — windows when queued green cards run themselves, on Claude Code or ChatGPT (Codex) per card, idle-gated and budget-capped; the Nights 23–07 preset is one click — plus the issue-population defaults next to it.',
     tab: 'backlog',
     selector: 'backlog-scheduler',
     placement: 'bottom',

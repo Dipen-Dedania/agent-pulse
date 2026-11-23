@@ -23,7 +23,7 @@ interface Database {
 }
 type DatabaseConstructor = new (path: string) => Database;
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -214,6 +214,23 @@ CREATE TABLE IF NOT EXISTS activity_offsets (
   context    TEXT,
   updated_at INTEGER NOT NULL DEFAULT 0
 );
+
+-- Claude Code slash-command uses (v9), read from its prompt history file (see
+-- command-history.ts). Names only: never arguments, prompt text or the project
+-- path. Kept apart from activity_facts on purpose: several queries there count
+-- sessions across every fact, and a session that only ran /model would skew
+-- them. \`key\` is cc:h:<timestamp>:<sessionId>:<name>, so re-reads insert
+-- idempotently. Pruned on the events retention cutoff, and rebuilt from
+-- scratch whenever the history file shrinks.
+CREATE TABLE IF NOT EXISTS command_uses (
+  key        TEXT PRIMARY KEY,
+  ts         INTEGER NOT NULL,
+  session_id TEXT,
+  name       TEXT NOT NULL,   -- raw, lower-cased, no leading slash
+  entry      TEXT NOT NULL    -- 'typed' | 'inline'
+);
+
+CREATE INDEX IF NOT EXISTS idx_command_uses_ts ON command_uses (ts);
 `;
 
 export interface EventRow {
@@ -326,6 +343,14 @@ export interface ActivityFactRow {
   tokensAfter?: number | null;
 }
 
+export interface CommandUseRow {
+  key: string;
+  ts: number;
+  sessionId?: string | null;
+  name: string;
+  entry: string;
+}
+
 export interface ActivityOffsetRow {
   path: string;
   offset: number;
@@ -345,6 +370,9 @@ export interface TimelineDb {
   // or null when the write failed — the caller must then NOT treat the source
   // lines as consumed.
   insertActivityFacts: (rows: ActivityFactRow[]) => number | null;
+  // Same contract as insertActivityFacts. With `replaceAll`, every existing
+  // row is deleted first, in the same transaction.
+  insertCommandUses: (rows: CommandUseRow[], replaceAll: boolean) => number | null;
   loadActivityOffsets: () => ActivityOffsetRow[];
   saveActivityOffset: (row: ActivityOffsetRow) => void;
   getMeta: (key: string) => string | null;
@@ -490,6 +518,12 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
       @trigger, @tokensBefore, @tokensAfter
     )
   `);
+  const insertCommandUseStmt: Statement = db.prepare(`
+    INSERT OR IGNORE INTO command_uses (key, ts, session_id, name, entry)
+    VALUES (@key, @ts, @sessionId, @name, @entry)
+  `);
+  const deleteCommandUsesStmt: Statement = db.prepare('DELETE FROM command_uses');
+  const pruneCommandUsesStmt: Statement = db.prepare('DELETE FROM command_uses WHERE ts < ?');
   const selectActivityOffsetsStmt: Statement = db.prepare(
     'SELECT path, offset, context, updated_at AS updatedAt FROM activity_offsets',
   );
@@ -563,6 +597,7 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
     'key', 'ts', 'toolId', 'sessionId', 'kind', 'toolName', 'words', 'linesAdded', 'linesRemoved',
     'trigger', 'tokensBefore', 'tokensAfter',
   ] as const;
+  const COMMAND_USE_KEYS = ['key', 'ts', 'sessionId', 'name', 'entry'] as const;
   const ACTIVITY_OFFSET_KEYS = ['path', 'offset', 'context', 'updatedAt'] as const;
 
   return {
@@ -613,6 +648,21 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
       }
       return inserted;
     },
+    insertCommandUses: (rows, replaceAll) => {
+      if (rows.length === 0 && !replaceAll) return 0;
+      let inserted = 0;
+      try {
+        db.exec('BEGIN');
+        if (replaceAll) deleteCommandUsesStmt.run();
+        for (const row of rows) inserted += Number(insertCommandUseStmt.run(normalize(row, COMMAND_USE_KEYS)).changes);
+        db.exec('COMMIT');
+      } catch (e: any) {
+        try { db.exec('ROLLBACK'); } catch { /* no open transaction */ }
+        logger.warn('[Timeline] insertCommandUses failed:', e?.message ?? e);
+        return null;
+      }
+      return inserted;
+    },
     loadActivityOffsets: () => {
       try { return selectActivityOffsetsStmt.all() as ActivityOffsetRow[]; }
       catch (e: any) { logger.warn('[Timeline] loadActivityOffsets failed:', e?.message ?? e); return []; }
@@ -642,6 +692,7 @@ export function openTimelineDb(dbPath: string): TimelineDb | null {
         const evInfo = pruneEventsStmt.run(eventsOlderThanMs);
         // Activity facts describe the same sessions as events — same retention.
         pruneActivityStmt.run(eventsOlderThanMs);
+        pruneCommandUsesStmt.run(eventsOlderThanMs);
         // A file untouched for that long has nothing left to read, and its
         // facts are gone too; without this the offsets table only ever grows.
         pruneActivityOffsetsStmt.run(eventsOlderThanMs);

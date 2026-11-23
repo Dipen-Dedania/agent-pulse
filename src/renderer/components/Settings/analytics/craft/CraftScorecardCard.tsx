@@ -169,7 +169,7 @@ export const CraftScorecardCard: React.FC = () => {
 
             <p className='text-[11px] text-faint leading-snug'>
               Ratings use simple rules of thumb, not benchmarks; the info icon shows each skill&apos;s exact rule.
-              Prompt and subagent figures come from Claude Code and Codex session files; context and cache
+              Prompt and subagent figures come from Claude Code and ChatGPT (Codex) session files; context and cache
               figures from the Claude Code status line.
             </p>
           </div>

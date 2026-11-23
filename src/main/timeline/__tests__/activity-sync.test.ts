@@ -356,7 +356,7 @@ describe.skipIf(!dbAvailable)('activity tables', () => {
     db.close();
   });
 
-  it('a v7 database opens as v8 with the activity tables rebuilt and empty', () => {
+  it('a v7 database opens at the current version with the activity tables rebuilt and empty', () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ap-migrate-')), 'timeline.db');
     try {
       // Build the v7 shape: current schema, then swap in the old activity tables with data.
@@ -374,7 +374,7 @@ describe.skipIf(!dbAvailable)('activity tables', () => {
       v8.close();
 
       const db = openTimelineDb(file)!;
-      expect(db.query<{ version: number }>('SELECT version FROM schema_version')[0].version).toBe(8);
+      expect(db.query<{ version: number }>('SELECT version FROM schema_version')[0].version).toBe(9);
       expect(db.query('SELECT * FROM activity_facts')).toEqual([]);
       expect(db.loadActivityOffsets()).toEqual([]);
       // New columns exist, and unrelated data survived.

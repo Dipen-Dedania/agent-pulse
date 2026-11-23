@@ -22,6 +22,7 @@ import { SummaryHeroCard } from './analytics/SummaryHeroCard';
 import { LifetimeTokensCard } from './analytics/LifetimeTokensCard';
 import { CraftScorecardCard } from './analytics/craft/CraftScorecardCard';
 import { CoachingCard } from './analytics/craft/CoachingCard';
+import { SlashCommandsCard } from './analytics/SlashCommandsCard';
 import { TopInsightsCard } from './analytics/craft/TopInsightsCard';
 import { Card, Segmented } from './analytics/shared';
 import { refreshAnalytics, useAnalyticsFreshness } from './analytics/useAnalytics';
@@ -274,6 +275,7 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
               <>
                 <CraftScorecardCard />
                 <CoachingCard />
+                <SlashCommandsCard />
               </>
             )}
 

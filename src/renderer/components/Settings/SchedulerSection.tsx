@@ -38,7 +38,7 @@ const PRESET_TIMES = ['06:00', '11:00', '16:00'];
 interface ProviderCopy {
   title: string;
   blurb: React.ReactNode;
-  agentName: string;       // "Claude" | "Codex" — used in adaptive-mode hint
+  agentName: string;       // "Claude" | "ChatGPT (Codex)" — used in adaptive-mode hint
   nudgeBlurb: string;
   // Rough API-equivalent of one opener ping, shown so the cost is never hidden.
   costModel: string;
@@ -64,15 +64,15 @@ const PROVIDER_COPY: Record<SchedulerProvider, ProviderCopy> = {
     costRatesLabel: 'at Haiku API rates',
   },
   'openai-codex': {
-    title: 'Codex Cowork Scheduler',
+    title: 'ChatGPT (Codex) Cowork Scheduler',
     blurb: (
       <>
-        Open a fresh 5-hour window on your schedule with one tiny <code className='text-body'>codex exec</code> ping
-        (which also refreshes your Codex login). Turns the rolling window into a daily cadence.
+        Open a fresh 5-hour window on your schedule with one tiny <code className='text-body'>codex exec</code> ping,
+        which also refreshes your ChatGPT (Codex) login. Turns the rolling window into a daily cadence.
       </>
     ),
-    agentName: 'Codex',
-    nudgeBlurb: 'Your Codex login expires about 10 days after its last refresh; any Codex command renews it. Off by default because each ping spends subscription tokens.',
+    agentName: 'ChatGPT (Codex)',
+    nudgeBlurb: 'Your ChatGPT (Codex) login expires about 10 days after its last refresh; any codex command renews it. Off by default because each ping spends subscription tokens.',
     // One verified ping on codex-cli 0.160: ~16k input (half cached), 5 output.
     costModel: 'gpt-5-codex',
     costTokens: { tokensIn: 8000, cacheRead: 8000, tokensOut: 5 },

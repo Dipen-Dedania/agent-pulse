@@ -35,6 +35,7 @@ import {
   SubagentUsePayload,
   CompactionsPayload,
   CraftPayload,
+  ClaudeCommandsPayload,
 } from '../../../../common/timeline-types';
 import { BacklogStatsPayload } from '../../../../common/backlog-types';
 
@@ -226,6 +227,12 @@ export function useSubagentUse(range: TimelineRange) {
 
 export function useCompactions(range: TimelineRange) {
   return useAnalyticsQuery<CompactionsPayload>('analytics:get-compactions', { range }, range);
+}
+
+// Slash commands — Claude Code only (its prompt history). The handler reads
+// the history file before answering.
+export function useClaudeCommands(range: TimelineRange) {
+  return useAnalyticsQuery<ClaudeCommandsPayload>('analytics:get-claude-commands', { range }, range);
 }
 
 // Your craft — shared by the scorecard and the Overview's Top insights, so both

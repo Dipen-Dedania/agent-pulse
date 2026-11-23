@@ -7,8 +7,8 @@ import { Card, EmptyState, InfoTooltip, SkeletonLine, formatCompactNumber, useCh
 import { ACTIVITY_EMPTY, AgentRow, DayAxis, StatTile, rollupDays } from './activityShared';
 
 const NOTE =
-  'A launch is one time an agent handed work to a subagent, read from Claude Code and Codex session ' +
-  'files. Automated runs such as backlog cards are included. Codex auto-reviews are its automatic approval reviewer: Codex starts them itself, so they ' +
+  'A launch is one time an agent handed work to a subagent, read from Claude Code and ChatGPT (Codex) session ' +
+  'files. Automated runs such as backlog cards are included. ChatGPT (Codex) auto-reviews are its automatic approval reviewer: it starts them itself, so they ' +
   'are shown separately and never counted as launches.';
 
 const mergeDays = (chunk: SubagentDayBucket[]): SubagentDayBucket => ({
@@ -48,7 +48,7 @@ export const SubagentUseCard: React.FC = () => {
             <StatTile label='Sessions using them' sub={`${data.sessionsWithSubagents} of ${data.sessions} sessions`}>
               <AnimatedNumber value={sessionShare} format={(n) => `${n.toFixed(0)}%`} />
             </StatTile>
-            <StatTile label='Codex auto-reviews' sub='not counted as launches'>
+            <StatTile label='ChatGPT (Codex) auto-reviews' sub='not counted as launches'>
               <AnimatedNumber value={data.autoReviews} format={formatCompactNumber} />
             </StatTile>
           </div>

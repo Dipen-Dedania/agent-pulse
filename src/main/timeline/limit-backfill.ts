@@ -21,12 +21,16 @@ const BACKFILL_MARKER = 'limit_backfill_done';
 const MAX_FILES = 5000;
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
 
-/** ~/.claude/projects, honoring CLAUDE_CONFIG_DIR like Claude Code itself. */
-export function claudeProjectsDir(): string {
-  const base = process.env.CLAUDE_CONFIG_DIR
+/** Claude Code's config directory: CLAUDE_CONFIG_DIR if set, else ~/.claude. */
+export function claudeConfigDir(): string {
+  return process.env.CLAUDE_CONFIG_DIR
     ? process.env.CLAUDE_CONFIG_DIR
     : path.join(os.homedir(), '.claude');
-  return path.join(base, 'projects');
+}
+
+/** ~/.claude/projects, honoring CLAUDE_CONFIG_DIR like Claude Code itself. */
+export function claudeProjectsDir(): string {
+  return path.join(claudeConfigDir(), 'projects');
 }
 
 export function listTranscripts(dir: string): string[] {

@@ -58,18 +58,18 @@ export const CodexUsageSection: React.FC<Props> = ({ config, status, onChange, o
 
   return (
     <UsageProviderPanel
-      title='Codex Subscription Usage'
+      title='ChatGPT (Codex) Subscription Usage'
       subtitle={
         <>
-          Tracks remaining quota in your ChatGPT/Codex 5-hour and weekly windows. Bars below the
-          Codex bubble fill as an "opportunity gauge" — full means you've got headroom. Readings
-          refresh live from running Codex sessions between polls.
+          Tracks remaining quota in your ChatGPT (Codex) 5-hour and weekly windows. Bars below the
+          ChatGPT (Codex) bubble fill as an "opportunity gauge" — full means you've got headroom. Readings
+          refresh live from running ChatGPT (Codex) sessions between polls.
         </>
       }
       state={status.state}
       enabled={config.enabled}
       onToggleEnabled={() => onChange({ enabled: !config.enabled })}
-      toggleLabel='Toggle Codex usage tracking'
+      toggleLabel='Toggle ChatGPT (Codex) usage tracking'
       onRefresh={onRefresh}
     >
       {/* Plan / credits / data-source strip */}
@@ -85,7 +85,7 @@ export const CodexUsageSection: React.FC<Props> = ({ config, status, onChange, o
             <Tooltip
               content={
                 snapshot.source === 'rollout'
-                  ? 'Read live from the running Codex session. Falls back to the ChatGPT usage API when Codex goes quiet.'
+                  ? 'Read live from the running ChatGPT (Codex) session. Falls back to the ChatGPT usage API when the session goes quiet.'
                   : 'Read from the ChatGPT usage API on the poll interval below.'
               }
             >
@@ -206,7 +206,7 @@ export const CodexUsageSection: React.FC<Props> = ({ config, status, onChange, o
           <NotificationsGroup
             capWarning={config.capWarning}
             nudge={config.nudge}
-            capHint='Notify when remaining Codex credit drops to or below this level. Also notifies when Codex reports a limit reached.'
+            capHint='Notify when remaining ChatGPT (Codex) credit drops to or below this level. Also notifies when ChatGPT (Codex) reports a limit reached.'
             nudgeHint='Notify when at least this much credit is unused and the window resets within 30 minutes.'
             onCapChange={(next) => onChange({ capWarning: next })}
             onNudgeChange={(next) => onChange({ nudge: next })}

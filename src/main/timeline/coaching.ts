@@ -79,7 +79,7 @@ export function buildCoachingPrompt(payload: CraftPayload): string {
   };
   return [
     'You are coaching a software developer on how they work with AI coding agents',
-    '(Claude Code, Codex and similar). Below are aggregate usage statistics measured',
+    '(Claude Code, ChatGPT (Codex) and similar). Below are aggregate usage statistics measured',
     'locally on their machine. null means "not measured".',
     '',
     JSON.stringify(data, null, 2),

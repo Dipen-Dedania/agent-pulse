@@ -298,14 +298,14 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
     },
   },
   'openai-codex': {
-    label: 'OpenAI Codex',
+    label: 'ChatGPT (Codex)',
     icon: './assets/codex.png',
     hookInfo: {
       mechanism: 'Shell Hook',
       configFile: '~/.codex/hooks.json',
       description:
         'Agent Pulse installs a shell hook script and registers it in ~/.codex/hooks.json, then ' +
-        'enables the hooks feature flag in ~/.codex/config.toml. Codex spawns the script on ' +
+        'enables the hooks feature flag in ~/.codex/config.toml. ChatGPT (Codex) spawns the script on ' +
         'SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, and Stop events, passing event ' +
         'JSON via stdin. The script forwards it to the bridge, mapping events into Waiting, Working, and Idle states.',
       snippet: JSON.stringify({
@@ -318,7 +318,7 @@ export const TOOL_META: Record<ToolId, ToolMeta> = {
         },
       }, null, 2),
       troubleshooting: [
-        'Restart the Codex CLI after installing the hook.',
+        'Restart ChatGPT (Codex), and any running codex CLI session, after installing the hook.',
         'Confirm hooks = true is set under [features] in ~/.codex/config.toml.',
         'Verify ~/.codex/hooks/agent-pulse.sh is executable.',
         ...COMMON_TROUBLESHOOTING,

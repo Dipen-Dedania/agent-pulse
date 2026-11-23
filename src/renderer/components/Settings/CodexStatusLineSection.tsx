@@ -70,8 +70,8 @@ export const CodexStatusLineSection: React.FC<Props> = ({ config, detect, onChan
         <div className='flex-1 min-w-0'>
           <p className='font-semibold text-strong leading-tight'>Status Line</p>
           <p className='text-xs text-muted mt-0.5'>
-            Pick which built-in items Codex shows in its terminal footer (<span className='font-mono'>[tui] status_line</span> in config.toml).
-            Codex draws it as plain text — no icons or colours, unlike Claude Code&apos;s scripted line.
+            Pick which built-in items the Codex CLI shows in its terminal footer (<span className='font-mono'>[tui] status_line</span> in config.toml).
+            The CLI draws it as plain text — no icons or colours, unlike Claude Code&apos;s scripted line.
           </p>
         </div>
         <div className='flex items-center gap-2 flex-wrap justify-end'>
@@ -88,7 +88,7 @@ export const CodexStatusLineSection: React.FC<Props> = ({ config, detect, onChan
             {preview || <span className='text-ghost italic'>—</span>}
           </div>
           <p className='text-[11px] text-faint mt-2'>
-            Approximate — Codex owns the real formatting and separator. Run <span className='font-mono'>/statusline</span> inside Codex to see it live.
+            Approximate — the Codex CLI owns the real formatting and separator. Run <span className='font-mono'>/statusline</span> inside the Codex CLI to see it live.
           </p>
         </div>
 

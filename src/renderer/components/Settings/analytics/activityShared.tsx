@@ -7,7 +7,7 @@ import { Eyebrow } from '../../Shared';
 // changed, subagent use) so they read as one family.
 
 export const ACTIVITY_EMPTY =
-  'No data yet. This fills in as Claude Code and Codex sessions run; history is read in the background shortly after launch.';
+  'No data yet. This fills in as Claude Code and ChatGPT (Codex) sessions run; history is read in the background shortly after launch.';
 
 // Labelled number tile, same look as the cache/context cards' KPI tiles.
 export const StatTile: React.FC<{

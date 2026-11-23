@@ -660,7 +660,7 @@ export const BacklogBoardTab: React.FC<BacklogBoardTabProps> = ({
       {store.projects.length === 0 ? (
         <Card
           title='Add your first project'
-          subtitle='Cards belong to a project (a repo folder — the agent runs there). Register one, queue research cards, and the night session (Claude Code or Codex, per card) works through them during your idle windows — so reports are waiting for you in the morning.'
+          subtitle='Cards belong to a project (a repo folder — the agent runs there). Register one, queue research cards, and the night session works through them during your idle windows, on Claude Code or ChatGPT (Codex) per card — so reports are waiting for you in the morning.'
         >
           <div className='flex items-center gap-2 flex-wrap'>
             <Button variant='primary' size='sm' onClick={() => void handleAddProject()}>

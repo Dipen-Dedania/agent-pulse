@@ -186,7 +186,7 @@ export function uninstallMcpServer(): { ok: boolean; reason?: string } {
 function combineResults(claude: WriteResult, codex: WriteResult): { ok: boolean; reason?: string } {
   const reasons = [
     claude.ok ? null : `Claude Code: ${claude.reason}`,
-    codex.ok ? null : `Codex: ${codex.reason}`,
+    codex.ok ? null : `ChatGPT (Codex): ${codex.reason}`,
   ].filter((r): r is string => r !== null);
   return reasons.length === 0 ? { ok: true } : { ok: false, reason: reasons.join(' · ') };
 }

@@ -679,3 +679,41 @@ export interface CraftCoachingResult {
   costUsd: number | null;
   generatedAt: number;                // epoch ms the run finished
 }
+
+// ─── Slash commands (Claude Code only) ───────────────────────────────────────
+// Read from Claude Code's prompt history. ChatGPT (Codex) does not save the
+// commands a user types, so this payload has no per-agent split and must never
+// be merged into cross-agent totals.
+
+export type ClaudeCommandCategory = 'builtin' | 'custom' | 'plugin' | 'unknown';
+
+export interface ClaudeCommandRow {
+  canonical: string;                  // main name, aliases folded in (no leading slash)
+  aliases: Array<{ name: string; count: number }>;  // the names actually typed, most used first
+  category: ClaudeCommandCategory;
+  count: number;                      // typed uses in the window
+  inline: number;                     // mid-prompt mentions (own and plugin commands only)
+}
+
+export interface ClaudeUnknownCommand {
+  name: string;
+  count: number;
+  suggestion: string | null;          // the command it was probably meant to be
+}
+
+export interface ClaudeCommandsPayload {
+  range: ActivityRange;
+  available: boolean;                 // false when no history file was found
+  firstRecordedAt: number | null;     // oldest row kept, any range
+  total: number;                      // typed uses in the window
+  distinct: number;                   // distinct commands typed (aliases folded)
+  sessionsWithCommands: number;
+  // The window of equal length before this one. null for '1y', and null when
+  // the history starts after that window began (the comparison would be unfair).
+  previousTotal: number | null;
+  top: ClaudeCommandRow[];            // most used first
+  unknown: ClaudeUnknownCommand[];    // typed names that match nothing known
+  byCategory: Record<ClaudeCommandCategory, number>;
+  neverUsed: string[];                // discovery built-ins with no use in ALL kept history
+  queriedAt: number;
+}

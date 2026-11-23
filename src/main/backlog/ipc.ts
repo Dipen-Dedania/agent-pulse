@@ -473,7 +473,7 @@ export function registerBacklogIpc(deps: BacklogIpcDeps): void {
       return {
         ok: false,
         reason: card.agent === 'codex'
-          ? 'Refine needs Claude Code installed (planning always uses Claude Code; the run itself will use Codex)'
+          ? 'Refine needs Claude Code installed. Planning always uses Claude Code; the run itself will use ChatGPT (Codex).'
           : 'claude CLI not found on PATH',
       };
     }

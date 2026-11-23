@@ -203,7 +203,7 @@ export class CodexUsagePoller {
       logger.warn(`[CodexUsagePoller] credentials unavailable (${creds.reason}): ${creds.detail}`);
       this.setStatus({
         state: 'unauthenticated',
-        message: 'No Codex credentials found. Sign in to Codex/ChatGPT, then click Refresh.',
+        message: 'No ChatGPT (Codex) credentials found. Sign in to ChatGPT, then click Refresh.',
       });
       return;
     }
@@ -221,7 +221,7 @@ export class CodexUsagePoller {
         logger.warn('[CodexUsagePoller] 401 unauthorized — pausing until manual refresh');
         this.setStatus({
           state: 'unauthenticated',
-          message: 'Codex token expired. Run any Codex command to refresh it, then click Refresh.',
+          message: 'ChatGPT (Codex) token expired. Run any codex command to refresh it, then click Refresh.',
         });
         return;
       }
@@ -269,7 +269,7 @@ export class CodexUsagePoller {
         logger.warn('[CodexUsagePoller] response shape unrecognized:', JSON.stringify(body)?.slice(0, 300));
         this.setStatus({
           state: 'unavailable',
-          message: 'Codex usage endpoint returned an unexpected shape.',
+          message: 'The ChatGPT (Codex) usage endpoint returned an unexpected shape.',
         });
         this.scheduleNext(UNAVAILABLE_BACKOFF_MS);
         return;
@@ -291,7 +291,7 @@ export class CodexUsagePoller {
         snapshot: this.status.snapshot,
         lastUpdated: this.status.lastUpdated,
         nudgeActive: this.status.nudgeActive,
-        message: 'Network error reaching the Codex usage endpoint.',
+        message: 'Network error reaching the ChatGPT (Codex) usage endpoint.',
       });
       this.scheduleNext(Math.max(MIN_INTERVAL_MS, this.config.intervalMs));
     }
@@ -361,7 +361,7 @@ export class CodexUsagePoller {
     this.lastCapNotified[key] = w.resetsAt;
     try {
       new Notification({
-        title: `Codex usage: ${Math.round(remaining)}% left`,
+        title: `ChatGPT (Codex) usage: ${Math.round(remaining)}% left`,
         body: `Your ${codexWindowPhrase(w.windowSeconds, key)} window is almost out. Resets ${formatRelative(w.resetsAt)}.`,
         silent: false,
       }).show();
@@ -375,7 +375,7 @@ export class CodexUsagePoller {
     this.lastNudgeNotified[key] = w.resetsAt;
     try {
       new Notification({
-        title: `${Math.round(remaining)}% Codex credit unused`,
+        title: `${Math.round(remaining)}% ChatGPT (Codex) credit unused`,
         body: `Your ${codexWindowPhrase(w.windowSeconds, key)} window resets ${formatRelative(w.resetsAt)}. Use it before it's gone.`,
         silent: false,
       }).show();
@@ -394,7 +394,7 @@ export class CodexUsagePoller {
     const plan = snapshot.planType ? ` on your ${snapshot.planType} plan` : '';
     try {
       new Notification({
-        title: 'Codex limit reached',
+        title: 'ChatGPT (Codex) limit reached',
         body: `${what}${plan}. Resets ${formatRelative(snapshot.primary.resetsAt)}.`,
         silent: false,
       }).show();

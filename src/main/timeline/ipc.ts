@@ -24,6 +24,7 @@ import {
 import { logger } from '../../common/logger';
 import { loadConfig } from '../user-config';
 import { runCoaching } from './coaching';
+import type { CommandHistorySync } from './command-sync';
 
 export interface TimelineStatus {
   available: boolean;
@@ -48,7 +49,7 @@ const coachingInFlight = new Map<string, Promise<CraftCoachingResult>>();
  * Pass a non-null `queries` once the timeline is up; pass null to mark it
  * unavailable.
  */
-export function registerTimelineIpc(queries: TimelineQueries | null) {
+export function registerTimelineIpc(queries: TimelineQueries | null, commandSync: CommandHistorySync | null = null) {
   if (queries) {
     currentStatus = { available: true };
   }
@@ -199,6 +200,19 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     catch (e) { logger.warn('[Timeline/ipc] get-compactions:', e); return null; }
   });
 
+  // Claude Code only. Reads the prompt history first, so a card that has just
+  // mounted shows the commands typed a moment ago.
+  ipcMain.handle('analytics:get-claude-commands', (_e, args: { range: ActivityRange }) => {
+    if (!queries) return null;
+    try {
+      const sync = commandSync?.sync();
+      return queries.getClaudeCommands(args.range, {
+        discovered: commandSync?.discoveredCommands(),
+        available: sync?.available ?? false,
+      });
+    } catch (e) { logger.warn('[Timeline/ipc] get-claude-commands:', e); return null; }
+  });
+
   ipcMain.handle('analytics:get-craft', (_e, args: { range: TimelineRange }) => {
     if (!queries) return null;
     try { return queries.getCraft(args.range); }
@@ -268,6 +282,7 @@ export function unregisterTimelineIpc() {
     'analytics:get-lines-changed',
     'analytics:get-subagent-use',
     'analytics:get-compactions',
+    'analytics:get-claude-commands',
     'analytics:get-craft',
     'analytics:get-coaching',
   ]) {

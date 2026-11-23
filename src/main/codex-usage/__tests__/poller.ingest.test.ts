@@ -225,13 +225,13 @@ describe('CodexUsagePoller.ingestExternal', () => {
     };
     poller.ingestExternal(hit);
     poller.ingestExternal({ ...hit, primary: { ...hit.primary, utilization: 100 } });
-    const limitToasts = notifications.filter((n) => n.title === 'Codex limit reached');
+    const limitToasts = notifications.filter((n) => n.title === 'ChatGPT (Codex) limit reached');
     expect(limitToasts).toHaveLength(1);
     expect(limitToasts[0].body).toContain('5-hour limit hit on your team plan');
 
     const off = new CodexUsagePoller(config({ capWarning: { enabled: false, threshold: 5 } }));
     notifications.length = 0;
     off.ingestExternal(hit);
-    expect(notifications.filter((n) => n.title === 'Codex limit reached')).toHaveLength(0);
+    expect(notifications.filter((n) => n.title === 'ChatGPT (Codex) limit reached')).toHaveLength(0);
   });
 });

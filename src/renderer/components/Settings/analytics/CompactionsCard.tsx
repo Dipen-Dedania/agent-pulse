@@ -9,9 +9,9 @@ import { ACTIVITY_EMPTY, AgentRow, DayAxis, StatTile, rollupDays } from './activ
 const NOTE =
   'A compaction is when a conversation outgrows its context window and is replaced by a summary. ' +
   'Manual means you ran the compact command; auto means the agent did it on its own. Claude Code ' +
-  'records which it was. Codex does not, so for Codex it is inferred: a compaction that is the only ' +
+  'records which it was. ChatGPT (Codex) does not, so there it is inferred: a compaction that is the only ' +
   'thing in its turn counts as manual. Context size is reported by Claude Code only. Compactions ' +
-  'inside subagents and Codex auto-reviews are not counted.';
+  'inside subagents and ChatGPT (Codex) auto-reviews are not counted.';
 
 const COLORS = { auto: '#fbbf24', manual: '#60a5fa', unknown: '#94a3b8' } as const;
 

@@ -164,7 +164,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
         <div className='flex-1 min-w-0'>
           <p className='text-sm text-muted'>
             Time windows when queued cards on this board auto-execute — night hours, weekends. Green
-            cards only, one at a time, on the agent each card names (Claude Code or Codex). Turns idle
+            cards only, one at a time, on the agent each card names: Claude Code or ChatGPT (Codex). Turns idle
             window credit into finished work.
           </p>
         </div>
@@ -272,7 +272,7 @@ export const BacklogSchedulerSection: React.FC<Props> = ({ config, status, onCha
         title='Pause new tasks near the usage limit'
         description={
           <>
-            Stop claiming new cards once an agent’s current usage window (Claude 5-hour / Codex primary)
+            Stop claiming new cards once an agent’s current usage window (Claude 5-hour / ChatGPT (Codex) primary)
             is this full — a task started with little left just dies partway through. Each agent is
             paused on its own; the other keeps running.{' '}
             {config.usageGatePercent >= 100

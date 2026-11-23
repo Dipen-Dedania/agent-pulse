@@ -772,12 +772,12 @@ export const SettingsPanel: React.FC<{ onBack?: () => void }> = ({ onBack }) => 
       if (result?.reason === 'inline-table') {
         void appAlert(
           'Your config.toml defines `tui` as an inline table or dotted key, which Agent Pulse cannot edit safely. Move it to a [tui] table and try again.',
-          'Codex status line',
+          'Codex CLI status line',
         );
       } else if (result?.reason === 'empty') {
-        void appAlert('Add at least one item before installing.', 'Codex status line');
+        void appAlert('Add at least one item before installing.', 'Codex CLI status line');
       } else if (result?.reason === 'error') {
-        void appAlert('Failed to write config.toml: ' + (result.message ?? 'unknown error'), 'Codex status line');
+        void appAlert('Failed to write config.toml: ' + (result.message ?? 'unknown error'), 'Codex CLI status line');
       }
     } catch (e) {
       logger.error('[SettingsPanel] failed to install Codex status line', e);

@@ -18,7 +18,7 @@ export const CacheEfficiencyCard: React.FC = () => {
       {loading && !data ? (
         <SkeletonLine width='100%' height='5rem' />
       ) : !data || !hasAny ? (
-        <EmptyState message='No cache data yet. Claude Code and Codex report cache usage.' />
+        <EmptyState message='No cache data yet. Claude Code and ChatGPT (Codex) report cache usage.' />
       ) : (
         <div className='flex flex-col gap-4'>
           <div className='grid grid-cols-2 gap-3'>

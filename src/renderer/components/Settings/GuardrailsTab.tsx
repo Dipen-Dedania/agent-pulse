@@ -132,8 +132,8 @@ export const GuardrailsTab: React.FC = () => {
       <div className={config.enabled ? '' : 'opacity-60 pointer-events-none'}>
         {/* Rule list */}
         <Card
-          subtitle='Inspect shell commands before tools run them. Some agents (Claude Code, Codex, Grok,
-            Antigravity, OpenCode) can block a risky command outright; others just get a warning.'
+          subtitle='Inspect shell commands before tools run them. Some agents — Claude Code, ChatGPT (Codex), Grok,
+            Antigravity, OpenCode — can block a risky command outright; others just get a warning.'
         >
           <div className='flex items-center justify-between mb-4'>
             <Eyebrow size='md'>Rules ({allRules.length})</Eyebrow>

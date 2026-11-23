@@ -215,7 +215,7 @@ export function classifyCodexNonZeroExit(
 
 export const codexAdapter: AgentAdapter = {
   id: 'codex',
-  displayName: 'Codex',
+  displayName: 'ChatGPT (Codex)',
   resolveBin: resolveCodexBin,
   resetBinCache: resetCodexBinCache,
   // The installer / standalone builds are a real codex.exe (spawn directly);

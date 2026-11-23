@@ -54,7 +54,7 @@ const FEATURES: Feature[] = [
   {
     title: 'Unified Bridge',
     description:
-      'Normalizes lifecycle events from Claude, Cursor, Copilot, Codex, Kiro & Antigravity.',
+      'Normalizes lifecycle events from Claude, Cursor, Copilot, ChatGPT (Codex), Kiro & Antigravity.',
     icon: (
       <svg
         className={iconClass}
@@ -75,7 +75,7 @@ const FEATURES: Feature[] = [
   {
     title: 'Usage Meters',
     description:
-      'Live Claude, Codex & Antigravity quota tracking with cap & nudge alerts.',
+      'Live Claude, ChatGPT (Codex) & Antigravity quota tracking with cap & nudge alerts.',
     icon: (
       <svg
         className={iconClass}

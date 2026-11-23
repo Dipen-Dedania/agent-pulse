@@ -96,8 +96,9 @@ const TOOL_WIN_WINDOW_PROCESS_NAMES: Partial<Record<ToolId, string[]>> = {
   // The agy CLI ships with the Antigravity IDE — when no CLI session is
   // found, a running IDE window is the next-best focus target.
   'antigravity-cli': ['Antigravity'],
-  // Codex desktop app (MSIX-packaged Electron, process name `Codex`).
-  'openai-codex':    ['Codex'],
+  // The OpenAI desktop app (MSIX package OpenAI.Codex). Renamed to ChatGPT in
+  // late 2026: the process is now `ChatGPT`; `Codex` covers older installs.
+  'openai-codex':    ['ChatGPT', 'Codex'],
 };
 
 // CLI agents never own a window — their terminal HOST does. To focus them

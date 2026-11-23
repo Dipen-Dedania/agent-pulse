@@ -8,6 +8,7 @@ import { StatuslineWriter } from './statusline-writer';
 import { TranscriptReader } from './transcript-reader';
 import { ActivitySync } from './activity-sync';
 import { startActivityBackfill } from './activity-backfill';
+import { CommandHistorySync } from './command-sync';
 import { TimelineQueries } from './queries';
 import { registerTimelineIpc, registerTimelineIpcUnavailable, unregisterTimelineIpc } from './ipc';
 import { PruneScheduler } from './prune';
@@ -66,6 +67,13 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
   const quotaWriter = new QuotaWriter(db);
   const statuslineWriter = new StatuslineWriter(db);
   const activitySync = new ActivitySync(db);
+  // Claude Code slash commands, from its prompt history file. Project folders
+  // the timeline has seen are scanned for the user's own commands and skills.
+  const commandSync = new CommandHistorySync(db, {
+    projectRoots: () => db
+      .query<{ project_path: string }>('SELECT DISTINCT project_path FROM sessions WHERE project_path IS NOT NULL')
+      .map((r) => r.project_path),
+  });
   const transcriptReader = new TranscriptReader(
     eventsWriter,
     sessionsDeriver,
@@ -96,6 +104,8 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
   // manual refresh. Cancelled when the timeline closes.
   let cancelActivityBackfill: () => void = () => undefined;
   const activityBackfillTimer = setTimeout(() => {
+    try { commandSync.sync(); }
+    catch (e) { logger.warn('[Timeline] command history read failed:', e); }
     try {
       cancelActivityBackfill = startActivityBackfill(db, activitySync, {
         onDone: ({ inserted }) => {
@@ -158,6 +168,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
     // later tick and tracked with its own offsets, so it can't delay or skew
     // the token path above.
     activitySync.onAgentEvent(event.toolId, event.payload.sessionId, event.payload.transcriptPath);
+    commandSync.onAgentEvent(event.toolId);
   };
   const unsubEvents = opts.stateManager.onEvent(onBridgeEvent);
   // The timeline boots in a deferred launch stage while the bridge has been
@@ -180,7 +191,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
   const unsubCursor = opts.cursorUsagePoller.subscribe((status) => quotaWriter.onCursorUsage(status));
   const unsubAg     = opts.antigravityUsagePoller.subscribe((status) => quotaWriter.onAntigravityUsage(status));
 
-  registerTimelineIpc(queries);
+  registerTimelineIpc(queries, commandSync);
   prune.start();
 
   // Flush sessions on quit so the day's last working stretch is never lost.
@@ -215,6 +226,7 @@ export function bootTimeline(opts: TimelineBootOptions): TimelineHandle | null {
       clearTimeout(activityBackfillTimer);
       cancelActivityBackfill();
       activitySync.dispose(); // before db.close(): drops queued reads and timers
+      commandSync.dispose();
       unregisterTimelineIpc();
       try { db.close(); } catch { /* ignore */ }
     },

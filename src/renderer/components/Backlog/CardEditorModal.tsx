@@ -90,7 +90,7 @@ function codexModelPresets(models: CodexModelAvailability[] | undefined): { valu
 
 const AGENT_OPTIONS: { value: BacklogAgent; label: string }[] = [
   { value: 'claude', label: 'Claude Code' },
-  { value: 'codex', label: 'Codex' },
+  { value: 'codex', label: 'ChatGPT (Codex)' },
 ];
 
 // Shared by both <Select>s in the form so their triggers line up with the
@@ -302,7 +302,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
   };
 
   const modelPresets = agent === 'codex' ? codexModelPresets(codexModels) : MODEL_PRESETS;
-  const defaultLabel = agent === 'codex' ? 'Codex default' : 'Project default';
+  const defaultLabel = agent === 'codex' ? 'ChatGPT (Codex) default' : 'Project default';
 
   // Any other card on the board can gate this one (the board is global, so
   // cross-project prereqs are allowed). Checked ones sort first for viz.
@@ -578,7 +578,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           <Eyebrow
             as='span'
             size='md'
-            right={<InfoHint text='Which CLI runs this card headlessly. Claude Code runs `claude -p`; Codex runs `codex exec` in a sandbox. Issue scouting and Refine Now always use Claude Code.' />}
+            right={<InfoHint text='Which CLI runs this card headlessly. Claude Code runs `claude -p`; ChatGPT (Codex) runs `codex exec` in a sandbox. Issue scouting and Refine Now always use Claude Code.' />}
           >
             Agent
           </Eyebrow>
@@ -589,7 +589,7 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
               hint: agentAvailable && !agentAvailable[o.value]
                 ? `${o.label} CLI not found — install it (or fix PATH) to run cards with it`
                 : o.value === 'codex'
-                  ? 'Runs with `codex exec`. Spends the Codex plan’s own usage window directly.'
+                  ? 'Runs with `codex exec`. Spends your ChatGPT plan’s own usage window directly.'
                   : 'Runs with `claude -p` (headless Claude Code).',
             }))}
             value={agent}
@@ -606,8 +606,8 @@ export const CardEditorModal: React.FC<Props> = ({ card, projects, templates, ca
           )}
           {agent === 'codex' && (
             <span className='text-[11px] text-faint'>
-              Refine Now always plans with Claude Code; the run itself uses Codex. Codex runs spend the
-              Codex plan’s usage window directly.
+              Refine Now always plans with Claude Code; the run itself uses ChatGPT (Codex). Those runs spend your
+              ChatGPT plan’s usage window directly.
             </span>
           )}
         </div>

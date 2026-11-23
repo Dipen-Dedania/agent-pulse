@@ -6,7 +6,7 @@ import { Card, EmptyState, InfoTooltip, SkeletonLine, formatCompactNumber, useCh
 import { ACTIVITY_EMPTY, AgentRow, StatTile } from './activityShared';
 
 const NOTE =
-  'Words in the messages you typed, read from Claude Code and Codex session files. Only the count is ' +
+  'Words in the messages you typed, read from Claude Code and ChatGPT (Codex) session files. Only the count is ' +
   'stored, never the text. Pasted text counts. Not counted: attached images and files, slash commands, ' +
   'the text of questions an agent asked you, and automated runs such as backlog cards.';
 

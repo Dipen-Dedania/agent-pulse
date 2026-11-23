@@ -109,7 +109,7 @@ export const BacklogSetupChecklist: React.FC<Props> = ({
     },
     {
       label: 'Codex CLI found (optional)',
-      hint: 'Only cards set to the Codex agent need it. Install Codex to run cards with `codex exec`.',
+      hint: 'Only cards set to the ChatGPT (Codex) agent need it. Install the Codex CLI to run cards with `codex exec`.',
       done: agents?.codex ?? false,
       optional: true,
     },

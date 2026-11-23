@@ -136,7 +136,7 @@ function codexTooltipLines(status: CodexUsageStatus, showSecondary: boolean): st
     }
     return lines;
   }
-  return [status.message ?? `Codex usage: ${status.state}`];
+  return [status.message ?? `ChatGPT (Codex) usage: ${status.state}`];
 }
 
 function cursorTooltipLines(status: CursorUsageStatus): string[] {
@@ -1393,7 +1393,7 @@ export const Bubble: React.FC<BubbleProps> = ({ toolId, demo = false }) => {
                   ? '0 0 8px rgba(20,184,166,0.7)'
                   : '0 0 6px rgba(13,148,136,0.5)',
               }}
-              title='Unused Codex credit about to reset'
+              title='Unused ChatGPT (Codex) credit about to reset'
             >
               <svg viewBox='0 0 24 24' className='w-2.5 h-2.5' fill='white'>
                 <path d='M13 2L4.09 13.6h7.41L11 22l8.91-11.6h-7.41L13 2z' />

@@ -261,7 +261,7 @@ const TABS: { id: TabId; label: string; Icon: React.FC<IconProps>; description: 
   { id: 'bubble',     label: 'Bubble',     Icon: BubbleIcon,     description: 'Size, screen position, and inactivity sound for the bubbles.' },
   { id: 'usage',      label: 'Plans & Limits', Icon: PlansIcon,  description: 'Monitor plan usage and configure each tool’s scheduler & status line.' },
   { id: 'backlog',    label: 'Backlog',    Icon: BacklogIcon,    description: 'Queue research tasks that run themselves during your idle windows.' },
-  { id: 'analytics',  label: 'Analytics',  Icon: AnalyticsIcon,  description: 'Heatmap, daily digest, model usage, and per-project time — all local.' },
+  { id: 'analytics',  label: 'Analytics',  Icon: AnalyticsIcon,  description: 'Your usage, cost, output, and how you work with agents — all local.' },
   { id: 'guardrails', label: 'Guardrails', Icon: GuardrailsIcon, description: 'Block risky shell commands and protect secret files from agents.' },
   { id: 'updates',    label: 'Updates',    Icon: UpdatesIcon,    description: 'Check for and install new versions of Agent Pulse.' },
 ];

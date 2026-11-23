@@ -34,6 +34,7 @@ import {
   LinesChangedPayload,
   SubagentUsePayload,
   CompactionsPayload,
+  CraftPayload,
 } from '../../../../common/timeline-types';
 import { BacklogStatsPayload } from '../../../../common/backlog-types';
 
@@ -225,6 +226,12 @@ export function useSubagentUse(range: TimelineRange) {
 
 export function useCompactions(range: TimelineRange) {
   return useAnalyticsQuery<CompactionsPayload>('analytics:get-compactions', { range }, range);
+}
+
+// Your craft — shared by the scorecard and the Overview's Top insights, so both
+// read one cached fetch.
+export function useCraft(range: TimelineRange) {
+  return useAnalyticsQuery<CraftPayload>('analytics:get-craft', { range }, range);
 }
 
 // Overnight Backlog — served from the backlog DB via backlog:get-stats (not the

@@ -602,3 +602,80 @@ export interface LifecyclePayload {
   densityPct: number;            // avgActiveMs / avgSpanMs, "engagement density"
   queriedAt: number;
 }
+
+// ─── Your craft (skill scorecard) ────────────────────────────────────────────
+// Compact aggregates behind the "Your craft" scorecard, for one window. Every
+// number uses the same definition as the card it summarises (Prompt size,
+// Session cadence, Needs you, Subagent use, Context compactions, Context
+// pressure, Prompt cache health), so the scorecard and the drill-down agree.
+// A ratio is null when its denominator is zero, never 0.
+export interface CraftMetrics {
+  // Prompt clarity — activity_facts (Claude Code, Codex)
+  prompts: number;                    // prompts with at least one word
+  medianWords: number;
+  shortPromptPct: number | null;      // % of those prompts ≤ CRAFT_SHORT_PROMPT_WORDS words
+  openedSessions: number;             // sessions whose first prompt (with words) falls in the window
+  detailedOpenerPct: number | null;   // % of those that opened with a detailed (40+ word) prompt
+
+  // Session shape — events turn starts (every hooked agent)
+  sessions: number;                   // native sessions with ≥1 turn start
+  oneShotPct: number | null;          // % of those sessions with exactly one prompt
+  avgPromptsPerSession: number | null;
+  medianThinkMs: number | null;       // null when there were no think-time gaps
+
+  // Context hygiene — compactions (activity_facts) + statusline (Claude Code)
+  activitySessions: number;           // sessions with any activity fact, the compaction denominator
+  autoCompactions: number;
+  autoCompactionsPerSession: number | null;
+  statuslineSessions: number;         // sessions with a context-% sample
+  highPressurePct: number | null;     // % of those whose PEAK sample reached ≥ 80% used. Peak, not
+                                      // latest: an auto-compaction drops the fill, so the latest
+                                      // sample misses exactly the sessions that ran full.
+  avgCacheHitRatio: number | null;    // 0..1, latest sample per session
+
+  // Delegation — activity_facts subagent launches
+  sessionsWithSubagents: number;
+  delegationPct: number | null;       // sessionsWithSubagents / activitySessions
+
+  // Flow — events waiting spans
+  waitEpisodes: number;
+  waitMs: number;
+  engagedMs: number;                  // working + waiting + error time, the denominator
+  waitPct: number | null;
+  avgWaitMs: number | null;
+}
+
+// Prompts the user typed per session, split by how long the session's opening
+// prompt was. Correlational only: it says which sessions took more prompts,
+// not why. Only sessions whose first prompt falls inside the window count, so
+// a session already running when the window opened isn't misread.
+export interface CraftCorrelation {
+  shortMaxWords: number;              // an opener at or under this is "short"
+  detailedMinWords: number;           // an opener at or over this is "detailed"
+  shortSessions: number;
+  detailedSessions: number;
+  shortAvgPrompts: number | null;
+  detailedAvgPrompts: number | null;
+}
+
+export interface CraftPayload {
+  range: TimelineRange;
+  current: CraftMetrics;
+  // The preceding window of equal length. null for '1y': events are kept for
+  // 365 days, so there is no complete prior year to compare against.
+  previous: CraftMetrics | null;
+  correlation: CraftCorrelation;
+  promptAgents: ToolId[];             // agents that reported prompts in the current window
+  queriedAt: number;
+}
+
+export const CRAFT_SHORT_PROMPT_WORDS = 10;
+
+// On-demand LLM coaching over the aggregate CraftMetrics (numbers only).
+export interface CraftCoachingResult {
+  ok: boolean;
+  tips: string[];                     // 3–5 short, concrete suggestions when ok
+  reason?: string;                    // why it failed, when !ok
+  costUsd: number | null;
+  generatedAt: number;                // epoch ms the run finished
+}

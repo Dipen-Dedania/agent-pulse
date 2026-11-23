@@ -72,6 +72,10 @@ import {
   SubagentAgentRow,
   CompactionsPayload,
   CompactionsAgentRow,
+  CraftPayload,
+  CraftMetrics,
+  CraftCorrelation,
+  CRAFT_SHORT_PROMPT_WORDS,
 } from '../../common/timeline-types';
 import {
   ACTION_CATEGORIES,
@@ -117,6 +121,19 @@ function rangeMs(range: TimelineRange): number {
 const THINK_CAP_MS = 5 * 60 * 1000;
 const WAIT_SPAN_CAP_MS = 30 * 60 * 1000;
 const RESUME_GAP_MS = 60 * 60 * 1000;
+
+// Open upper bound for the window cores below. The public getters read "from
+// the window start to now, and anything newer", which an end bound of
+// MAX_SAFE_INTEGER keeps exactly; the craft scorecard passes a real end to
+// read the preceding period.
+const END_OF_TIME = Number.MAX_SAFE_INTEGER;
+
+// Context-pressure threshold shared by the card and the craft scorecard.
+const HIGH_PRESSURE_PCT = 80;
+
+// Correlation buckets for the craft scorecard's opener-length comparison.
+const CRAFT_SHORT_OPENER_WORDS = 15;
+const CRAFT_DETAILED_OPENER_WORDS = 40;
 
 // Median of an already-ascending-sorted array. Returns 0 for an empty array.
 function median(sorted: number[]): number {
@@ -567,24 +584,22 @@ export class TimelineQueries {
   // detect per-session transitions. JS does the median/bucketing/pricing.
 
   // Session Cadence — think-time between prompts + prompts-per-session depth.
-  getCadence(range: CadenceRange): CadencePayload {
-    const now = Date.now();
-    const startMs = now - rangeMs(range);
-
-    // A prompt/turn start = an event entering 'working' from a non-working prev
-    // state, within one native session. LAG detects the transition.
+  // Turn starts per native session in [startMs, endMs), timestamps ascending.
+  // A prompt/turn start = an event entering 'working' from a non-working prev
+  // state, within one native session. LAG detects the transition.
+  private turnStartsBySession(startMs: number, endMs: number): Map<string, { toolId: string; ts: number[] }> {
     const rows = this.db.query<{ tool_id: string; session_id: string; timestamp: number }>(
       `WITH ev AS (
          SELECT tool_id, session_id, state, timestamp,
                 LAG(state) OVER (PARTITION BY session_id ORDER BY timestamp) AS prev_state
          FROM events
-         WHERE timestamp >= ? AND session_id IS NOT NULL
+         WHERE timestamp >= ? AND timestamp < ? AND session_id IS NOT NULL
        )
        SELECT tool_id, session_id, timestamp
        FROM ev
        WHERE state = 'working' AND (prev_state IS NULL OR prev_state <> 'working')
        ORDER BY session_id, timestamp`,
-      [startMs],
+      [startMs, endMs],
     );
 
     // Group turn-starts per native session, preserving timestamp order.
@@ -594,6 +609,13 @@ export class TimelineQueries {
       s.ts.push(r.timestamp);
       bySession.set(r.session_id, s);
     }
+    return bySession;
+  }
+
+  getCadence(range: CadenceRange): CadencePayload {
+    const now = Date.now();
+    const startMs = now - rangeMs(range);
+    const bySession = this.turnStartsBySession(startMs, END_OF_TIME);
 
     const byTool = new Map<string, { gaps: number[]; prompts: number; sessions: number }>();
     const allGaps: number[] = [];
@@ -641,20 +663,19 @@ export class TimelineQueries {
     };
   }
 
-  // Waiting on You — time an agent sat blocked on the user (permission prompts).
-  getWaiting(range: WaitingRange): WaitingPayload {
-    const now = Date.now();
-    const startMs = now - rangeMs(range);
-
-    // A waiting span = the gap from a 'waiting' event to the next event in the
-    // same session, capped so a walk-away doesn't inflate it. `active_ms` is the
-    // engaged (work+wait+error) time, the denominator for pctOfActive.
-    const rows = this.db.query<{ tool_id: string; wait_ms: number; episodes: number; active_ms: number }>(
+  // Per-tool waiting/engaged time in [startMs, endMs). A waiting span = the gap
+  // from a 'waiting' event to the next event in the same session, capped so a
+  // walk-away doesn't inflate it. `active_ms` is the engaged (work+wait+error)
+  // time, the denominator for pctOfActive. With a real end bound, the last
+  // span before it has no next event inside the window, so its time is not
+  // counted — a small, accepted undercount at the boundary.
+  private waitingToolRows(startMs: number, endMs: number): Array<{ tool_id: string; wait_ms: number; episodes: number; active_ms: number }> {
+    return this.db.query<{ tool_id: string; wait_ms: number; episodes: number; active_ms: number }>(
       `WITH ev AS (
          SELECT tool_id, session_id, state, timestamp,
                 LEAD(timestamp) OVER (PARTITION BY session_id ORDER BY timestamp) AS next_ts
          FROM events
-         WHERE timestamp >= ? AND session_id IS NOT NULL
+         WHERE timestamp >= ? AND timestamp < ? AND session_id IS NOT NULL
        )
        SELECT tool_id,
               SUM(CASE WHEN state = 'waiting' AND next_ts IS NOT NULL
@@ -664,8 +685,15 @@ export class TimelineQueries {
                        THEN MIN(next_ts - timestamp, ?) ELSE 0 END) AS active_ms
        FROM ev
        GROUP BY tool_id`,
-      [startMs, WAIT_SPAN_CAP_MS, WAIT_SPAN_CAP_MS],
+      [startMs, endMs, WAIT_SPAN_CAP_MS, WAIT_SPAN_CAP_MS],
     );
+  }
+
+  // Waiting on You — time an agent sat blocked on the user (permission prompts).
+  getWaiting(range: WaitingRange): WaitingPayload {
+    const now = Date.now();
+    const startMs = now - rangeMs(range);
+    const rows = this.waitingToolRows(startMs, END_OF_TIME);
 
     const out: WaitingRow[] = rows.map((r) => {
       const waitMs = r.wait_ms ?? 0;
@@ -1137,7 +1165,42 @@ export class TimelineQueries {
   // statusline-feed cards: statusline_samples rows are throttled snapshots, and
   // per-session stats (hit ratio, misses, context %) are running values where
   // only the newest sample matters.
-  private latestStatuslineSamples(startMs: number): Array<{
+  /** Highest context-fill % each session reached in [start, end). */
+  private peakContextBySession(startMs: number, endMs: number = END_OF_TIME): number[] {
+    return this.db.query<{ peak: number | null }>(
+      `SELECT MAX(context_used_pct) AS peak
+         FROM statusline_samples
+        WHERE sampled_at >= ? AND sampled_at < ? AND context_used_pct IS NOT NULL
+        GROUP BY session_id`,
+      [startMs, endMs],
+    ).map((r) => r.peak).filter((v): v is number => v !== null);
+  }
+
+  /**
+   * Each session whose first prompt falls in [start, end): its opening prompt's
+   * word count (0 for an image-only opener) and its total prompt count.
+   */
+  private sessionOpeners(startMs: number, endMs: number = END_OF_TIME): Map<string, { opener: number; prompts: number }> {
+    const rows = this.db.query<{ session_id: string; words: number | null }>(
+      `SELECT session_id, words FROM activity_facts
+        WHERE kind = 'prompt' AND session_id IN (
+          SELECT session_id FROM activity_facts
+           WHERE kind = 'prompt' AND session_id IS NOT NULL
+           GROUP BY session_id
+          HAVING MIN(ts) >= ? AND MIN(ts) < ?)
+        ORDER BY session_id, ts, key`,
+      [startMs, endMs],
+    );
+    const sessions = new Map<string, { opener: number; prompts: number }>();
+    for (const r of rows) {
+      const s = sessions.get(r.session_id);
+      if (s) s.prompts += 1;
+      else sessions.set(r.session_id, { opener: r.words ?? 0, prompts: 1 });
+    }
+    return sessions;
+  }
+
+  private latestStatuslineSamples(startMs: number, endMs: number = END_OF_TIME): Array<{
     session_id: string; model: string | null; sampled_at: number;
     cost_usd: number | null; context_used_pct: number | null;
     cache_warm: number | null; cache_hit_ratio: number | null; cache_misses: number | null;
@@ -1149,11 +1212,11 @@ export class TimelineQueries {
        JOIN (
          SELECT session_id, MAX(sampled_at) AS latest
          FROM statusline_samples
-         WHERE sampled_at >= ?
+         WHERE sampled_at >= ? AND sampled_at < ?
          GROUP BY session_id
        ) t ON s.session_id = t.session_id AND s.sampled_at = t.latest
        ORDER BY s.sampled_at DESC`,
-      [startMs],
+      [startMs, endMs],
     );
   }
 
@@ -1254,7 +1317,7 @@ export class TimelineQueries {
       rows,
       avgUsedPct: pcts.length ? pcts.reduce((s, v) => s + v, 0) / pcts.length : null,
       maxUsedPct: pcts.length ? Math.max(...pcts) : null,
-      highPressureSessions: pcts.filter((p) => p >= 80).length,
+      highPressureSessions: pcts.filter((p) => p >= HIGH_PRESSURE_PCT).length,
       byDay,
       queriedAt: now,
     };
@@ -1366,13 +1429,63 @@ export class TimelineQueries {
     return { now, windowStart, dayKeys };
   }
 
+  // Start of the activity window of equal length immediately before
+  // `windowStart`, stepped by calendar date like activityWindow.
+  private previousActivityWindowStart(range: ActivityRange, windowStart: number): number {
+    const d = new Date(windowStart);
+    d.setDate(d.getDate() - rangeDays(range));
+    return d.getTime();
+  }
+
+  // Prompt facts in [startMs, endMs).
+  private promptWordRows(startMs: number, endMs: number): Array<{ tool_id: string; words: number | null }> {
+    return this.db.query<{ tool_id: string; words: number | null }>(
+      `SELECT tool_id, words FROM activity_facts WHERE kind = 'prompt' AND ts >= ? AND ts < ?`,
+      [startMs, endMs],
+    );
+  }
+
+  // Per-agent subagent launches and session counts in [startMs, endMs).
+  private subagentAgentRows(startMs: number, endMs: number): Array<{
+    tool_id: string; launches: number; auto_reviews: number; sessions: number; sessions_with: number;
+  }> {
+    return this.db.query(
+      `SELECT tool_id,
+              SUM(kind = 'subagent')    AS launches,
+              SUM(kind = 'auto_review') AS auto_reviews,
+              COUNT(DISTINCT session_id) AS sessions,
+              COUNT(DISTINCT CASE WHEN kind = 'subagent' THEN session_id END) AS sessions_with
+         FROM activity_facts
+        WHERE ts >= ? AND ts < ?
+        GROUP BY tool_id`,
+      [startMs, endMs],
+    );
+  }
+
+  // Compaction facts in [startMs, endMs).
+  private compactionRows(startMs: number, endMs: number): Array<{
+    tool_id: string; ts: number; session_id: string | null; trigger_kind: string | null; tokens_before: number | null;
+  }> {
+    return this.db.query(
+      `SELECT tool_id, ts, session_id, trigger_kind, tokens_before
+         FROM activity_facts WHERE kind = 'compaction' AND ts >= ? AND ts < ?`,
+      [startMs, endMs],
+    );
+  }
+
+  // Sessions with any recorded activity in [startMs, endMs), per agent.
+  private activitySessionRows(startMs: number, endMs: number): Array<{ tool_id: string; sessions: number }> {
+    return this.db.query<{ tool_id: string; sessions: number }>(
+      `SELECT tool_id, COUNT(DISTINCT session_id) AS sessions
+         FROM activity_facts WHERE ts >= ? AND ts < ? GROUP BY tool_id`,
+      [startMs, endMs],
+    );
+  }
+
   // Prompt size — how much the user writes per prompt, in words.
   getPromptSize(range: ActivityRange): PromptSizePayload {
     const { now, windowStart } = this.activityWindow(range);
-    const rows = this.db.query<{ tool_id: string; words: number | null }>(
-      `SELECT tool_id, words FROM activity_facts WHERE kind = 'prompt' AND ts >= ?`,
-      [windowStart],
-    );
+    const rows = this.promptWordRows(windowStart, END_OF_TIME);
 
     const bounds: Array<{ label: string; max: number }> = [
       { label: '1–10', max: 10 }, { label: '11–25', max: 25 }, { label: '26–50', max: 50 },
@@ -1466,19 +1579,7 @@ export class TimelineQueries {
   getSubagentUse(range: ActivityRange): SubagentUsePayload {
     const { now, windowStart, dayKeys } = this.activityWindow(range);
 
-    const perAgentRows = this.db.query<{
-      tool_id: string; launches: number; auto_reviews: number; sessions: number; sessions_with: number;
-    }>(
-      `SELECT tool_id,
-              SUM(kind = 'subagent')    AS launches,
-              SUM(kind = 'auto_review') AS auto_reviews,
-              COUNT(DISTINCT session_id) AS sessions,
-              COUNT(DISTINCT CASE WHEN kind = 'subagent' THEN session_id END) AS sessions_with
-         FROM activity_facts
-        WHERE ts >= ?
-        GROUP BY tool_id`,
-      [windowStart],
-    );
+    const perAgentRows = this.subagentAgentRows(windowStart, END_OF_TIME);
     const agents: SubagentAgentRow[] = perAgentRows
       .map((r) => ({
         toolId: r.tool_id as ToolId,
@@ -1518,19 +1619,9 @@ export class TimelineQueries {
   getCompactions(range: ActivityRange): CompactionsPayload {
     const { now, windowStart, dayKeys } = this.activityWindow(range);
 
-    const rows = this.db.query<{
-      tool_id: string; ts: number; session_id: string | null; trigger_kind: string | null; tokens_before: number | null;
-    }>(
-      `SELECT tool_id, ts, session_id, trigger_kind, tokens_before
-         FROM activity_facts WHERE kind = 'compaction' AND ts >= ?`,
-      [windowStart],
-    );
+    const rows = this.compactionRows(windowStart, END_OF_TIME);
     // Denominator: sessions with any recorded activity in the window.
-    const sessionRows = this.db.query<{ tool_id: string; sessions: number }>(
-      `SELECT tool_id, COUNT(DISTINCT session_id) AS sessions
-         FROM activity_facts WHERE ts >= ? GROUP BY tool_id`,
-      [windowStart],
-    );
+    const sessionRows = this.activitySessionRows(windowStart, END_OF_TIME);
 
     const byDayMap = new Map<string, { auto: number; manual: number; unknown: number }>();
     for (const key of dayKeys) byDayMap.set(key, { auto: 0, manual: 0, unknown: 0 });
@@ -1583,6 +1674,169 @@ export class TimelineQueries {
       agents,
       byDay: Array.from(byDayMap.entries()).map(([date, v]) => ({ date, ...v })),
       queriedAt: now,
+    };
+  }
+
+  // ─── Your craft ─────────────────────────────────────────────────────────
+  // Aggregates behind the "Your craft" scorecard for the selected range and,
+  // except for '1y', the preceding window of equal length. Each source keeps
+  // the window its own card uses (events: trailing span; activity facts:
+  // calendar days; statusline: day-aligned) so the scorecard and the cards in
+  // its drill-down show the same numbers.
+  getCraft(range: TimelineRange): CraftPayload {
+    const now = Date.now();
+    const span = rangeMs(range);
+    const days = rangeDays(range);
+    const evStart = now - span;
+    const { windowStart: actStart } = this.activityWindow(range);
+    const slStart = startOfLocalDay(now) - (days - 1) * DAY_MS;
+
+    const current = this.craftMetricsForWindow(
+      { start: evStart, end: END_OF_TIME },
+      { start: actStart, end: END_OF_TIME },
+      { start: slStart, end: END_OF_TIME },
+    );
+    const previous = range === '1y'
+      ? null
+      : this.craftMetricsForWindow(
+        { start: evStart - span, end: evStart },
+        { start: this.previousActivityWindowStart(range, actStart), end: actStart },
+        { start: slStart - days * DAY_MS, end: slStart },
+      );
+
+    const promptAgents = this.db.query<{ tool_id: string }>(
+      `SELECT DISTINCT tool_id FROM activity_facts
+        WHERE kind = 'prompt' AND ts >= ? AND COALESCE(words, 0) > 0
+        ORDER BY tool_id`,
+      [actStart],
+    ).map((r) => r.tool_id as ToolId);
+
+    return {
+      range,
+      current,
+      previous,
+      correlation: this.craftCorrelation(actStart),
+      promptAgents,
+      queriedAt: now,
+    };
+  }
+
+  private craftMetricsForWindow(
+    ev: { start: number; end: number },
+    act: { start: number; end: number },
+    sl: { start: number; end: number },
+  ): CraftMetrics {
+    const pct = (n: number, d: number): number | null => (d > 0 ? (n / d) * 100 : null);
+
+    // Prompt clarity — same filter as Prompt size: image-only prompts have no words.
+    const words = this.promptWordRows(act.start, act.end)
+      .map((r) => r.words ?? 0)
+      .filter((w) => w > 0)
+      .sort((a, b) => a - b);
+    const shortCount = words.filter((w) => w <= CRAFT_SHORT_PROMPT_WORDS).length;
+    let openedSessions = 0;
+    let detailedOpeners = 0;
+    for (const s of this.sessionOpeners(act.start, act.end).values()) {
+      if (s.opener <= 0) continue;
+      openedSessions += 1;
+      if (s.opener >= CRAFT_DETAILED_OPENER_WORDS) detailedOpeners += 1;
+    }
+
+    // Session shape — same turn-start definition and think-time cap as Session cadence.
+    let sessions = 0;
+    let turnPrompts = 0;
+    let oneShot = 0;
+    const gaps: number[] = [];
+    for (const s of this.turnStartsBySession(ev.start, ev.end).values()) {
+      sessions += 1;
+      turnPrompts += s.ts.length;
+      if (s.ts.length <= 1) oneShot += 1;
+      for (let i = 1; i < s.ts.length; i++) {
+        const gap = s.ts[i] - s.ts[i - 1];
+        if (gap > 0 && gap < THINK_CAP_MS) gaps.push(gap);
+      }
+    }
+    gaps.sort((a, b) => a - b);
+
+    // Context hygiene + delegation share one denominator: sessions with any
+    // activity fact (what Context compactions and Subagent use divide by).
+    const activitySessions = this.activitySessionRows(act.start, act.end)
+      .reduce((s, r) => s + (r.sessions ?? 0), 0);
+    const autoCompactions = this.compactionRows(act.start, act.end)
+      .filter((r) => r.trigger_kind === 'auto').length;
+    const sessionsWithSubagents = this.subagentAgentRows(act.start, act.end)
+      .reduce((s, r) => s + (r.sessions_with ?? 0), 0);
+
+    // Context fill uses each session's PEAK sample: an auto-compaction drops the
+    // fill, so the latest sample would miss exactly the sessions that ran full.
+    // Cache hit stays on the latest sample (the session's settled state).
+    const pressure = this.peakContextBySession(sl.start, sl.end);
+    const latest = this.latestStatuslineSamples(sl.start, sl.end);
+    const ratios = latest.map((r) => r.cache_hit_ratio).filter((v): v is number => v !== null);
+
+    // Flow — same capped waiting spans as Needs you.
+    let waitMs = 0;
+    let waitEpisodes = 0;
+    let engagedMs = 0;
+    for (const r of this.waitingToolRows(ev.start, ev.end)) {
+      waitMs += r.wait_ms ?? 0;
+      waitEpisodes += r.episodes ?? 0;
+      engagedMs += r.active_ms ?? 0;
+    }
+
+    return {
+      prompts: words.length,
+      medianWords: median(words),
+      shortPromptPct: pct(shortCount, words.length),
+      openedSessions,
+      detailedOpenerPct: pct(detailedOpeners, openedSessions),
+
+      sessions,
+      oneShotPct: pct(oneShot, sessions),
+      avgPromptsPerSession: sessions > 0 ? turnPrompts / sessions : null,
+      medianThinkMs: gaps.length > 0 ? median(gaps) : null,
+
+      activitySessions,
+      autoCompactions,
+      autoCompactionsPerSession: activitySessions > 0 ? autoCompactions / activitySessions : null,
+      statuslineSessions: pressure.length,
+      highPressurePct: pct(pressure.filter((p) => p >= HIGH_PRESSURE_PCT).length, pressure.length),
+      avgCacheHitRatio: ratios.length > 0 ? ratios.reduce((s, v) => s + v, 0) / ratios.length : null,
+
+      sessionsWithSubagents,
+      delegationPct: pct(sessionsWithSubagents, activitySessions),
+
+      waitEpisodes,
+      waitMs,
+      engagedMs,
+      waitPct: pct(waitMs, engagedMs),
+      avgWaitMs: waitEpisodes > 0 ? waitMs / waitEpisodes : null,
+    };
+  }
+
+  // Opening-prompt length vs prompts per session, over sessions whose first
+  // prompt is inside the window. A session's opener is its earliest prompt
+  // fact; a session that opened with an image only (no words) is skipped.
+  private craftCorrelation(startMs: number): CraftCorrelation {
+    const sessions = this.sessionOpeners(startMs);
+
+    let shortSessions = 0;
+    let shortPrompts = 0;
+    let detailedSessions = 0;
+    let detailedPrompts = 0;
+    for (const s of sessions.values()) {
+      if (s.opener <= 0) continue;
+      if (s.opener <= CRAFT_SHORT_OPENER_WORDS) { shortSessions += 1; shortPrompts += s.prompts; }
+      else if (s.opener >= CRAFT_DETAILED_OPENER_WORDS) { detailedSessions += 1; detailedPrompts += s.prompts; }
+    }
+
+    return {
+      shortMaxWords: CRAFT_SHORT_OPENER_WORDS,
+      detailedMinWords: CRAFT_DETAILED_OPENER_WORDS,
+      shortSessions,
+      detailedSessions,
+      shortAvgPrompts: shortSessions > 0 ? shortPrompts / shortSessions : null,
+      detailedAvgPrompts: detailedSessions > 0 ? detailedPrompts / detailedSessions : null,
     };
   }
 

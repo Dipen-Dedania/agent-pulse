@@ -1,32 +1,28 @@
 import React, { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { AnalyticsConfig, TimelineRange } from '../../../common/timeline-types';
-import { GlassToggle, IconButton, Tooltip } from '../Shared';
+import { GlassToggle, IconButton, Tabs, Tooltip } from '../Shared';
+import { tabContent, tabContentTransition } from '../../motion';
 import { logger } from '../../../common/logger';
 import { DigestCard } from './analytics/DigestCard';
 import { WindowValueCard } from './analytics/WindowValueCard';
 import { LimitHitsCard } from './analytics/LimitHitsCard';
 import { BacklogShippedCard } from './analytics/BacklogShippedCard';
 import { HeatmapCard } from './analytics/HeatmapCard';
-import { HourRhythmCard } from './analytics/HourRhythmCard';
 import { ToolMixCard } from './analytics/ToolMixCard';
 import { ModelUsageCard } from './analytics/ModelUsageCard';
 import { ActionMixCard } from './analytics/ActionMixCard';
 import { LinesChangedCard } from './analytics/LinesChangedCard';
-import { PromptSizeCard } from './analytics/PromptSizeCard';
-import { SubagentUseCard } from './analytics/SubagentUseCard';
-import { CompactionsCard } from './analytics/CompactionsCard';
 import { ProjectBreakdownCard } from './analytics/ProjectBreakdownCard';
 import { TokensTimelineCard } from './analytics/TokensTimelineCard';
 import { GuardrailsCard } from './analytics/GuardrailsCard';
 import { SecretProtectionCard } from './analytics/SecretProtectionCard';
-import { CadenceCard } from './analytics/CadenceCard';
-import { WaitingCard } from './analytics/WaitingCard';
 import { CacheEfficiencyCard } from './analytics/CacheEfficiencyCard';
-import { CacheHealthCard } from './analytics/CacheHealthCard';
-import { ContextPressureCard } from './analytics/ContextPressureCard';
-import { LifecycleCard } from './analytics/LifecycleCard';
 import { SummaryHeroCard } from './analytics/SummaryHeroCard';
 import { LifetimeTokensCard } from './analytics/LifetimeTokensCard';
+import { CraftScorecardCard } from './analytics/craft/CraftScorecardCard';
+import { CoachingCard } from './analytics/craft/CoachingCard';
+import { TopInsightsCard } from './analytics/craft/TopInsightsCard';
 import { Card, Segmented } from './analytics/shared';
 import { refreshAnalytics, useAnalyticsFreshness } from './analytics/useAnalytics';
 import { AnalyticsRangeProvider, RANGE_OPTIONS } from './analytics/rangeContext';
@@ -62,8 +58,34 @@ interface Props {
   onConfigChange: (partial: Partial<AnalyticsConfig>) => void;
 }
 
-// "updated 12s ago ↻" — freshness of the newest fetch plus a manual refresh
-// that re-queries every mounted card at once.
+// Sub-tabs: each answers one question, and only the open one mounts (and
+// queries) its cards.
+type AnalyticsSection = 'overview' | 'usage' | 'craft' | 'output' | 'safety';
+
+const SECTIONS: { value: AnalyticsSection; label: string }[] = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'usage',    label: 'Usage & cost' },
+  { value: 'craft',    label: 'Your craft' },
+  { value: 'output',   label: 'Output' },
+  { value: 'safety',   label: 'Safety' },
+];
+
+// The open sub-tab is a per-viewer convenience: remembered across launches when
+// storage works, and Overview when it does not.
+const SECTION_STORAGE_KEY = 'agentPulse.analytics.section';
+
+function readSection(): AnalyticsSection {
+  try {
+    const v = window.localStorage.getItem(SECTION_STORAGE_KEY);
+    if (SECTIONS.some((s) => s.value === v)) return v as AnalyticsSection;
+  } catch { /* storage unavailable */ }
+  return 'overview';
+}
+
+function writeSection(section: AnalyticsSection) {
+  try { window.localStorage.setItem(SECTION_STORAGE_KEY, section); } catch { /* storage unavailable */ }
+}
+
 const FreshnessControl: React.FC = () => {
   const fetchedAt = useAnalyticsFreshness();
   const ago = fetchedAt != null ? Math.max(0, Math.round((Date.now() - fetchedAt) / 1000)) : null;
@@ -159,6 +181,11 @@ const PrivacyAndSettings: React.FC<Props> = ({ config, onConfigChange }) => {
 export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ config, onConfigChange, status }) => {
   // One range scopes every range-aware card below the filter row.
   const [range, setRange] = useState<TimelineRange>('30d');
+  const [section, setSectionState] = useState<AnalyticsSection>(readSection);
+  const setSection = (next: AnalyticsSection) => {
+    setSectionState(next);
+    writeSection(next);
+  };
 
   // Refresh (cache-drop + refetch) when the user changes settings so queries
   // reflect new redaction / idle-gap behavior immediately.
@@ -190,10 +217,18 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
           <UnavailableBanner reason={status.reason ?? 'Pulse Timeline is currently unavailable.'} />
         )}
 
-        {/* All-time total — sits above the filter row because no range scopes it. */}
-        <LifetimeTokensCard />
+        {/* Sub-tabs switch the body below, so Tabs (not Segmented). */}
+        <Tabs
+          tone='blue'
+          fill
+          className='glass-secondary rounded-xl mb-4'
+          ariaLabel='Analytics sections'
+          tabs={SECTIONS}
+          value={section}
+          onChange={(v) => setSection(v as AnalyticsSection)}
+        />
 
-        {/* Filter row: the range scopes every card below it (the digest and
+        {/* Filter row: the range scopes every sub-tab (the digest, lifetime and
             trailing-window cards keep their intrinsic windows and say so). */}
         <div className='mb-4 flex items-center justify-between gap-3 flex-wrap'>
           <Segmented
@@ -204,43 +239,69 @@ export const AnalyticsTab: React.FC<Props & { status: TimelineStatus }> = ({ con
           <FreshnessControl />
         </div>
 
-        <SummaryHeroCard />
-        <DigestCard />
-        <WindowValueCard />
-        <LimitHitsCard />
-        <BacklogShippedCard />
-        <HeatmapCard />
-        <TokensTimelineCard />
-        <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
-          <HourRhythmCard />
-          <ToolMixCard />
-        </div>
-        <ActionMixCard />
-        <LinesChangedCard />
-        <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
-          <PromptSizeCard />
-          <SubagentUseCard />
-        </div>
-        <ModelUsageCard />
-        <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
-          <CadenceCard />
-          <WaitingCard />
-        </div>
-        <CacheEfficiencyCard />
-        <div className='grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-5'>
-          <CacheHealthCard />
-          <ContextPressureCard />
-        </div>
-        <CompactionsCard />
-        <LifecycleCard />
-        <ProjectBreakdownCard />
-        <GuardrailsCard />
-        <SecretProtectionCard />
-        <PrivacyAndSettings config={config} onConfigChange={handleConfigChange} />
-        <p className='text-[11px] text-faint text-center mt-1 mb-3'>
-          Costs are estimates at public API list prices ({priceProvenance}), not your actual plan billing.
-          Only agents that expose token usage can be priced.
-        </p>
+        {/* Standard cross-fade under a Tabs row. */}
+        <AnimatePresence mode='wait'>
+          <motion.div
+            key={section}
+            variants={tabContent}
+            initial='initial'
+            animate='animate'
+            exit='exit'
+            transition={tabContentTransition}
+          >
+            {section === 'overview' && (
+              <>
+                <SummaryHeroCard />
+                <TopInsightsCard onOpenCraft={() => setSection('craft')} />
+                <DigestCard />
+                <HeatmapCard />
+              </>
+            )}
+
+            {section === 'usage' && (
+              <>
+                <LifetimeTokensCard />
+                <WindowValueCard />
+                <LimitHitsCard />
+                <TokensTimelineCard />
+                <ToolMixCard />
+                <ModelUsageCard />
+                <CacheEfficiencyCard />
+              </>
+            )}
+
+            {section === 'craft' && (
+              <>
+                <CraftScorecardCard />
+                <CoachingCard />
+              </>
+            )}
+
+            {section === 'output' && (
+              <>
+                <LinesChangedCard />
+                <ActionMixCard />
+                <ProjectBreakdownCard />
+                <BacklogShippedCard />
+              </>
+            )}
+
+            {section === 'safety' && (
+              <>
+                <GuardrailsCard />
+                <SecretProtectionCard />
+                <PrivacyAndSettings config={config} onConfigChange={handleConfigChange} />
+              </>
+            )}
+
+            {(section === 'overview' || section === 'usage') && (
+              <p className='text-[11px] text-faint text-center mt-1 mb-3'>
+                Costs are estimates at public API list prices ({priceProvenance}), not your actual plan billing.
+                Only agents that expose token usage can be priced.
+              </p>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </AnalyticsRangeProvider>
   );

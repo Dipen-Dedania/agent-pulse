@@ -91,6 +91,21 @@ export function runScout(
   allowedTools: string,
   timeoutMs: number = SCOUT_TIMEOUT_MS,
 ): Promise<ScoutRunResult> {
+  return runClaudeOneShot(prompt, buildScoutArgs(model, allowedTools), timeoutMs, 'scout');
+}
+
+/**
+ * Run one headless `claude` invocation with the given argv (prompt over stdin),
+ * parse its JSON result, and kill it on timeout. The scouts and the Analytics
+ * coaching run share this; each supplies its own argv. `label` only names the
+ * run in its timeout/no-result reasons. Never throws.
+ */
+export function runClaudeOneShot(
+  prompt: string,
+  baseArgs: string[],
+  timeoutMs: number,
+  label: string,
+): Promise<ScoutRunResult> {
   return new Promise((resolve) => {
     const done = (r: ScoutRunResult) => resolve(r);
     const bin = resolveClaudeBin();
@@ -101,7 +116,6 @@ export function runScout(
     }
     const isWin = process.platform === 'win32';
     const file = isWin ? (process.env.ComSpec || 'cmd.exe') : bin;
-    const baseArgs = buildScoutArgs(model, allowedTools);
     const args = isWin ? buildCmdShimArgs(bin, baseArgs) : baseArgs;
 
     let proc: ChildProcess;
@@ -129,7 +143,7 @@ export function runScout(
     });
     proc.on('close', (code) => {
       if (timedOut) {
-        settle({ ok: false, connector: 'connected', reason: `scout timed out after ${Math.round(timeoutMs / 1000)}s`, costUsd: null });
+        settle({ ok: false, connector: 'connected', reason: `${label} timed out after ${Math.round(timeoutMs / 1000)}s`, costUsd: null });
         return;
       }
       const parsed = parseClaudeJsonOutput(stdout);
@@ -137,7 +151,7 @@ export function runScout(
         settle({ ok: true, connector: 'connected', report: parsed.report, costUsd: parsed.costUsd, sessionId: parsed.sessionId });
         return;
       }
-      const reason = code !== 0 ? classifyNonZeroExit(code, stdout, stderr).reason : (parsed.reason ?? 'scout produced no result');
+      const reason = code !== 0 ? classifyNonZeroExit(code, stdout, stderr).reason : (parsed.reason ?? `${label} produced no result`);
       settle({ ok: false, connector: classifyConnector(false, reason), reason, costUsd: parsed.costUsd, sessionId: parsed.sessionId });
     });
 

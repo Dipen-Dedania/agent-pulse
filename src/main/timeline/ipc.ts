@@ -19,8 +19,11 @@ import {
   ContextPressureRange,
   ActionMixRange,
   ActivityRange,
+  CraftCoachingResult,
 } from '../../common/timeline-types';
 import { logger } from '../../common/logger';
+import { loadConfig } from '../user-config';
+import { runCoaching } from './coaching';
 
 export interface TimelineStatus {
   available: boolean;
@@ -28,6 +31,13 @@ export interface TimelineStatus {
 }
 
 let currentStatus: TimelineStatus = { available: false, reason: 'Timeline not initialized' };
+
+// The last successful coaching answer per range, so re-opening the tab shows
+// it (with its age) instead of paying for another run. The numbers move with
+// every event while the user works, so the key is the range alone; a re-run is
+// an explicit `force`. A failure is not kept and can be retried immediately.
+const coachingCache = new Map<string, CraftCoachingResult>();
+const coachingInFlight = new Map<string, Promise<CraftCoachingResult>>();
 
 /**
  * Register all analytics handlers up-front. They always exist — when the
@@ -188,6 +198,41 @@ export function registerTimelineIpc(queries: TimelineQueries | null) {
     try { return queries.getCompactions(args.range); }
     catch (e) { logger.warn('[Timeline/ipc] get-compactions:', e); return null; }
   });
+
+  ipcMain.handle('analytics:get-craft', (_e, args: { range: TimelineRange }) => {
+    if (!queries) return null;
+    try { return queries.getCraft(args.range); }
+    catch (e) { logger.warn('[Timeline/ipc] get-craft:', e); return null; }
+  });
+
+  // Explicit, user-triggered only. Recomputes the metrics here rather than
+  // trusting renderer input, so the prompt can only ever carry these numbers.
+  // `peek` returns the cached answer (or null) without starting a run.
+  ipcMain.handle('analytics:get-coaching', async (
+    _e,
+    args: { range: TimelineRange; force?: boolean; peek?: boolean },
+  ): Promise<CraftCoachingResult | null> => {
+    if (!queries) return null;
+    try {
+      const key = args.range;
+      const cached = coachingCache.get(key);
+      if (args.peek) return cached ?? null;
+      if (cached && !args.force) return cached;
+      const pending = coachingInFlight.get(key);
+      if (pending) return await pending;
+
+      const payload = queries.getCraft(args.range);
+      const model = loadConfig().backlogPopulation.scoutModel;
+      const run = runCoaching(payload, model).finally(() => coachingInFlight.delete(key));
+      coachingInFlight.set(key, run);
+      const result = await run;
+      if (result.ok) coachingCache.set(key, result);
+      return result;
+    } catch (e) {
+      logger.warn('[Timeline/ipc] get-coaching:', e);
+      return { ok: false, tips: [], reason: 'Coaching failed unexpectedly. See the app log.', costUsd: null, generatedAt: Date.now() };
+    }
+  });
 }
 
 /** Called by bootTimeline when the timeline cannot start. */
@@ -223,6 +268,8 @@ export function unregisterTimelineIpc() {
     'analytics:get-lines-changed',
     'analytics:get-subagent-use',
     'analytics:get-compactions',
+    'analytics:get-craft',
+    'analytics:get-coaching',
   ]) {
     ipcMain.removeHandler(channel);
   }

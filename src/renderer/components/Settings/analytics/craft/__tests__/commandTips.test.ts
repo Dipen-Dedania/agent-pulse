@@ -85,6 +85,8 @@ describe('commandTips', () => {
       { id: 'fresh-starts', tone: 'positive', text: 'Fresh starts are your habit (`/clear` ×568), which keeps each context small.' },
     ]);
     expect(ids(payload({ top: [row('exit', 30), row('clear', 20)] }))).toEqual([]);
+    const viaNew = { ...row('clear', 54), aliases: [{ name: 'new', count: 54 }] };
+    expect(commandTips(payload({ top: [viaNew] }))[0].text).toContain('(`/new` ×54)');
   });
 
   it('ignores commands that were only mentioned inline', () => {

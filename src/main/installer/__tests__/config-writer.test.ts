@@ -502,6 +502,111 @@ describe('ConfigWriter — openai-codex', () => {
       expect(ps1).toContain('[Console]::Out.Write($resp.Content)');
     });
   });
+
+  it('PowerShell script stays off the slow paths on per-tool-call events', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('openai-codex');
+      const ps1 = fs.readFileSync(path.join(tmpDir, '.codex', 'hooks', 'agent-pulse.ps1'), 'utf8');
+      const sh = fs.readFileSync(path.join(tmpDir, '.codex', 'hooks', 'agent-pulse.sh'), 'utf8');
+
+      // Literal IPv4 loopback: `localhost` costs ~2s per hook in .NET against
+      // the IPv4-only bridge. curl does not pay it, so bash keeps localhost.
+      expect(ps1).toContain('http://127.0.0.1:4242/event');
+      expect(ps1).not.toContain('localhost:4242');
+      expect(sh).toContain('http://localhost:4242/event');
+
+      // The WMI walk is skipped for the awaited per-tool-call events and is a
+      // single whole-table query (never one query per ancestor) when it runs.
+      expect(ps1).toContain('"(PreToolUse|PostToolUse|PermissionRequest|Stop)"');
+      expect(ps1).toContain('if (-not $skipWalk)');
+      expect(ps1.match(/Get-CimInstance/g)).toHaveLength(1);
+      expect(ps1).not.toContain('-Filter "ProcessId=');
+
+      // A skipped or failed walk sends no PID fields at all, so the bridge
+      // keeps the latched chain instead of latching the dead hook process.
+      expect(ps1).toContain("$pidInject = ''");
+      expect(ps1).toContain('if ($chainPids.Count -ge 2)');
+      expect(ps1).not.toContain('else { $PID }');
+    });
+  });
+});
+
+// ── Hook script refresh ───────────────────────────────────────────────────────
+
+describe('ConfigWriter — refreshHookScripts', () => {
+  const codexScript = (ext: 'sh' | 'ps1') => path.join(tmpDir, '.codex', 'hooks', `agent-pulse.${ext}`);
+
+  it('does nothing when no hook is installed', async () => {
+    await withFakeHome(async (writer) => {
+      expect(writer.refreshHookScripts()).toEqual([]);
+      expect(fs.existsSync(path.join(tmpDir, '.codex'))).toBe(false);
+    });
+  });
+
+  it('leaves current scripts alone', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('openai-codex');
+      expect(writer.refreshHookScripts()).toEqual([]);
+    });
+  });
+
+  it('rewrites a stale script and reports the tool, without touching the hook config', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('openai-codex');
+      await writer.installHook('grok');
+      const fresh = fs.readFileSync(codexScript('ps1'), 'utf8');
+      const hooksJson = path.join(tmpDir, '.codex', 'hooks.json');
+      // A user-added hook on another event must survive the refresh.
+      const config = JSON.parse(fs.readFileSync(hooksJson, 'utf8'));
+      config.hooks.Notification = [{ matcher: '*', hooks: [{ type: 'command', command: 'echo mine' }] }];
+      fs.writeFileSync(hooksJson, JSON.stringify(config, null, 2));
+      const configBefore = fs.readFileSync(hooksJson, 'utf8');
+
+      fs.writeFileSync(codexScript('ps1'), '# old Agent Pulse script\n');
+
+      expect(writer.refreshHookScripts()).toEqual(['openai-codex']);
+      expect(fs.readFileSync(codexScript('ps1'), 'utf8')).toBe(fresh);
+      expect(fs.readFileSync(hooksJson, 'utf8')).toBe(configBefore);
+      expect(writer.refreshHookScripts()).toEqual([]);
+    });
+  });
+
+  it('does not recreate a deleted script or touch a tool that reads as not installed', async () => {
+    await withFakeHome(async (writer) => {
+      await writer.installHook('openai-codex');
+      fs.rmSync(codexScript('sh'));
+      fs.writeFileSync(codexScript('ps1'), '# old Agent Pulse script\n');
+
+      // Missing .sh ⇒ the hook no longer reads as installed ⇒ hands off.
+      expect(writer.isHookInstalled('openai-codex')).toBe(false);
+      expect(writer.refreshHookScripts()).toEqual([]);
+      expect(fs.existsSync(codexScript('sh'))).toBe(false);
+      expect(fs.readFileSync(codexScript('ps1'), 'utf8')).toBe('# old Agent Pulse script\n');
+    });
+  });
+
+  it('refreshes every shell-hook tool to the literal-address PowerShell script', async () => {
+    await withFakeHome(async (writer) => {
+      const scripts: Array<[Parameters<ConfigWriter['installHook']>[0], string]> = [
+        ['cursor', path.join(tmpDir, '.cursor', 'hooks', 'agent-pulse.ps1')],
+        ['vscode-copilot', path.join(tmpDir, '.copilot', 'hooks', 'agent-pulse.ps1')],
+        ['kiro', path.join(tmpDir, '.kiro', 'hooks-scripts', 'agent-pulse.ps1')],
+        ['antigravity-cli', path.join(tmpDir, '.gemini', 'config', 'agent-pulse', 'agent-pulse.ps1')],
+      ];
+      for (const [toolId, file] of scripts) {
+        await writer.installHook(toolId);
+        expect(writer.isHookInstalled(toolId)).toBe(true);
+        fs.writeFileSync(file, '# old Agent Pulse script\n');
+      }
+
+      expect(writer.refreshHookScripts().sort()).toEqual(scripts.map(([toolId]) => toolId).sort());
+      for (const [, file] of scripts) {
+        const ps1 = fs.readFileSync(file, 'utf8');
+        expect(ps1).toContain('http://127.0.0.1:4242/event');
+        expect(ps1).not.toContain('localhost:4242');
+      }
+    });
+  });
 });
 
 // ── Kiro ──────────────────────────────────────────────────────────────────────

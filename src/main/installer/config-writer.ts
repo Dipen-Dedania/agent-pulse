@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
+import { logger } from '../../common/logger';
 import { BRIDGE_URL, STATUSLINE_INGEST_URL } from '../bridge/config';
 import { readConnectionFile } from '../mcp/connection';
 import { ToolId, StatusLineConfig, StatusLineRuntime, StatusLineState } from '../../common/types';
@@ -30,6 +31,16 @@ import {
 
 export class ConfigWriter {
   private bridgeUrl = BRIDGE_URL;
+
+  // Bridge URL for PowerShell hook scripts. The bridge listens on 127.0.0.1
+  // only, and a `localhost` URL makes .NET try ::1 first and wait for the
+  // refusal — measured at ~2.0s per hook in a fresh PowerShell process versus
+  // ~0.05s for the literal IPv4 address. Awaited hooks sit on every tool call,
+  // so every PowerShell script posts to the address form. Node `fetch` and
+  // `curl` do not pay this, so http hooks and bash scripts keep `bridgeUrl`.
+  private psBridgeUrl(): string {
+    return this.bridgeUrl.replace('://localhost:', '://127.0.0.1:');
+  }
 
   public isHookInstalled(toolId: ToolId, projectPath?: string): boolean {
     switch (toolId) {
@@ -487,7 +498,7 @@ $agentPid = if ($chainPids.Count -ge 2) { $chainPids[1] } else { $PID }
 $inject = '"cwd":' + $cwdJson + ',"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
 $body = $body -replace '^\\{', ('{' + $inject)
 try {
-  Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
+  Invoke-WebRequest -Uri "${this.psBridgeUrl()}" \`
     -Method POST \`
     -ContentType "application/json" \`
     -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
@@ -665,25 +676,42 @@ $body = $reader.ReadToEnd()
 $reader.Close()
 $cwdJson = ($PWD.Path | ConvertTo-Json -Compress)
 # Capture the ancestor PID chain — see buildPowerShellScript for rationale.
-$chainPids = New-Object System.Collections.ArrayList
-[void]$chainPids.Add($PID)
-try {
-  $cur = $PID
-  for ($i = 0; $i -lt 7; $i++) {
-    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$cur" -ErrorAction Stop
-    if (-not $p) { break }
-    $next = [int]$p.ParentProcessId
-    if ($next -le 0) { break }
-    [void]$chainPids.Add($next)
-    $cur = $next
+# The walk is a WMI query (~1s even as one query; ~4-5s as seven), and Codex
+# awaits PreToolUse and PostToolUse on every tool call, so those events — plus
+# PermissionRequest and Stop — skip it. SessionStart and UserPromptSubmit still
+# walk, which re-latches the chain once per turn: enough to follow the most
+# recently prompted session and to recover after an Agent Pulse restart. The
+# bridge keeps the latched chain when a payload omits it. An event name we do
+# not recognise walks, as before.
+$skipWalk = $body -match '"hook_event_name"\\s*:\\s*"(PreToolUse|PostToolUse|PermissionRequest|Stop)"'
+$pidInject = ''
+if (-not $skipWalk) {
+  $chainPids = New-Object System.Collections.ArrayList
+  [void]$chainPids.Add($PID)
+  try {
+    $parents = @{}
+    foreach ($p in (Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId -ErrorAction Stop)) {
+      $parents[[int]$p.ProcessId] = [int]$p.ParentProcessId
+    }
+    $cur = $PID
+    for ($i = 0; $i -lt 7; $i++) {
+      if (-not $parents.ContainsKey($cur)) { break }
+      $next = $parents[$cur]
+      if ($next -le 0) { break }
+      [void]$chainPids.Add($next)
+      $cur = $next
+    }
+  } catch { }
+  # A failed walk leaves only this script's own PID, which is gone by the time
+  # anyone clicks the bubble — send nothing so the latched chain survives.
+  if ($chainPids.Count -ge 2) {
+    $pidInject = '"agent_pid":' + $chainPids[1] + ',"agent_pid_chain":[' + ($chainPids -join ',') + '],'
   }
-} catch { }
-$chainJson = '[' + ($chainPids -join ',') + ']'
-$agentPid = if ($chainPids.Count -ge 2) { $chainPids[1] } else { $PID }
-$inject = '"_ap_tool":"openai-codex","cwd":' + $cwdJson + ',"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
+}
+$inject = '"_ap_tool":"openai-codex","cwd":' + $cwdJson + ',' + $pidInject
 $body = $body -replace '^\\{', ('{' + $inject)
 try {
-  $resp = Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
+  $resp = Invoke-WebRequest -Uri "${this.psBridgeUrl()}" \`
     -Method POST \`
     -ContentType "application/json" \`
     -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
@@ -926,7 +954,7 @@ $inject = '"_ap_tool":"antigravity-cli","hook_event_name":"' + $Event + '","cwd"
 $body = $body -replace '^\\{', ('{' + $inject)
 $verdict = $null
 try {
-  $resp = Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
+  $resp = Invoke-WebRequest -Uri "${this.psBridgeUrl()}" \`
     -Method POST \`
     -ContentType "application/json" \`
     -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
@@ -1135,7 +1163,7 @@ $sidInject = if ($env:GROK_SESSION_ID) { '"session_id":"' + $env:GROK_SESSION_ID
 $inject = '"_ap_tool":"grok",' + $sidInject + '"cwd":' + $cwdJson + ',"agent_pid":' + $agentPid + ',"agent_pid_chain":' + $chainJson + ','
 $body = $body -replace '^\\{', ('{' + $inject)
 try {
-  $resp = Invoke-WebRequest -Uri "${this.bridgeUrl}" \`
+  $resp = Invoke-WebRequest -Uri "${this.psBridgeUrl()}" \`
     -Method POST \`
     -ContentType "application/json" \`
     -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) \`
@@ -1177,13 +1205,9 @@ exit 0
   ];
   private static readonly MUSE_STATUS_MESSAGE = 'Agent Pulse';
 
-  // The bridge listens on 127.0.0.1 only. A `localhost` URL makes .NET try
-  // ::1 first and wait for the refusal — measured at ~2.0s per hook in a fresh
-  // PowerShell process versus ~0.18s for the literal IPv4 address — and the
-  // awaited PreToolUse hook sits on every tool call, so the Muse scripts use
-  // the address form.
+  // The Muse scripts (bash too) use the literal-address form — see psBridgeUrl.
   private museBridgeUrl(): string {
-    return this.bridgeUrl.replace('://localhost:', '://127.0.0.1:');
+    return this.psBridgeUrl();
   }
 
   private readMuseSettings(): { settings: any; existed: boolean } {
@@ -1476,6 +1500,71 @@ exit 0
       rewrote = true;
     }
     return rewrote;
+  }
+
+  /**
+   * Rewrites user-level hook scripts whose content differs from this build's
+   * template, so script fixes (the PowerShell latency work, the guardrail deny
+   * relay) reach existing installs without a manual reinstall. Called on app
+   * start.
+   *
+   * Deliberately narrow: only the script files are touched, never the tool's
+   * hook config, and only for a tool whose hook currently reads as installed —
+   * which also means its config already has the event set and command shape
+   * these scripts expect. A script the user deleted is not recreated.
+   * Project-level installs are not tracked and so are not refreshed.
+   *
+   * Returns the tool ids that had at least one script rewritten.
+   */
+  public refreshHookScripts(): ToolId[] {
+    const home = os.homedir();
+    const generic = { sh: () => this.buildShellScript(), ps1: () => this.buildPowerShellScript() };
+    const targets: Array<{ toolId: ToolId; dir: string; sh: () => string; ps1: () => string }> = [
+      { toolId: 'cursor',         dir: path.join(home, '.cursor', 'hooks'),        ...generic },
+      { toolId: 'vscode-copilot', dir: path.join(home, '.copilot', 'hooks'),       ...generic },
+      { toolId: 'kiro',           dir: path.join(home, '.kiro', 'hooks-scripts'),  ...generic },
+      {
+        toolId: 'openai-codex',
+        dir: path.join(home, '.codex', 'hooks'),
+        sh: () => this.buildCodexShellScript(),
+        ps1: () => this.buildCodexPowerShellScript(),
+      },
+      {
+        toolId: 'antigravity-cli',
+        dir: this.antigravityCliPaths().scriptDir,
+        sh: () => this.buildAntigravityShellScript(),
+        ps1: () => this.buildAntigravityPowerShellScript(),
+      },
+      {
+        toolId: 'grok',
+        dir: path.join(this.grokHome(), 'hooks'),
+        sh: () => this.buildGrokShellScript(),
+        ps1: () => this.buildGrokPowerShellScript(),
+      },
+    ];
+
+    const refreshed: ToolId[] = [];
+    for (const target of targets) {
+      try {
+        if (!this.isHookInstalled(target.toolId)) continue;
+        let rewrote = false;
+        const files: Array<[string, string, fs.WriteFileOptions]> = [
+          [path.join(target.dir, 'agent-pulse.sh'), target.sh(), { mode: 0o755 }],
+          [path.join(target.dir, 'agent-pulse.ps1'), target.ps1(), {}],
+        ];
+        for (const [file, fresh, options] of files) {
+          if (!fs.existsSync(file)) continue;
+          if (fs.readFileSync(file, 'utf8') === fresh) continue;
+          fs.writeFileSync(file, fresh, options);
+          rewrote = true;
+        }
+        if (rewrote) refreshed.push(target.toolId);
+      } catch (e) {
+        // One unreadable/locked script must not stop the other tools.
+        logger.warn(`[ConfigWriter] hook script refresh failed for ${target.toolId}:`, e);
+      }
+    }
+    return refreshed;
   }
 
   /**

@@ -92,3 +92,29 @@ describe('StatusStateManager — subagent depth counting', () => {
     expect(manager.getStatus('vscode-copilot')?.activeAgents).toBe(3);
   });
 });
+
+// Hook scripts only walk the process tree on some events (the walk is slow on
+// Windows), so most payloads carry no PID fields. The last chain must survive
+// them or a bubble click loses its focus target mid-turn.
+describe('StatusStateManager — agent PID latching', () => {
+  it('keeps the latched pid and chain when a later event omits them', () => {
+    const manager = new StatusStateManager();
+
+    manager.updateStatus('openai-codex', 'working', { sessionId: 's1', agentPid: 200, agentPidChain: [100, 200, 300] });
+    manager.updateStatus('openai-codex', 'working', { sessionId: 's1' });
+    manager.updateStatus('openai-codex', 'idle', { sessionId: 's1', agentPidChain: [] });
+
+    expect(manager.getStatus('openai-codex')?.agentPid).toBe(200);
+    expect(manager.getStatus('openai-codex')?.agentPidChain).toEqual([100, 200, 300]);
+  });
+
+  it('replaces the latch when a later event carries a new chain', () => {
+    const manager = new StatusStateManager();
+
+    manager.updateStatus('openai-codex', 'working', { sessionId: 's1', agentPid: 200, agentPidChain: [100, 200] });
+    manager.updateStatus('openai-codex', 'working', { sessionId: 's2', agentPid: 500, agentPidChain: [400, 500] });
+
+    expect(manager.getStatus('openai-codex')?.agentPid).toBe(500);
+    expect(manager.getStatus('openai-codex')?.agentPidChain).toEqual([400, 500]);
+  });
+});

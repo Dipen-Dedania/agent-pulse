@@ -104,7 +104,8 @@ export function commandTips(payload: ClaudeCommandsPayload, ctx: CommandTipConte
   if (typed[0]?.canonical === 'clear') {
     tips.push({
       id: 'fresh-starts', tone: 'positive',
-      text: `Fresh starts are your habit (${cmd('clear')} ×${typed[0].count}), which keeps each context small.`,
+      // Name it the way the user types it most (`/new` is an alias of `/clear`).
+      text: `Fresh starts are your habit (${cmd(typed[0].aliases[0]?.name ?? 'clear')} ×${typed[0].count}), which keeps each context small.`,
     });
   }
 

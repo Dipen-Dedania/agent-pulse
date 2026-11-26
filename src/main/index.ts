@@ -481,6 +481,18 @@ class AgentPulseApp {
               }
             },
           },
+          // Same for the shell-hook tools' scripts: an old copy keeps paying
+          // seconds of per-tool-call latency on Windows and may predate the
+          // guardrail deny relay. Scripts only — hook configs are never touched.
+          {
+            name: 'hook-scripts',
+            run: () => {
+              const refreshed = this.writer.refreshHookScripts();
+              if (refreshed.length > 0) {
+                logger.info(`[AgentPulseApp] refreshed stale hook scripts: ${refreshed.join(', ')}`);
+              }
+            },
+          },
         ],
         // Start Stage 1 once the settings page has loaded — so its first paint
         // and Landing's IPC aren't competing with SQLite opens on this thread —

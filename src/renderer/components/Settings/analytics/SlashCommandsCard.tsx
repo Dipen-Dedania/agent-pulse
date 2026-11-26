@@ -49,6 +49,8 @@ const TipText: React.FC<{ text: string }> = ({ text }) => (
 function aliasNote(row: ClaudeCommandRow): string | null {
   const others = row.aliases.filter((a) => a.name !== row.canonical);
   if (others.length === 0) return null;
+  // Every use went through one alias: "includes" would wrongly suggest a mix.
+  if (others.length === 1 && row.aliases.length === 1) return `typed as /${others[0].name}`;
   return `includes ${others.map((a) => `/${a.name} ×${a.count}`).join(', ')}`;
 }
 
